@@ -24,12 +24,30 @@ from .critic_cross_attn import CrossAttentionCriticGroup
 
 
 class MultiCrossAttentionCritic(nn.Module):
-    def __init__(self, head_num: int, attn_heads: int, critic_num: int, task_to_critic: dict[int, int] | None = None):
+    def __init__(
+        self,
+        head_num: int,
+        attn_heads: int,
+        input_dim: int,
+        hidden_dims: list[int],
+        prefix_embed_dim: int,
+        critic_num: int,
+        task_to_critic: dict[int, int] | None = None,
+    ):
         super().__init__()
         self.critic_num = critic_num
         self.task_to_critic = task_to_critic
         self.critics = nn.ModuleList(
-            [CrossAttentionCriticGroup(head_num=head_num, attn_heads=attn_heads) for _ in range(critic_num)]
+            [
+                CrossAttentionCriticGroup(
+                    head_num=head_num,
+                    attn_heads=attn_heads,
+                    input_dim=input_dim,
+                    hidden_dims=hidden_dims,
+                    prefix_embed_dim=prefix_embed_dim,
+                )
+                for _ in range(critic_num)
+            ]
         )
 
     def _resolve_critic_ids(self, task_ids: torch.Tensor, batch_size: int) -> torch.Tensor:
@@ -135,11 +153,17 @@ class MultiCrossAttentionCriticBackend(CriticBackend):
     def init(self, model) -> None:
         head_num = int(getattr(model.config, "critic_head_num", 2))
         attn_heads = int(getattr(model.config, "critic_prefix_attn_heads", 8))
+        input_dim = int(getattr(model.config, "critic_input_dim", 2150))
+        hidden_dims = [int(dim) for dim in getattr(model.config, "critic_hidden_dims", [1024, 512, 256])]
+        prefix_embed_dim = int(getattr(model.config, "critic_prefix_embed_dim", 2048))
         critic_num = int(getattr(model.config, "critic_num", 1))
         task_to_critic = _normalize_task_to_critic(getattr(model.config, "critic_task_to_critic", None))
         model.critic_backend = MultiCrossAttentionCritic(
             head_num=head_num,
             attn_heads=attn_heads,
+            input_dim=input_dim,
+            hidden_dims=hidden_dims,
+            prefix_embed_dim=prefix_embed_dim,
             critic_num=critic_num,
             task_to_critic=task_to_critic,
         )

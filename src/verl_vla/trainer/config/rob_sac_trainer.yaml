@@ -239,6 +239,9 @@ actor_rollout_ref:
 
   model:
     override_config:
+      # policy adapter type used by PI0 wrapper: "libero" or "lerobot"
+      policy_type: libero
+
       sac_enable: True
 
       # critic backend type: "cross_attn" or "multi_cross_attn"
@@ -248,11 +251,14 @@ actor_rollout_ref:
       critic_num: 10
       critic_head_num: 2
       critic_prefix_attn_heads: 8
+      critic_prefix_embed_dim: 2048
+      critic_input_dim: 2150
+      critic_hidden_dims: [1024, 512, 256]
 
       # optional task_id -> critic_id mapping, e.g. {0: 0, 1: 0, 2: 1}
       critic_task_to_critic: null
 
-      flow_sde_enable: True
+      flow_sde_enable: False
       flow_sde_noise_level: 0.08
       flow_sde_noise_schedule_enabled: False
       flow_sde_noise_schedule_initial: null

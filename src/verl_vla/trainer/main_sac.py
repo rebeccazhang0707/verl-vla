@@ -21,7 +21,8 @@ import datasets
 import hydra
 import ray
 from omegaconf import OmegaConf
-from verl.single_controller.ray.base import RayResourcePool
+from ray.util.placement_group import placement_group
+from verl.single_controller.ray.base import RayResourcePool, sort_placement_group_by_node_ip
 from verl.trainer.constants_ppo import get_ppo_ray_runtime_env
 from verl.trainer.ppo.ray_trainer import ResourcePoolManager
 from verl.trainer.ppo.utils import Role
@@ -37,6 +38,37 @@ from .sac.sac_separate_trainer import RobRaySACSeparateTrainInference
 logger = logging.getLogger(__name__)
 
 
+class VLARayResourcePool(RayResourcePool):
+    def get_placement_groups(self, strategy="STRICT_PACK", name=None, device_name="cuda"):
+        if self.pgs is not None:
+            return self.pgs
+
+        pg_name_prefix = (
+            name if name else f"{self.name_prefix}verl_group_{'_'.join([str(count) for count in self._store])}:"
+        )
+        if device_name == "npu":
+            device_name = "NPU"
+        elif device_name == "cuda":
+            device_name = "GPU"
+
+        bundle = {"CPU": self.max_colocate_count}
+        if self.use_gpu:
+            bundle[device_name] = 1
+        if self.accelerator_type is not None:
+            bundle[self.accelerator_type] = 1e-4
+
+        pg_scheme = [[bundle.copy() for _ in range(process_count)] for process_count in self._store]
+        lifetime = "detached" if self.detached else None
+        pgs = [
+            placement_group(bundles=bundles, strategy=strategy, name=pg_name_prefix + str(idx), lifetime=lifetime)
+            for idx, bundles in enumerate(pg_scheme)
+        ]
+
+        ray.get([pg.ready() for pg in pgs])
+        self.pgs = sort_placement_group_by_node_ip(pgs)
+        return pgs
+
+
 @dataclass
 class VLAResourcePoolManager(ResourcePoolManager):
     cpu_pool_names: set[str] = field(default_factory=set)
@@ -44,7 +76,7 @@ class VLAResourcePoolManager(ResourcePoolManager):
     def create_resource_pool(self):
         for resource_pool_name, process_on_nodes in self.resource_pool_spec.items():
             use_gpu = resource_pool_name not in self.cpu_pool_names
-            resource_pool = RayResourcePool(
+            resource_pool = VLARayResourcePool(
                 process_on_nodes=process_on_nodes,
                 use_gpu=use_gpu,
                 max_colocate_count=3,
@@ -84,7 +116,13 @@ def main(config):
         ray_init_kwargs = OmegaConf.create({**ray_init_kwargs, "runtime_env": runtime_env})
         logger.info(f"ray init kwargs: {ray_init_kwargs}")
         ray.init(**OmegaConf.to_container(ray_init_kwargs))
-    ray.get(main_task.remote(config))
+
+    remote_main_task = main_task
+    cluster_resources = ray.cluster_resources()
+    if config.env.disagg_sim.enable and cluster_resources.get("train_rollout", 0) > 0:
+        # Keep controller-side tokenizer/model-path setup on the training node.
+        remote_main_task = main_task.options(resources={"train_rollout": 0.001})
+    ray.get(remote_main_task.remote(config))
 
 
 @ray.remote

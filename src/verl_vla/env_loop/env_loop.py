@@ -153,6 +153,8 @@ class EnvLoop:
         trajectories = {i: [] for i in range(self.stage_num)}
         initial_state_ids = prompts.non_tensor_batch["state_ids"]
         staged_task_ids = self._restructure_prompt_task_ids(prompts)
+        if self.single_env_rollout:
+            initial_state_ids = initial_state_ids[:1]
 
         staged_obs = self._restructure_obs_data(reset_results)
         for stage_id in range(self.stage_num):

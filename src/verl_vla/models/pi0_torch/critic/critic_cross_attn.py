@@ -24,20 +24,20 @@ from .base import CriticBackend
 
 
 class CrossAttentionCriticGroup(nn.Module):
-    def __init__(self, head_num: int, attn_heads: int):
+    def __init__(self, head_num: int, attn_heads: int, input_dim: int, hidden_dims: list[int], prefix_embed_dim: int):
         super().__init__()
-        self.critic_state_token = nn.Parameter(torch.zeros(1, 1, 2048))
-        self.target_state_token = nn.Parameter(torch.zeros(1, 1, 2048))
+        self.critic_state_token = nn.Parameter(torch.zeros(1, 1, prefix_embed_dim))
+        self.target_state_token = nn.Parameter(torch.zeros(1, 1, prefix_embed_dim))
         nn.init.normal_(self.critic_state_token, mean=0.0, std=0.02)
         self.target_state_token.data.copy_(self.critic_state_token.data)
 
         self.critic_prefix_cross_attn = nn.MultiheadAttention(
-            embed_dim=2048,
+            embed_dim=prefix_embed_dim,
             num_heads=attn_heads,
             batch_first=True,
         )
         self.target_prefix_cross_attn = nn.MultiheadAttention(
-            embed_dim=2048,
+            embed_dim=prefix_embed_dim,
             num_heads=attn_heads,
             batch_first=True,
         )
@@ -45,8 +45,8 @@ class CrossAttentionCriticGroup(nn.Module):
         self.critic_heads = nn.ModuleList(
             [
                 MLP(
-                    input_dim=2150,
-                    hidden_dims=[1024, 512, 256],
+                    input_dim=input_dim,
+                    hidden_dims=hidden_dims,
                     output_dim=1,
                     activation="relu",
                     init_method="kaiming",
@@ -57,8 +57,8 @@ class CrossAttentionCriticGroup(nn.Module):
         self.target_network_heads = nn.ModuleList(
             [
                 MLP(
-                    input_dim=2150,
-                    hidden_dims=[1024, 512, 256],
+                    input_dim=input_dim,
+                    hidden_dims=hidden_dims,
                     output_dim=1,
                     activation="relu",
                     init_method="kaiming",
@@ -165,7 +165,16 @@ class CrossAttentionCriticBackend(CriticBackend):
     def init(self, model) -> None:
         head_num = int(getattr(model.config, "critic_head_num", 2))
         attn_heads = int(getattr(model.config, "critic_prefix_attn_heads", 8))
-        model.critic_backend = CrossAttentionCriticGroup(head_num=head_num, attn_heads=attn_heads)
+        input_dim = int(getattr(model.config, "critic_input_dim", 2150))
+        hidden_dims = [int(dim) for dim in getattr(model.config, "critic_hidden_dims", [1024, 512, 256])]
+        prefix_embed_dim = int(getattr(model.config, "critic_prefix_embed_dim", 2048))
+        model.critic_backend = CrossAttentionCriticGroup(
+            head_num=head_num,
+            attn_heads=attn_heads,
+            input_dim=input_dim,
+            hidden_dims=hidden_dims,
+            prefix_embed_dim=prefix_embed_dim,
+        )
 
     def forward(
         self,

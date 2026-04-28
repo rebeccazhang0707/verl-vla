@@ -1,1 +1,3 @@
 verl==0.7.1
+timm==0.9.16
+onnx-ir
