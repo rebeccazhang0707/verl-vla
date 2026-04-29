@@ -151,10 +151,12 @@ class EnvLoop:
 
     async def run(self, prompts: DataProto, reset_results: DataProto) -> tuple[DataProto, dict[str, float]]:
         trajectories = {i: [] for i in range(self.stage_num)}
-        initial_state_ids = prompts.non_tensor_batch["state_ids"]
+        initial_state_ids = np.asarray(prompts.non_tensor_batch["state_ids"])
         staged_task_ids = self._restructure_prompt_task_ids(prompts)
+        staged_state_ids = self._restructure_prompt_values(initial_state_ids)
         if self.single_env_rollout:
             initial_state_ids = initial_state_ids[:1]
+            staged_state_ids = [staged_state_ids[0][:1]]
 
         staged_obs = self._restructure_obs_data(reset_results)
         for stage_id in range(self.stage_num):
@@ -256,7 +258,14 @@ class EnvLoop:
         await asyncio.gather(*[asyncio.create_task(_stage_loop(sid)) for sid in range(self.stage_num)])
         self.env_wg.finish_rollout()
 
-        output = self._collate_trajectories(trajectories, initial_state_ids, meta_info=prompts.meta_info)
+        collated_state_ids = np.concatenate(staged_state_ids, axis=0)
+        collated_meta_info = dict(prompts.meta_info)
+        if any(task_ids is not None for task_ids in staged_task_ids):
+            collated_meta_info["task_ids"] = np.concatenate(
+                [task_ids for task_ids in staged_task_ids if task_ids is not None],
+                axis=0,
+            )
+        output = self._collate_trajectories(trajectories, collated_state_ids, meta_info=collated_meta_info)
         stage_wall_max_s = max(stage_timing[sid]["stage_wall_s"] for sid in range(self.stage_num))
         rollout_wait_sum_s = sum(stage_timing[sid]["rollout_wait_s"] for sid in range(self.stage_num))
         env_wait_sum_s = sum(stage_timing[sid]["env_wait_s"] for sid in range(self.stage_num))
@@ -288,32 +297,38 @@ class EnvLoop:
                 staged_data[stage_id].append(data)
         return [DataProto.concat(data_list) for data_list in staged_data]
 
+    def _restructure_prompt_values(self, values: np.ndarray) -> list[np.ndarray]:
+        staged_values = [[] for _ in range(self.stage_num)]
+        num_workers = self.env_wg.world_size
+        envs_per_worker = len(values) // num_workers
+        if envs_per_worker * num_workers != len(values):
+            raise ValueError(f"value length {len(values)} is not divisible by env worker count {num_workers}.")
+
+        for worker_id in range(num_workers):
+            worker_start = worker_id * envs_per_worker
+            worker_end = worker_start + envs_per_worker
+            worker_values = values[worker_start:worker_end]
+            if len(worker_values) % self.stage_num != 0:
+                raise ValueError(
+                    f"worker value length {len(worker_values)} is not divisible by stage_num {self.stage_num}."
+                )
+            stage_size = len(worker_values) // self.stage_num
+            for stage_id in range(self.stage_num):
+                stage_start = stage_id * stage_size
+                stage_end = stage_start + stage_size
+                staged_values[stage_id].append(worker_values[stage_start:stage_end])
+
+        return [
+            np.concatenate(value_list, axis=0) if value_list else np.array([], dtype=values.dtype)
+            for value_list in staged_values
+        ]
+
     def _restructure_prompt_task_ids(self, prompts: DataProto) -> list[np.ndarray | None]:
         if "task_ids" not in prompts.meta_info:
             return [None for _ in range(self.stage_num)]
 
         task_ids = np.asarray(prompts.meta_info["task_ids"])
-        staged_task_ids = [[] for _ in range(self.stage_num)]
-        num_workers = self.env_wg.world_size
-        envs_per_worker = len(task_ids) // num_workers
-        if envs_per_worker * num_workers != len(task_ids):
-            raise ValueError(f"task_ids length {len(task_ids)} is not divisible by env worker count {num_workers}.")
-
-        for worker_id in range(num_workers):
-            worker_start = worker_id * envs_per_worker
-            worker_end = worker_start + envs_per_worker
-            worker_task_ids = task_ids[worker_start:worker_end]
-            if len(worker_task_ids) % self.stage_num != 0:
-                raise ValueError(
-                    f"worker task_ids length {len(worker_task_ids)} is not divisible by stage_num {self.stage_num}."
-                )
-            stage_size = len(worker_task_ids) // self.stage_num
-            for stage_id in range(self.stage_num):
-                stage_start = stage_id * stage_size
-                stage_end = stage_start + stage_size
-                staged_task_ids[stage_id].append(worker_task_ids[stage_start:stage_end])
-
-        return [np.concatenate(task_id_list, axis=0) if task_id_list else None for task_id_list in staged_task_ids]
+        return self._restructure_prompt_values(task_ids)
 
     def _collate_trajectories(self, trajectories: dict, initial_state_ids: np.ndarray, meta_info) -> DataProto:
         flat_trajs = [{} for _ in range(len(trajectories[0]))]
