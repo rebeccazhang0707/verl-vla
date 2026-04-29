@@ -80,6 +80,9 @@ trainer:
   # Number of training steps between rollout collections
   rollout_interval: 20
 
+  # Number of rollout collections to run within each rollout interval window
+  rollout_times: 1
+
   # Save frequency (by iteration) for model checkpoints
   save_freq: -1
 

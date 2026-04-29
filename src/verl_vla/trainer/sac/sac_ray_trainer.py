@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import math
 from pprint import pprint
 from typing import Optional
 
@@ -345,8 +346,11 @@ class RobRaySACTrainer(RayPPOTrainer):
                 return
 
         # add tqdm
+        rollout_times = int(getattr(self.config.trainer, "rollout_times", 1))
+        rollout_interval = int(self.config.trainer.rollout_interval)
+
         self.total_training_steps = (
-            self.config.trainer.total_epochs * len(self.train_dataloader) * self.config.trainer.rollout_interval
+            self.config.trainer.total_epochs * math.ceil(len(self.train_dataloader) / rollout_times) * rollout_interval
         )
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
 
@@ -371,7 +375,7 @@ class RobRaySACTrainer(RayPPOTrainer):
 
             print(f"Starting epoch {epoch}, dataloader length: {len(self.train_dataloader)}")
             while next_rollout_batch is not None:
-                for training_step in range(self.config.trainer.rollout_interval):
+                for training_step in range(rollout_interval):
                     metrics = {}
                     timing_raw = {}
 
@@ -388,7 +392,7 @@ class RobRaySACTrainer(RayPPOTrainer):
                         # Determine whether to perform rollout:
                         # enable at start and early warmup, disable during critic warmup phase
                         warm_rollout_steps = int(getattr(self.config.actor_rollout_ref.actor, "warm_rollout_steps", 0))
-                        need_rollout = (training_step == 0) or self.global_steps < warm_rollout_steps
+                        need_rollout = (training_step < rollout_times) or self.global_steps < warm_rollout_steps
                         if (
                             warm_rollout_steps
                             <= self.global_steps
