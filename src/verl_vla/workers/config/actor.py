@@ -91,6 +91,7 @@ class ActorConfig(BaseVLAActorConfig):
 
     critic_lr: float = 1e-4
     critic_weight_decay: float = 0.0
+    critic_grad_clip: float | None = None
 
     warm_rollout_steps: int = 0
     critic_warmup_steps: int = 0
@@ -115,6 +116,9 @@ class ActorConfig(BaseVLAActorConfig):
 
         if self.critic_lr <= 0:
             raise ValueError(f"critic_lr must be positive, got {self.critic_lr}")
+
+        if self.critic_grad_clip is not None and self.critic_grad_clip <= 0:
+            raise ValueError(f"critic_grad_clip must be positive when provided, got {self.critic_grad_clip}")
 
         if self.actor_update_interval <= 0:
             raise ValueError(f"actor_update_interval must be positive, got {self.actor_update_interval}")

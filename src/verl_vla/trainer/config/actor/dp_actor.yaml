@@ -20,6 +20,10 @@ defaults:
 # Distribution strategy for SAC actor
 strategy: fsdp2
 
+# Optional critic-specific gradient clipping threshold.
+# When null, critic clipping falls back to optim.clip_grad.
+critic_grad_clip: null
+
 # Keep engine strategy aligned with actor strategy
 fsdp_config:
 

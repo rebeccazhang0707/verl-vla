@@ -106,8 +106,19 @@ class SACTrainingWorker(TrainingWorker):
         self._sac_initialized = True
 
     @property
-    def _grad_clip(self) -> float:
+    def _actor_grad_clip(self) -> float:
         return self.actor_config.optim.clip_grad
+
+    @property
+    def _critic_grad_clip(self) -> float:
+        return self.actor_config.critic_grad_clip or self._actor_grad_clip
+
+    def _post_clip_norm(self, pre_clip_norm: torch.Tensor | float, clip_threshold: float) -> float:
+        if isinstance(pre_clip_norm, torch.Tensor):
+            pre_clip_norm = pre_clip_norm.detach().item()
+        if not np.isfinite(pre_clip_norm):
+            return float(pre_clip_norm)
+        return float(min(pre_clip_norm, clip_threshold))
 
     def _init_actor_ema(self):
         if self.actor_ema_initialized:
@@ -322,7 +333,7 @@ class SACTrainingWorker(TrainingWorker):
             critic_qvalues_0_list.append(q_values_0.mean(dim=-1).detach())
             critic_qvalues_1_list.append(q_values_1.detach())
         critic_grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.engine.module.sac_get_critic_parameters(), max_norm=self._grad_clip
+            self.engine.module.sac_get_critic_parameters(), max_norm=self._critic_grad_clip
         )
         self.critic_optimizer.step()
         self.critic_scheduler.step()
@@ -366,7 +377,7 @@ class SACTrainingWorker(TrainingWorker):
                     (raw_alpha_loss / grad_accum_steps).backward()
                     alpha_loss_list.append(raw_alpha_loss.detach().item())
                 torch.distributed.all_reduce(self.raw_alpha.grad, op=torch.distributed.ReduceOp.SUM)
-                alpha_grad_norm = torch.nn.utils.clip_grad_norm_(self.raw_alpha, max_norm=self._grad_clip)
+                alpha_grad_norm = torch.nn.utils.clip_grad_norm_(self.raw_alpha, max_norm=self._actor_grad_clip)
                 self.alpha_optimizer.step()
                 self.alpha_scheduler.step()
 
@@ -400,6 +411,9 @@ class SACTrainingWorker(TrainingWorker):
             else 0.0
         )
 
+        critic_grad_norm_pre_clip = critic_grad_norm.detach().item()
+        critic_grad_norm_post_clip = self._post_clip_norm(critic_grad_norm_pre_clip, self._critic_grad_clip)
+
         metrics = {
             "data/reward_mean": valid_mean(critic_batch.batch["info.rewards"], critic_batch.batch["info.valids"])
             .detach()
@@ -427,7 +441,9 @@ class SACTrainingWorker(TrainingWorker):
             "sac/replay_pool_size": len(self.replay_pool),
             "critic/loss": sum(critic_loss_list) / len(critic_loss_list) if critic_loss_list else 0.0,
             "critic/lr": self.critic_optimizer.param_groups[0]["lr"],
-            "critic/grad_norm": critic_grad_norm.detach().item(),
+            "critic/grad_norm": critic_grad_norm_post_clip,
+            "critic/grad_norm_pre_clip": critic_grad_norm_pre_clip,
+            "critic/grad_clip_threshold": self._critic_grad_clip,
             "critic/qvalue0_mean": (
                 valid_mean(torch.cat(critic_qvalues_0_list), critic_batch.batch["info.valids"]).detach().item()
                 if critic_qvalues_0_list
@@ -443,11 +459,14 @@ class SACTrainingWorker(TrainingWorker):
             "critic/diff_pos_neg_qvalue_mean": positive_qvalue_mean - negative_qvalue_mean,
         }
         if update_actor:
+            actor_grad_norm_post_clip = self._post_clip_norm(actor_grad_norm, self._actor_grad_clip)
             metrics.update(
                 {
                     "actor/loss": sum(actor_loss_list) / len(actor_loss_list),
                     "actor/lr": self.engine.optimizer.param_groups[0]["lr"],
-                    "actor/grad_norm": actor_grad_norm,
+                    "actor/grad_norm": actor_grad_norm_post_clip,
+                    "actor/grad_norm_pre_clip": actor_grad_norm,
+                    "actor/grad_clip_threshold": self._actor_grad_clip,
                     "actor/logprob_mean": (
                         valid_mean(torch.cat(actor_logprobs_list), actor_batch.batch["info.valids"]).detach().item()
                         if actor_logprobs_list
@@ -462,7 +481,13 @@ class SACTrainingWorker(TrainingWorker):
                     "sac/alpha_loss": sum(alpha_loss_list) / len(alpha_loss_list)
                     if self.auto_entropy and alpha_loss_list
                     else 0.0,
-                    "sac/alpha_grad_norm": alpha_grad_norm.detach().item()
+                    "sac/alpha_grad_norm": self._post_clip_norm(alpha_grad_norm, self._actor_grad_clip)
+                    if self.auto_entropy and actor_logprobs_list
+                    else 0.0,
+                    "sac/alpha_grad_norm_pre_clip": alpha_grad_norm.detach().item()
+                    if self.auto_entropy and actor_logprobs_list
+                    else 0.0,
+                    "sac/alpha_grad_clip_threshold": self._actor_grad_clip
                     if self.auto_entropy and actor_logprobs_list
                     else 0.0,
                 }
