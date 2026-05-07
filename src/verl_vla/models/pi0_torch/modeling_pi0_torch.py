@@ -45,13 +45,6 @@ from .pi0_utils import (
 from .policy import get_pi0_policy_classes
 from .policy.base import Pi0Output
 
-
-def beta_schedule(step, beta0, beta_min, T):
-    progress = min(step / T, 1.0)
-    beta = beta_min + (beta0 - beta_min) * 0.5 * (1 + math.cos(math.pi * progress))
-    return beta
-
-
 CRITIC_BACKENDS = {
     "cross_attn": CrossAttentionCriticBackend(),
     "multi_cross_attn": MultiCrossAttentionCriticBackend(),
@@ -102,8 +95,6 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         self.flow_sde_task_noise_level = self._parse_task_noise_levels(config.flow_sde_task_noise_level)
         self.flow_sde_rollout_noise_scale = float(getattr(config, "flow_sde_rollout_noise_scale", 1.0))
         self.flow_sde_train_noise_scale = float(getattr(config, "flow_sde_train_noise_scale", 1.0))
-        self.flow_sde_initial_beta = float(getattr(config, "flow_sde_initial_beta", 1.0))
-        self.flow_sde_beta_min = float(getattr(config, "flow_sde_beta_min", 0.02))
         self.flow_sde_beta_schedule_T = int(getattr(config, "flow_sde_beta_schedule_T", 2000))
         self.register_buffer("flow_sde_step", torch.zeros((), dtype=torch.long))
 
@@ -338,15 +329,6 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         log_prob = -0.5 * (((sample - mean) / std_safe) ** 2 + 2.0 * torch.log(std_safe) + math.log(2.0 * math.pi))
         return log_prob.mean(dim=(-1, -2))
 
-    def flow_sde_beta(self) -> torch.Tensor:
-        beta = beta_schedule(
-            int(self.flow_sde_step.item()),
-            beta0=self.flow_sde_initial_beta,
-            beta_min=self.flow_sde_beta_min,
-            T=self.flow_sde_beta_schedule_T,
-        )
-        return torch.tensor(beta, device=self.flow_sde_step.device, dtype=torch.float32)
-
     def _parse_task_noise_levels(
         self,
         task_noise_levels: str,
@@ -411,7 +393,6 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         prefix_embs, prefix_pad_masks, _ = prefix_features
         batch_size = prefix_embs.shape[0]
         device = prefix_embs.device
-        beta = self.flow_sde_beta().to(device=device, dtype=prefix_embs.dtype)
         noise_levels = self._resolve_flow_sde_noise_levels(
             batch_size=batch_size,
             device=device,
@@ -458,8 +439,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             x1_pred = x_t + v_t * (1.0 - t_cur_exp)
 
             if noise_scale > 0:
-                sigma_schedule = noise_levels * noise_scale * torch.sqrt(t_cur_safe / (1.0 - t_cur_safe))
-                sigma = beta * sigma_schedule
+                sigma = noise_levels * noise_scale * torch.sqrt(t_cur_safe / (1.0 - t_cur_safe))
                 sigma_exp = sigma.view(batch_size, 1, 1)
                 x0_weight = 1.0 - t_next_exp
                 x1_weight = t_next_exp - sigma_exp.pow(2) * delta_exp / (2.0 * t_cur_exp)
@@ -581,8 +561,9 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         actor_metrics: dict[str, float] = {}
         if self.flow_sde_enable:
             actor_metrics = {
-                "flow_sde_beta": float(self.flow_sde_beta().item()),
                 "flow_sde_step": float(self.flow_sde_step.item()),
+                "flow_sde_noise_level": float(self.flow_sde_noise_scheduler.current_value),
+                "flow_sde_noise_control": float(self.flow_sde_noise_scheduler.control_value),
             }
         _, pi0_output_cls = self._get_pi0_policy_classes()
         pi0_output = pi0_output_cls.from_model_output(
