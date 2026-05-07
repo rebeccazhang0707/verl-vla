@@ -33,6 +33,7 @@ from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining
 from .configuration_pi0_torch import PI0TorchConfig
 from .critic import (
     CrossAttentionCriticBackend,
+    MeanPoolCriticBackend,
     MultiCrossAttentionCriticBackend,
 )
 from .model.modeling_pi0 import PI0Model, make_att_2d_masks
@@ -47,6 +48,7 @@ from .policy.base import Pi0Output
 
 CRITIC_BACKENDS = {
     "cross_attn": CrossAttentionCriticBackend(),
+    "mean_pool": MeanPoolCriticBackend(),
     "multi_cross_attn": MultiCrossAttentionCriticBackend(),
 }
 

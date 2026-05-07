@@ -14,12 +14,15 @@
 
 from .base import CriticBackend
 from .critic_cross_attn import CrossAttentionCriticBackend, CrossAttentionCriticGroup
+from .critic_mean_pool import MeanPoolCriticBackend, MeanPoolCriticGroup
 from .critic_multi_cross_attn import MultiCrossAttentionCritic, MultiCrossAttentionCriticBackend
 
 __all__ = [
     "CriticBackend",
     "CrossAttentionCriticBackend",
     "CrossAttentionCriticGroup",
+    "MeanPoolCriticBackend",
+    "MeanPoolCriticGroup",
     "MultiCrossAttentionCriticBackend",
     "MultiCrossAttentionCritic",
 ]

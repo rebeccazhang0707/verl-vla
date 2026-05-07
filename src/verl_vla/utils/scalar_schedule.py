@@ -31,6 +31,7 @@ class ScheduledScalar:
         self.initial_value = self._clamp(self.base_value if self.initial_value is None else self.initial_value)
         self.final_value = self._clamp(self.base_value if self.final_value is None else self.final_value)
         self.control_value = 0.0
+        self.progress_value = 0.0
         self.current_value = self.base_value
 
     def _clamp(self, value: float) -> float:
@@ -57,9 +58,11 @@ class ScheduledScalar:
 
     def refresh(self, control_value: float) -> float:
         self.control_value = self._control_01(control_value)
+        self.progress_value = self._progress(self.control_value)
         if self.enabled:
-            progress = self._progress(self.control_value)
-            self.current_value = self._clamp(self.initial_value + (self.final_value - self.initial_value) * progress)
+            self.current_value = self._clamp(
+                self.initial_value + (self.final_value - self.initial_value) * self.progress_value
+            )
         else:
             self.current_value = self.base_value
         return self.current_value
