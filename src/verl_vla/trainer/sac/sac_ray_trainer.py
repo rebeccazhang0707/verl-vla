@@ -483,6 +483,9 @@ class RobRaySACSeparateTrainInference(RayPPOTrainer):
                                 # Start next rollout asynchronously
                                 next_rollout_future = None
                                 if next_rollout_batch is not None:
+                                    # Ensure reset_future is not None before starting rollout
+                                    if reset_future is None:
+                                        reset_future = self._reset_envs(next_rollout_batch)
                                     next_rollout_future = generate_sequences_task.remote(
                                         self.async_rollout_manager, next_rollout_batch, reset_future
                                     )
@@ -519,7 +522,6 @@ class RobRaySACSeparateTrainInference(RayPPOTrainer):
                         metrics.update(actor_output_metrics)
 
                         # === Sync weights to inference workers ===
-                        # It can be removed to speed up training, but is kept here for safety.
                         with marked_timer("update_weights", timing_raw):
                             self._fit_update_weights()
 
