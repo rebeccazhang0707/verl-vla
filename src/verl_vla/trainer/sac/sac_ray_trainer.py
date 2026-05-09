@@ -121,7 +121,10 @@ class RobRaySACTrainer(RayPPOTrainer):
         self.use_prefix_grouper = False
         self.use_legacy_worker_impl = config.trainer.get("use_legacy_worker_impl", "auto")
 
+        actor_optim_total_training_steps = self.config.actor_rollout_ref.actor.optim.total_training_steps
         self._create_dataloader(train_dataset, val_dataset, collate_fn, train_sampler)
+        if actor_optim_total_training_steps is not None and actor_optim_total_training_steps > 0:
+            self.config.actor_rollout_ref.actor.optim.total_training_steps = actor_optim_total_training_steps
         self.checkpoint_manager = None
 
     def _start_profiling(self, do_profile: bool) -> None:
