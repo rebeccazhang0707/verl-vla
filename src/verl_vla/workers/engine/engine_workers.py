@@ -141,13 +141,16 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
             self.peft_merge: bool = model_config.lora.get("merge", False)
 
         # 4. build checkpoint engine
-        if "actor" in self.role:
+        if "actor" in self.role or "rollout" in self.role:
             checkpoint_engine_config = omega_conf_to_dataclass(self.config.rollout.checkpoint_engine)
             backend = checkpoint_engine_config.backend
             bucket_size = checkpoint_engine_config.update_weights_bucket_megabytes << 20
             engine_kwargs = checkpoint_engine_config.engine_kwargs.get(backend, {})
+            is_master = False
+            if "actor" in self.role:
+                is_master = torch.distributed.get_rank() == 0
             self.checkpoint_engine = CheckpointEngineRegistry.new(
-                backend, is_master=(torch.distributed.get_rank() == 0), bucket_size=bucket_size, **engine_kwargs
+                backend, is_master=is_master, bucket_size=bucket_size, **engine_kwargs
             )
 
         # Free cached GPU memory so colocated vLLM processes can see it via cudaMemGetInfo
@@ -175,6 +178,38 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
         prompts = prompts.to(get_device_id())
         output = self.rollout.generate_sequences(prompts=prompts)
         return output.to("cpu")
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL, blocking=False)
+    async def update_weights(self, global_steps: int = None):
+        # Rollout-only worker: receive weights from checkpoint engine
+        if self._is_rollout and not self._is_actor:
+            weights = self.checkpoint_engine.receive_weights()
+            await self.rollout.update_weights(weights, global_steps=global_steps)
+            return
+
+        # Actor-only worker: send weights via checkpoint engine
+        if self._is_actor and not self._is_rollout:
+            if self.config.rollout.checkpoint_engine.backend != "naive":
+                per_tensor_param, _ = self.actor.engine.get_per_tensor_param()
+                await self.checkpoint_engine.send_weights(per_tensor_param)
+            return
+
+        # Colocated worker (actor + rollout): use base class implementation
+        await super().update_weights(global_steps=global_steps)
+
+    @register(dispatch_mode=Dispatch.DP_COMPUTE, blocking=False)
+    def execute_checkpoint_engine(self, method: str, *args, **kwargs):
+        return getattr(self.checkpoint_engine, method)(*args, **kwargs)
+
+
+class VLAActorWorker(VLAActorRolloutRefWorker):
+    def __init__(self, config, role=None):
+        super().__init__(config, role="actor")
+
+
+class VLARolloutWorker(VLAActorRolloutRefWorker):
+    def __init__(self, config, role=None):
+        super().__init__(config, role="rollout")
 
 
 register_vla_models()
