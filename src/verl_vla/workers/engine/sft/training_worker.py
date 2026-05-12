@@ -46,15 +46,7 @@ class SFTTrainingWorker(TrainingWorker):
     @staticmethod
     def _extract_sft_actions(micro_batch: DataProto) -> dict[str, torch.Tensor]:
         batch = micro_batch.batch
-        if batch is None:
-            raise ValueError("micro_batch.batch must not be None")
-        if "action.full_action" in batch:
-            return {"full_action": batch["action.full_action"]}
-        if "action.action" in batch:
-            return {"full_action": batch["action.action"]}
-        if "action" in batch:
-            return {"full_action": batch["action"]}
-        raise KeyError("No action tensor found. Expected one of: action.full_action, action.action, action")
+        return {"action": batch["action"]}
 
     @staticmethod
     def _extract_sft_valids(micro_batch: DataProto) -> torch.Tensor:
