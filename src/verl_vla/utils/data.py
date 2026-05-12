@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from verl import DataProto
 
-from verl_vla.workers.actor_critic.base import ACTION_KEY, OBS_KEY
+from verl_vla.utils.keys import ACTION_KEY, OBS_KEY
 
 
 def get_dataproto_from_prefix(data: DataProto, prefix: str, separator: str = "") -> DataProto:

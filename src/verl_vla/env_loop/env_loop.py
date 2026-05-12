@@ -24,7 +24,7 @@ from verl import DataProto
 from verl.single_controller.ray import RayWorkerGroup
 
 from verl_vla.utils.data import get_dataproto_from_prefix, slice_dataproto_batch, stack_dataproto_with_padding
-from verl_vla.workers.actor_critic.base import ACTION_KEY, FEEDBACK_KEY, INTERVENTION_INFO_KEY, OBS_KEY
+from verl_vla.utils.keys import ACTION_KEY, FEEDBACK_KEY, INTERVENTION_INFO_KEY, OBS_KEY
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
