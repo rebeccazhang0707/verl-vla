@@ -108,6 +108,9 @@ class SACTrainingWorker(TrainingWorker):
         self.cql_enabled = bool(self.sac_config.get("cql_enabled", False))
         self.cql_alpha = float(self.sac_config.get("cql_alpha", 1.0))
         self.cql_temperature = float(self.sac_config.get("cql_temperature", 1.0))
+        self.skip_critic_update_when_actor_update = bool(
+            self.sac_config.get("skip_critic_update_when_actor_update", False)
+        )
         self._sac_initialized = True
 
     @property
@@ -355,7 +358,7 @@ class SACTrainingWorker(TrainingWorker):
         if "data/trajectory_avg_reward" in data.meta_info:
             rollout_success_rate = float(data.meta_info["data/trajectory_avg_reward"])
         self.actor_ema_scheduler.refresh(rollout_success_rate)
-        self.critic_target_ema_scheduler.refresh(rollout_success_rate)
+        critic_only_update = bool(data.meta_info.get("critic_only_update", False))
 
         self._force_set_lr(self.engine.optimizer, 5e-6)
         self._force_set_lr(self.critic_optimizer, 1e-4)
@@ -378,6 +381,13 @@ class SACTrainingWorker(TrainingWorker):
         micro_batches = critic_batch.split(self.actor_config.sac_micro_batch_size_per_gpu)
         grad_accum_steps = len(micro_batches) * torch.distributed.get_world_size()
 
+        update_actor = (
+            global_steps >= self.actor_config.critic_warmup_steps
+            and global_steps % self.actor_config.actor_update_interval == 0
+            and not critic_only_update
+        )
+        skip_critic_update = self.skip_critic_update_when_actor_update and update_actor
+
         actor_logprobs_list, actor_qvalues_list = [], []
         critic_qvalues_0_list, critic_qvalues_1_list = [], []
         actor_loss_list, alpha_loss_list = [], []
@@ -385,29 +395,30 @@ class SACTrainingWorker(TrainingWorker):
         critic_loss_metrics_agg: dict[str, list[float]] = defaultdict(list)
         actor_forward_metrics: dict[str, list[float]] = defaultdict(list)
 
-        self.critic_optimizer.zero_grad()
-        for batch_idx, micro_batch in enumerate(micro_batches):
-            logger.info(f"[{batch_idx + 1}/{len(micro_batches)}] critic micro batch ")
-            micro_batch = micro_batch.to(get_device_id())
-            raw_critic_loss, q_values_0, q_values_1, critic_loss_metrics = self._forward_critic(
-                micro_batch, resample=True
+        if skip_critic_update:
+            critic_grad_norm = torch.tensor(0.0)
+        else:
+            self.critic_optimizer.zero_grad()
+            for batch_idx, micro_batch in enumerate(micro_batches):
+                logger.info(f"[{batch_idx + 1}/{len(micro_batches)}] critic micro batch ")
+                micro_batch = micro_batch.to(get_device_id())
+                raw_critic_loss, q_values_0, q_values_1, critic_loss_metrics = self._forward_critic(
+                    micro_batch, resample=True
+                )
+                (raw_critic_loss / grad_accum_steps).backward()
+                critic_loss_list.append(float(raw_critic_loss.detach().item()))
+                for key, value in critic_loss_metrics.items():
+                    critic_loss_metrics_agg[key].append(float(value.item()))
+                critic_qvalues_0_list.append(q_values_0.mean(dim=-1).detach())
+                critic_qvalues_1_list.append(q_values_1.detach())
+            critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.engine.module.sac_get_critic_parameters(), max_norm=self._critic_grad_clip
             )
-            (raw_critic_loss / grad_accum_steps).backward()
-            critic_loss_list.append(float(raw_critic_loss.detach().item()))
-            for key, value in critic_loss_metrics.items():
-                critic_loss_metrics_agg[key].append(float(value.item()))
-            critic_qvalues_0_list.append(q_values_0.mean(dim=-1).detach())
-            critic_qvalues_1_list.append(q_values_1.detach())
-        critic_grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.engine.module.sac_get_critic_parameters(), max_norm=self._critic_grad_clip
-        )
-        self.critic_optimizer.step()
-        self.critic_scheduler.step()
+            if global_steps < self.actor_config.critic_warmup_steps:
+                self.critic_optimizer.step()
+                self.critic_scheduler.step()
+                self._update_critic_ema()
 
-        update_actor = (
-            global_steps >= self.actor_config.critic_warmup_steps
-            and global_steps % self.actor_config.actor_update_interval == 0
-        )
         actor_replay_sample_info = {"actual_positive_sample_ratio": 0.0}
         if update_actor:
             actor_batch, actor_replay_sample_info = self.replay_pool.sample_batch(
@@ -433,6 +444,7 @@ class SACTrainingWorker(TrainingWorker):
                 for key, value in actor_forward_metrics_mb.items():
                     actor_forward_metrics[key].append(float(value))
             actor_grad_norm = self.engine.optimizer_step()
+            actor_lr = self.engine.lr_scheduler_step()
             self._update_actor_ema()
             self._apply_actor_ema_to_actor_module()
 
@@ -454,7 +466,9 @@ class SACTrainingWorker(TrainingWorker):
             if force_tau_one_in_warmup and global_steps < self.actor_config.critic_warmup_steps
             else (1.0 - self.critic_target_ema_scheduler.current_value)
         )
-        self.engine.module.sac_update_target_network(critic_target_tau)
+        if not skip_critic_update:
+            self.engine.module.sac_update_target_network(critic_target_tau)
+
         if global_steps % self.actor_config.replay_pool_save_interval == 0:
             self.replay_pool.save(self.actor_config.replay_pool_save_dir)
 
@@ -491,6 +505,9 @@ class SACTrainingWorker(TrainingWorker):
             if update_actor
             else 0.0,
             "sac/td3_enabled": float(self.td3_enabled),
+            "sac/critic_only_update": float(critic_only_update),
+            "sac/skip_critic_update_when_actor_update": float(self.skip_critic_update_when_actor_update),
+            "sac/critic_update_skipped": float(skip_critic_update),
             **(
                 {
                     "sac/cql_enabled": float(self.cql_enabled),
@@ -510,11 +527,12 @@ class SACTrainingWorker(TrainingWorker):
             "sac/actor_ema_decay": self.actor_ema_scheduler.current_value,
             "sac/actor_ema_strength_initial": self.actor_ema_scheduler.initial_value,
             "sac/actor_ema_strength_final": self.actor_ema_scheduler.final_value,
-            "sac/critic_target_ema_dynamic_enabled": float(self.critic_target_ema_scheduler.enabled),
+            "sac/critic_ema_enabled": float(self.critic_ema_enabled),
+            "sac/critic_ema_dynamic_enabled": float(self.critic_ema_scheduler.enabled),
+            "sac/critic_ema_decay": self.critic_ema_scheduler.current_value,
+            "sac/critic_ema_strength_initial": self.critic_ema_scheduler.initial_value,
+            "sac/critic_ema_strength_final": self.critic_ema_scheduler.final_value,
             "sac/critic_target_tau": critic_target_tau,
-            "sac/critic_target_ema_strength": 1.0 - critic_target_tau,
-            "sac/critic_target_ema_strength_initial": self.critic_target_ema_scheduler.initial_value,
-            "sac/critic_target_ema_strength_final": self.critic_target_ema_scheduler.final_value,
             "sac/replay_pool_size": len(self.replay_pool),
             "critic/loss": sum(critic_loss_list) / len(critic_loss_list) if critic_loss_list else 0.0,
             "critic/lr": self.critic_optimizer.param_groups[0]["lr"],
@@ -549,7 +567,7 @@ class SACTrainingWorker(TrainingWorker):
             metrics.update(
                 {
                     "actor/loss": sum(actor_loss_list) / len(actor_loss_list),
-                    "actor/lr": self.engine.optimizer.param_groups[0]["lr"],
+                    "actor/lr": actor_lr,
                     "actor/grad_norm": actor_grad_norm_post_clip,
                     "actor/grad_norm_pre_clip": actor_grad_norm,
                     "actor/grad_clip_threshold": self._actor_grad_clip,

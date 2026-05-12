@@ -178,6 +178,9 @@ sac:
   # Temperature used by the CQL logsumexp penalty
   cql_temperature: 1.0
 
+  # Whether to skip critic updates on steps that also update actor
+  skip_critic_update_when_actor_update: false
+
   # Initial entropy temperature
   initial_alpha: 0.0
 
@@ -210,6 +213,9 @@ warm_rollout_steps: 22
 
 # Number of steps to train critic before actor updates start
 critic_warmup_steps: 0
+
+# Number of critic-only update steps after each rollout group
+critic_only_steps_after_rollout: 0
 
 # Update actor every N trainer steps
 actor_update_interval: 2

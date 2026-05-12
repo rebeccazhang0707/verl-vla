@@ -352,6 +352,9 @@ class RobRaySACTrainer(RayPPOTrainer):
         # add tqdm
         rollout_times = int(getattr(self.config.trainer, "rollout_times", 1))
         rollout_interval = int(self.config.trainer.rollout_interval)
+        critic_only_steps_after_rollout = int(
+            getattr(self.config.actor_rollout_ref.actor, "critic_only_steps_after_rollout", 0)
+        )
 
         self.total_training_steps = (
             self.config.trainer.total_epochs * math.ceil(len(self.train_dataloader) / rollout_times) * rollout_interval
@@ -432,8 +435,10 @@ class RobRaySACTrainer(RayPPOTrainer):
                                 actor_input = self._prepare_actor_input(rollout_output)
 
                         # === update policy ===
+                        critic_only_update = training_step < rollout_times + critic_only_steps_after_rollout
                         with marked_timer("update_actor", timing_raw, color="red"):
                             if actor_input is not None:
+                                actor_input.meta_info["critic_only_update"] = critic_only_update
                                 actor_output = self.actor_rollout_wg.update_actor(actor_input)
                             else:
                                 actor_output = self.actor_rollout_wg.update_actor(
@@ -442,6 +447,7 @@ class RobRaySACTrainer(RayPPOTrainer):
                                             "empty_batch": True,
                                             "global_steps": self.global_steps,
                                             "global_token_num": [0],
+                                            "critic_only_update": critic_only_update,
                                         }
                                     )
                                 )
@@ -542,7 +548,7 @@ class RobRaySACTrainer(RayPPOTrainer):
         test_batch = self._next_rollout_batch(val_iter)
         while test_batch is not None:
             valid_batch_size = len(test_batch)
-            target_batch_size = self.config.data.val_batch_size
+            target_batch_size = self.config.data.val_batch_size * self.config.actor_rollout_ref.rollout.n
             if valid_batch_size < target_batch_size:
                 test_batch = self._pad_validation_batch(test_batch, target_batch_size)
 

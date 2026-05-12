@@ -303,6 +303,7 @@ class RobDataParallelSACActor(BaseSACActor):
             rollout_success_rate = float(data.meta_info["data/trajectory_avg_reward"])
         self.actor_ema_scheduler.refresh(rollout_success_rate)
         self.critic_target_ema_scheduler.refresh(rollout_success_rate)
+        critic_only_update = bool(data.meta_info.get("critic_only_update", False))
 
         self._force_set_lr(self.actor_optimizer, 5e-6)
         self._force_set_lr(self.critic_optimizer, 1e-4)
@@ -339,7 +340,7 @@ class RobDataParallelSACActor(BaseSACActor):
         for batch_idx, micro_batch in enumerate(micro_batches):
             logger.info(f"[{batch_idx + 1}/{len(micro_batches)}] critic micro batch ")
             micro_batch = micro_batch.to(get_device_id())
-            raw_critic_loss, q_values_0, q_values_1 = self._forward_critic(micro_batch, resample=True)
+            raw_critic_loss, q_values_0, q_values_1 = self._forward_critic(micro_batch, resample=False)
             (raw_critic_loss / grad_accum_steps).backward()
             critic_loss_list.append(raw_critic_loss.detach().item())
             critic_qvalues_0_list.append(q_values_0.mean(dim=-1).detach())
@@ -351,7 +352,9 @@ class RobDataParallelSACActor(BaseSACActor):
         self.critic_scheduler.step()
 
         update_actor = (
-            global_steps >= self.config.critic_warmup_steps and global_steps % self.config.actor_update_interval == 0
+            global_steps >= self.config.critic_warmup_steps
+            and global_steps % self.config.actor_update_interval == 0
+            and not critic_only_update
         )
         actor_replay_sample_info = {"actual_positive_sample_ratio": 0.0}
         if update_actor:
@@ -433,6 +436,7 @@ class RobDataParallelSACActor(BaseSACActor):
             "sac/actor_replay_sampled_ratio": actor_replay_sample_info["actual_positive_sample_ratio"]
             if update_actor
             else 0.0,
+            "sac/critic_only_update": float(critic_only_update),
             "sac/replay_pool_positive_size": critic_replay_sample_info["positive_size"],
             "sac/replay_pool_negative_size": critic_replay_sample_info["negative_size"],
             "sac/replay_task_count": critic_replay_sample_info["task_count"],

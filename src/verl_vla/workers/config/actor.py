@@ -46,6 +46,7 @@ class SACConfig(BaseConfig):
     cql_enabled: bool = False
     cql_alpha: float = 1.0
     cql_temperature: float = 1.0
+    skip_critic_update_when_actor_update: bool = False
     initial_alpha: float = 0.0
     critic_replay_positive_sample_ratio: float = 0.5
     actor_replay_positive_sample_ratio: float = 0.5
@@ -105,6 +106,7 @@ class ActorConfig(BaseVLAActorConfig):
 
     warm_rollout_steps: int = 0
     critic_warmup_steps: int = 0
+    critic_only_steps_after_rollout: int = 0
     actor_update_interval: int = 1
 
     actor_ema_enabled: bool = True
@@ -132,6 +134,11 @@ class ActorConfig(BaseVLAActorConfig):
 
         if self.actor_update_interval <= 0:
             raise ValueError(f"actor_update_interval must be positive, got {self.actor_update_interval}")
+
+        if self.critic_only_steps_after_rollout < 0:
+            raise ValueError(
+                f"critic_only_steps_after_rollout must be non-negative, got {self.critic_only_steps_after_rollout}"
+            )
 
         if self.sac_mini_batch_size <= 0:
             raise ValueError(f"sac_mini_batch_size must be positive, got {self.sac_mini_batch_size}")
