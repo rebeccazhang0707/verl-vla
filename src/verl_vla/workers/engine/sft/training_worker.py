@@ -29,6 +29,10 @@ class SFTTrainingWorker(TrainingWorker):
         self.actor_config = actor_config
         self.tokenizer = tokenizer or self.model_config.tokenizer
         self._sft_initialized = False
+        self.actor_ema_enabled = bool(self.actor_config.actor_ema_enabled)
+        self.actor_ema_decay = float(self.actor_config.actor_ema_decay)
+        self.actor_ema_shadow: dict[str, torch.Tensor] = {}
+        self.actor_ema_initialized = False
 
     @staticmethod
     def _force_set_lr(opt: torch.optim.Optimizer, lr: float):
@@ -40,6 +44,39 @@ class SFTTrainingWorker(TrainingWorker):
             return
         self.engine.module.sft_init()
         self._sft_initialized = True
+
+    def _get_named_actor_parameters(self) -> list[tuple[str, torch.nn.Parameter]]:
+        if hasattr(self.engine.module, "sac_get_named_actor_parameters"):
+            return self.engine.module.sac_get_named_actor_parameters()
+        return [(name, param) for name, param in self.engine.module.named_parameters() if param.requires_grad]
+
+    def _init_actor_ema(self):
+        if self.actor_ema_initialized:
+            return
+        self.actor_ema_shadow = {}
+        if not self.actor_ema_enabled:
+            self.actor_ema_initialized = True
+            return
+        for name, param in self._get_named_actor_parameters():
+            self.actor_ema_shadow[name] = param.detach().clone().to(dtype=torch.float32)
+        self.actor_ema_initialized = True
+
+    @torch.no_grad()
+    def _update_actor_ema(self):
+        if not self.actor_ema_enabled:
+            return
+        one_minus_decay = 1.0 - self.actor_ema_decay
+        for name, param in self._get_named_actor_parameters():
+            self.actor_ema_shadow[name].mul_(self.actor_ema_decay).add_(
+                param.detach().to(dtype=torch.float32), alpha=one_minus_decay
+            )
+
+    @torch.no_grad()
+    def _apply_actor_ema_to_actor_module(self):
+        if not self.actor_ema_enabled:
+            return
+        for name, param in self._get_named_actor_parameters():
+            param.copy_(self.actor_ema_shadow[name].to(device=param.device, dtype=param.dtype))
 
     def _extract_sft_obs(self, micro_batch: DataProto) -> DataProto:
         return micro_batch
@@ -57,6 +94,9 @@ class SFTTrainingWorker(TrainingWorker):
         return torch.ones(len(micro_batch), device=get_device_id(), dtype=torch.float32)
 
     def _update_sft_policy(self, data: DataProto) -> dict[str, float]:
+        if not self.actor_ema_initialized:
+            self._init_actor_ema()
+
         timing_raw = {}
 
         with marked_timer("sft_update_policy", timing_raw):
@@ -94,6 +134,8 @@ class SFTTrainingWorker(TrainingWorker):
 
             with marked_timer("sft_optimizer_step", timing_raw):
                 grad_norm = self.engine.optimizer_step()
+                self._update_actor_ema()
+                self._apply_actor_ema_to_actor_module()
 
             mean_loss = torch.stack(loss_list).mean().item() if loss_list else 0.0
 
@@ -104,6 +146,8 @@ class SFTTrainingWorker(TrainingWorker):
             "sft/num_mini_batches": len(mini_batches),
             "sft/num_micro_batches": sum(len(micro_batches) for micro_batches in split_micro_batches),
             "sft/grad_accum_steps": grad_accum_steps,
+            "sft/actor_ema_enabled": float(self.actor_ema_enabled),
+            "sft/actor_ema_decay": self.actor_ema_decay,
         }
         metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
         return metrics
