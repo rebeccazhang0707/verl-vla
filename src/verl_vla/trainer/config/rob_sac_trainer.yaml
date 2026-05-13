@@ -46,6 +46,44 @@ defaults:
   - _self_
 
 
+data:
+
+  # Offline LeRobot demonstrations used to prefill every SAC replay pool.
+  rlpd:
+
+    # Whether to enable RLPD replay prefill.
+    enable: false
+
+    # LeRobot dataset repo id.
+    repo_id: null
+
+    # Optional local LeRobot dataset root.
+    root: null
+
+    # Optional LeRobot dataset revision.
+    revision: null
+
+    # Optional video backend for LeRobot decoding.
+    video_backend: null
+
+    # Optional list of episode indices to load.
+    episodes: null
+
+    # Maximum number of episodes to prefill. A non-positive value means all.
+    max_episodes: 0
+
+    # Number of DataLoader workers for offline dataset reads.
+    num_workers: 0
+
+    # Whether the offline DataLoader pins host memory.
+    pin_memory: true
+
+    # Flush prefill data to workers after this many transitions. A non-positive value submits once at the end.
+    submit_max_transitions: 0
+
+    # Sparse terminal reward assigned when the dataset has no reward field.
+    terminal_reward: 1.0
+
 
 # config for the trainer
 trainer:

@@ -44,10 +44,12 @@ class SACReplayPool:
         single_pool_capacity: int,
         pool_device: str = "cpu",
         sample_device: str = "cpu",
+        positive_only: bool = False,
     ):
         self.single_pool_capacity = int(single_pool_capacity)
         self.pool_device = pool_device
         self.sample_device = sample_device
+        self.positive_only = bool(positive_only)
 
         self.task_pools: dict[str, _DualPoolState] = {}
         self.size = 0
@@ -69,8 +71,15 @@ class SACReplayPool:
         batch = self._index_select_batch(batch, valid_indices)
         selected = valid_indices.cpu().tolist()
         task_ids = [task_ids[i] for i in selected]
+        if self.positive_only:
+            positive_sample_mask = batch.batch[POSITIVE_SAMPLE_MASK_KEY].clone()
+            batch.batch[POSITIVE_SAMPLE_MASK_KEY] = torch.ones_like(positive_sample_mask)
 
-        positive_mask = self._extract_positive_mask(batch)
+        positive_mask = (
+            torch.ones(len(batch), device=valid_indices.device, dtype=torch.bool)
+            if self.positive_only
+            else self._extract_positive_mask(batch)
+        )
         grouped_indices: dict[str, dict[str, list[int]]] = {}
         for idx in range(len(batch)):
             task_key = self._normalize_task_id(task_ids[idx])
@@ -88,7 +97,7 @@ class SACReplayPool:
                     self._index_select_batch(batch, positive_idx),
                     is_positive_pool=True,
                 )
-            if groups["negative"]:
+            if groups["negative"] and not self.positive_only:
                 negative_idx = torch.tensor(groups["negative"], device=valid_indices.device, dtype=torch.long)
                 self._insert_block_to_pool(
                     pool_state,
@@ -107,7 +116,7 @@ class SACReplayPool:
         if self.size == 0:
             raise ValueError("Replay pool is empty, unable to sample.")
 
-        positive_sample_ratio = max(0.0, min(1.0, float(positive_sample_ratio)))
+        positive_sample_ratio = 1.0 if self.positive_only else max(0.0, min(1.0, float(positive_sample_ratio)))
         target_positive = int(round(batch_size * positive_sample_ratio))
         target_negative = batch_size - target_positive
 
@@ -165,24 +174,29 @@ class SACReplayPool:
         tasks_payload: dict[str, dict[str, Any]] = {}
         for task_id, pool_state in self.task_pools.items():
             assert pool_state.positive_pool is not None
-            assert pool_state.negative_pool is not None
             tasks_payload[task_id] = {
                 "positive_pool_batch": pool_state.positive_pool.batch.cpu(),
                 "positive_pool_non_tensor_batch": pool_state.positive_pool.non_tensor_batch,
-                "negative_pool_batch": pool_state.negative_pool.batch.cpu(),
-                "negative_pool_non_tensor_batch": pool_state.negative_pool.non_tensor_batch,
                 "positive_size": pool_state.positive_size,
                 "negative_size": pool_state.negative_size,
                 "positive_position": pool_state.positive_position,
                 "negative_position": pool_state.negative_position,
             }
+            if pool_state.negative_pool is not None:
+                tasks_payload[task_id].update(
+                    {
+                        "negative_pool_batch": pool_state.negative_pool.batch.cpu(),
+                        "negative_pool_non_tensor_batch": pool_state.negative_pool.non_tensor_batch,
+                    }
+                )
 
         payload = {
             "meta_info": {
-                "version": 4,
+                "version": 5,
                 "single_pool_capacity": self.single_pool_capacity,
                 "pool_device": self.pool_device,
                 "sample_device": self.sample_device,
+                "positive_only": self.positive_only,
                 "size": self.size,
                 "positive_size": self.positive_size,
                 "negative_size": self.negative_size,
@@ -202,6 +216,7 @@ class SACReplayPool:
         meta_info = payload["meta_info"]
         tasks_payload = payload["tasks"]
         version = int(meta_info.get("version", 3))
+        self.positive_only = bool(meta_info.get("positive_only", self.positive_only))
 
         self.single_pool_capacity = int(meta_info["single_pool_capacity"])
         self.task_pools = {}
@@ -211,19 +226,25 @@ class SACReplayPool:
                     batch=task_payload["positive_pool_batch"].to(self.pool_device),
                     non_tensor_batch=task_payload["positive_pool_non_tensor_batch"],
                 )
-                negative_pool = DataProto(
-                    batch=task_payload["negative_pool_batch"].to(self.pool_device),
-                    non_tensor_batch=task_payload["negative_pool_non_tensor_batch"],
-                )
+                negative_pool = None
+                if not self.positive_only and "negative_pool_batch" in task_payload:
+                    negative_pool = DataProto(
+                        batch=task_payload["negative_pool_batch"].to(self.pool_device),
+                        non_tensor_batch=task_payload["negative_pool_non_tensor_batch"],
+                    )
             else:
                 positive_pool = DataProto(batch=task_payload["positive_pool"].to(self.pool_device), non_tensor_batch={})
-                negative_pool = DataProto(batch=task_payload["negative_pool"].to(self.pool_device), non_tensor_batch={})
+                negative_pool = None
+                if not self.positive_only:
+                    negative_pool = DataProto(
+                        batch=task_payload["negative_pool"].to(self.pool_device), non_tensor_batch={}
+                    )
 
             self.task_pools[task_id] = _DualPoolState(
                 positive_pool=positive_pool,
                 negative_pool=negative_pool,
                 positive_size=int(task_payload["positive_size"]),
-                negative_size=int(task_payload["negative_size"]),
+                negative_size=0 if self.positive_only else int(task_payload["negative_size"]),
                 positive_position=int(task_payload["positive_position"]),
                 negative_position=int(task_payload["negative_position"]),
             )
@@ -243,6 +264,7 @@ class SACReplayPool:
             single_pool_capacity=int(meta_info["single_pool_capacity"]),
             pool_device=meta_info["pool_device"],
             sample_device=meta_info["sample_device"],
+            positive_only=bool(meta_info.get("positive_only", False)),
         )
         replay_pool.rank = rank
         if not replay_pool.load(directory):
@@ -263,6 +285,8 @@ class SACReplayPool:
             pool_state.positive_position = (pool_state.positive_position + length) % self.single_pool_capacity
             pool_state.positive_size = min(pool_state.positive_size + length, self.single_pool_capacity)
         else:
+            if self.positive_only:
+                raise RuntimeError("Cannot insert negative samples into a positive-only replay pool.")
             assert pool_state.negative_pool is not None
             idx = (pool_state.negative_position + idx) % self.single_pool_capacity
             target_pool = pool_state.negative_pool
@@ -292,10 +316,12 @@ class SACReplayPool:
                 key: self._allocate_non_tensor_storage(value) for key, value in sample.non_tensor_batch.items()
             },
         )
-        negative_pool = DataProto.from_dict(
-            tensors={key: value.clone() for key, value in positive_pool.batch.items()},
-            non_tensors={key: value.copy() for key, value in positive_pool.non_tensor_batch.items()},
-        )
+        negative_pool = None
+        if not self.positive_only:
+            negative_pool = DataProto.from_dict(
+                tensors={key: value.clone() for key, value in positive_pool.batch.items()},
+                non_tensors={key: value.copy() for key, value in positive_pool.non_tensor_batch.items()},
+            )
         self.task_pools[task_id] = _DualPoolState(
             positive_pool=positive_pool,
             negative_pool=negative_pool,
@@ -410,7 +436,8 @@ class SACReplayPool:
         return (
             f"SACReplayPool(single_pool_capacity={self.single_pool_capacity}, size={self.size}, "
             f"positive_size={self.positive_size}, negative_size={self.negative_size}, "
-            f"task_count={len(self.task_pools)}, pool_device={self.pool_device}, sample_device={self.sample_device})"
+            f"task_count={len(self.task_pools)}, pool_device={self.pool_device}, "
+            f"sample_device={self.sample_device}, positive_only={self.positive_only})"
         )
 
     def __len__(self):

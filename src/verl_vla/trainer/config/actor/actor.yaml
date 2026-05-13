@@ -217,6 +217,12 @@ actor_ema_decay: 0.8
 # SAC mini-batch size sampled from replay buffer
 sac_mini_batch_size: 256
 
+# Online replay samples per global SAC update. Null falls back to sac_mini_batch_size.
+online_replay_sample_batch_size: null
+
+# Offline replay samples per global SAC update. Null falls back to sac_mini_batch_size when available.
+offline_replay_sample_batch_size: null
+
 # SAC micro-batch size per GPU used during updates
 sac_micro_batch_size_per_gpu: 16
 
@@ -225,6 +231,9 @@ replay_pool_save_interval: 500
 
 # Capacity of each rank-local replay pool
 replay_pool_single_size: 10
+
+# Capacity of each rank-local offline RLPD replay pool
+offline_replay_pool_single_size: 1000
 
 # Directory used to save and restore replay pools
 replay_pool_save_dir: /tmp/replay_pools

@@ -109,10 +109,13 @@ class ActorConfig(BaseVLAActorConfig):
     actor_ema_decay: float = 0.995
 
     sac_mini_batch_size: int = 256
+    online_replay_sample_batch_size: int | None = None
+    offline_replay_sample_batch_size: int | None = None
     sac_micro_batch_size_per_gpu: int = 16
 
     replay_pool_save_interval: int = 500
     replay_pool_single_size: int = 1000
+    offline_replay_pool_single_size: int = 1000
     replay_pool_save_dir: str = "/tmp/replay_pools"
 
     def __post_init__(self):
@@ -134,6 +137,18 @@ class ActorConfig(BaseVLAActorConfig):
 
         if self.sac_mini_batch_size <= 0:
             raise ValueError(f"sac_mini_batch_size must be positive, got {self.sac_mini_batch_size}")
+
+        if self.online_replay_sample_batch_size is not None and self.online_replay_sample_batch_size < 0:
+            raise ValueError(
+                "online_replay_sample_batch_size must be non-negative when provided, "
+                f"got {self.online_replay_sample_batch_size}"
+            )
+
+        if self.offline_replay_sample_batch_size is not None and self.offline_replay_sample_batch_size < 0:
+            raise ValueError(
+                "offline_replay_sample_batch_size must be non-negative when provided, "
+                f"got {self.offline_replay_sample_batch_size}"
+            )
 
         if self.sac_micro_batch_size_per_gpu <= 0:
             raise ValueError(f"sac_micro_batch_size_per_gpu must be positive, got {self.sac_micro_batch_size_per_gpu}")

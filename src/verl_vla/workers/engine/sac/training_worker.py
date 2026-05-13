@@ -38,10 +38,24 @@ class SACTrainingWorker(TrainingWorker):
     def __init__(self, config: TrainingWorkerConfig, actor_config: ActorConfig, tokenizer=None):
         super().__init__(config=config)
         self.actor_config = actor_config
-        self.sac_mini_batch_size = self.actor_config.sac_mini_batch_size // torch.distributed.get_world_size()
+        self.sac_mini_batch_size = self._global_to_local_batch_size(self.actor_config.sac_mini_batch_size)
+        self.online_replay_sample_batch_size = self._global_to_local_batch_size(
+            self.actor_config.online_replay_sample_batch_size
+            if self.actor_config.online_replay_sample_batch_size is not None
+            else self.actor_config.sac_mini_batch_size
+        )
+        self.offline_replay_sample_batch_size = self._global_to_local_batch_size(
+            self.actor_config.offline_replay_sample_batch_size
+            if self.actor_config.offline_replay_sample_batch_size is not None
+            else self.actor_config.sac_mini_batch_size
+        )
         self.sac_config = actor_config.sac
         self.tokenizer = tokenizer or self.model_config.tokenizer
         self._sac_initialized = False
+
+    @staticmethod
+    def _global_to_local_batch_size(global_batch_size: int) -> int:
+        return int(global_batch_size) // torch.distributed.get_world_size()
 
     @staticmethod
     def _force_set_lr(opt: torch.optim.Optimizer, lr: float):
@@ -58,6 +72,11 @@ class SACTrainingWorker(TrainingWorker):
             sample_device=get_device_name(),
         )
         self.replay_pool.load(self.actor_config.replay_pool_save_dir)
+        self.offline_replay_pool = SACReplayPool(
+            single_pool_capacity=self.actor_config.offline_replay_pool_single_size,
+            sample_device=get_device_name(),
+            positive_only=True,
+        )
 
         self.critic_optimizer = torch.optim.Adam(
             self.engine.module.sac_get_critic_parameters(),
@@ -96,6 +115,70 @@ class SACTrainingWorker(TrainingWorker):
             self.sac_config.get("skip_critic_update_when_actor_update", False)
         )
         self._sac_initialized = True
+
+    def _add_data_to_replay_pool(self, replay_pool: SACReplayPool, data: DataProto):
+        replay_batch_keys = [key for key in data.batch.keys() if key.startswith(("t0.", "t1.", "info."))]
+        replay_non_tensor_batch_keys = [
+            key for key in data.non_tensor_batch.keys() if key.startswith(("t0.", "t1.", "info."))
+        ]
+        replay_pool.add_batch(
+            data.select(batch_keys=replay_batch_keys, non_tensor_batch_keys=replay_non_tensor_batch_keys),
+            task_ids=data.batch["info.task_ids"],
+        )
+
+    def _sample_rlpd_batch(
+        self,
+        positive_sample_ratio: float,
+    ) -> tuple[DataProto, dict]:
+        online_batch = None
+        online_sample_info = {
+            "actual_positive_sample_ratio": 0.0,
+            "positive_size": self.replay_pool.positive_size,
+            "negative_size": self.replay_pool.negative_size,
+            "task_count": len(self.replay_pool.task_pools),
+        }
+        if self.online_replay_sample_batch_size > 0:
+            online_batch, online_sample_info = self.replay_pool.sample_batch(
+                self.online_replay_sample_batch_size,
+                positive_sample_ratio=positive_sample_ratio,
+                return_sample_info=True,
+            )
+
+        offline_batch = None
+        offline_sample_info = {
+            "task_count": len(self.offline_replay_pool.task_pools),
+        }
+        if self.offline_replay_sample_batch_size > 0 and len(self.offline_replay_pool) > 0:
+            offline_batch, offline_sample_info = self.offline_replay_pool.sample_batch(
+                self.offline_replay_sample_batch_size,
+                positive_sample_ratio=1.0,
+                return_sample_info=True,
+            )
+
+        if online_batch is None and offline_batch is None:
+            raise ValueError(
+                "No replay samples available. "
+                f"online_sample_batch_size={self.online_replay_sample_batch_size}, "
+                f"offline_sample_batch_size={self.offline_replay_sample_batch_size}, "
+                f"online_pool_size={len(self.replay_pool)}, offline_pool_size={len(self.offline_replay_pool)}"
+            )
+
+        online_sample_count = len(online_batch) if online_batch is not None else 0
+        offline_sample_count = len(offline_batch) if offline_batch is not None else 0
+
+        sampled_batches = [batch for batch in (online_batch, offline_batch) if batch is not None]
+        batch = sampled_batches[0] if len(sampled_batches) == 1 else DataProto.concat(sampled_batches)
+        sample_info = {
+            "online_actual_positive_sample_ratio": online_sample_info["actual_positive_sample_ratio"],
+            "online_sample_count": online_sample_count,
+            "offline_sample_count": offline_sample_count,
+            "online_positive_size": online_sample_info["positive_size"],
+            "online_negative_size": online_sample_info["negative_size"],
+            "online_task_count": online_sample_info["task_count"],
+            "offline_task_count": offline_sample_info["task_count"],
+            "offline_size": len(self.offline_replay_pool),
+        }
+        return batch, sample_info
 
     @property
     def _actor_grad_clip(self) -> float:
@@ -339,24 +422,24 @@ class SACTrainingWorker(TrainingWorker):
 
         global_steps = data.meta_info["global_steps"]
         critic_only_update = bool(data.meta_info.get("critic_only_update", False))
+        add_to_offline_replay_only = bool(data.meta_info.get("add_to_offline_replay_only", False))
 
         self._force_set_lr(self.engine.optimizer, 5e-6)
         self._force_set_lr(self.critic_optimizer, 1e-4)
 
-        if "empty_batch" not in data.meta_info:
-            replay_batch_keys = [key for key in data.batch.keys() if key.startswith(("t0.", "t1.", "info."))]
-            replay_non_tensor_batch_keys = [
-                key for key in data.non_tensor_batch.keys() if key.startswith(("t0.", "t1.", "info."))
-            ]
-            self.replay_pool.add_batch(
-                data.select(batch_keys=replay_batch_keys, non_tensor_batch_keys=replay_non_tensor_batch_keys),
-                task_ids=data.batch["info.task_ids"],
-            )
+        if add_to_offline_replay_only:
+            self._add_data_to_replay_pool(self.offline_replay_pool, data)
+            return {
+                "sac/offline_replay_pool_size": len(self.offline_replay_pool),
+                "sac/offline_replay_task_count": len(self.offline_replay_pool.task_pools),
+                "sac/offline_replay_prefill_only": 1.0,
+            }
 
-        critic_batch, critic_replay_sample_info = self.replay_pool.sample_batch(
-            self.sac_mini_batch_size,
-            positive_sample_ratio=float(self.sac_config.get("critic_replay_positive_sample_ratio", 0.5)),
-            return_sample_info=True,
+        if "empty_batch" not in data.meta_info:
+            self._add_data_to_replay_pool(self.replay_pool, data)
+
+        critic_batch, critic_replay_sample_info = self._sample_rlpd_batch(
+            positive_sample_ratio=float(self.sac_config.get("critic_replay_positive_sample_ratio", 0.5))
         )
         micro_batches = critic_batch.split(self.actor_config.sac_micro_batch_size_per_gpu)
         grad_accum_steps = len(micro_batches) * torch.distributed.get_world_size()
@@ -398,12 +481,10 @@ class SACTrainingWorker(TrainingWorker):
                 self.critic_optimizer.step()
                 self.critic_scheduler.step()
 
-        actor_replay_sample_info = {"actual_positive_sample_ratio": 0.0}
+        actor_replay_sample_info = {}
         if update_actor:
-            actor_batch, actor_replay_sample_info = self.replay_pool.sample_batch(
-                self.sac_mini_batch_size,
-                positive_sample_ratio=float(self.sac_config.get("actor_replay_positive_sample_ratio", 0.5)),
-                return_sample_info=True,
+            actor_batch, actor_replay_sample_info = self._sample_rlpd_batch(
+                positive_sample_ratio=float(self.sac_config.get("actor_replay_positive_sample_ratio", 0.5))
             )
             micro_batches = actor_batch.split(self.actor_config.sac_micro_batch_size_per_gpu)
 
@@ -479,10 +560,16 @@ class SACTrainingWorker(TrainingWorker):
             .detach()
             .item(),
             "data/valid_ratio": critic_batch.batch["info.valids"].float().mean().item(),
-            "sac/critic_replay_sampled_ratio": critic_replay_sample_info["actual_positive_sample_ratio"],
-            "sac/actor_replay_sampled_ratio": actor_replay_sample_info["actual_positive_sample_ratio"]
+            "sac/critic_online_replay_sampled_ratio": critic_replay_sample_info["online_actual_positive_sample_ratio"],
+            "sac/critic_online_sample_count": critic_replay_sample_info["online_sample_count"],
+            "sac/critic_offline_sample_count": critic_replay_sample_info["offline_sample_count"],
+            "sac/online_replay_sample_batch_size": self.online_replay_sample_batch_size,
+            "sac/offline_replay_sample_batch_size": self.offline_replay_sample_batch_size,
+            "sac/actor_online_replay_sampled_ratio": actor_replay_sample_info["online_actual_positive_sample_ratio"]
             if update_actor
             else 0.0,
+            "sac/actor_online_sample_count": actor_replay_sample_info["online_sample_count"] if update_actor else 0,
+            "sac/actor_offline_sample_count": actor_replay_sample_info["offline_sample_count"] if update_actor else 0,
             "sac/td3_enabled": float(self.td3_enabled),
             "sac/critic_only_update": float(critic_only_update),
             "sac/skip_critic_update_when_actor_update": float(self.skip_critic_update_when_actor_update),
@@ -496,14 +583,16 @@ class SACTrainingWorker(TrainingWorker):
                 if self.cql_enabled
                 else {}
             ),
-            "sac/replay_pool_positive_size": critic_replay_sample_info["positive_size"],
-            "sac/replay_pool_negative_size": critic_replay_sample_info["negative_size"],
-            "sac/replay_task_count": critic_replay_sample_info["task_count"],
+            "sac/replay_pool_positive_size": critic_replay_sample_info["online_positive_size"],
+            "sac/replay_pool_negative_size": critic_replay_sample_info["online_negative_size"],
+            "sac/replay_task_count": critic_replay_sample_info["online_task_count"],
+            "sac/offline_replay_task_count": critic_replay_sample_info["offline_task_count"],
             "sac/alpha": self._get_alpha().detach().item(),
             "sac/actor_ema_enabled": float(self.actor_ema_enabled),
             "sac/actor_ema_decay": self.actor_ema_decay,
             "sac/critic_target_tau": critic_target_tau,
             "sac/replay_pool_size": len(self.replay_pool),
+            "sac/offline_replay_pool_size": len(self.offline_replay_pool),
             "critic/loss": sum(critic_loss_list) / len(critic_loss_list) if critic_loss_list else 0.0,
             "critic/lr": self.critic_optimizer.param_groups[0]["lr"],
             "critic/grad_norm": critic_grad_norm_post_clip,

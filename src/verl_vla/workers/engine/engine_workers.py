@@ -168,6 +168,13 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
         output = self.actor.train_mini_batch(data=data)
         return output.to("cpu") if output is not None else None
 
+    @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="actor"))
+    def add_offline_replay_data(self, data: DataProto) -> DataProto:
+        assert self._is_actor
+        data.meta_info["add_to_offline_replay_only"] = True
+        output = self.actor.train_mini_batch(data=data)
+        return output.to("cpu") if output is not None else None
+
     # The interface reserved for VLA
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)

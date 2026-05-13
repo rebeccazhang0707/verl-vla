@@ -31,6 +31,7 @@ from verl.utils.debug import marked_timer
 from verl.utils.metric import reduce_metrics
 
 from verl_vla.utils.data import add_transition_prefixes, flatten_trajectories
+from verl_vla.utils.rlpd import iter_rlpd_replay_prefill_batches
 
 
 def compute_avg_positive_trajectory_length(batch: DataProto) -> float:
@@ -247,6 +248,20 @@ class RobRaySACTrainer(RayPPOTrainer):
 
         return rollout_batch
 
+    def _prefill_replay_pool_from_rlpd(self) -> None:
+        rlpd_config = OmegaConf.select(self.config, "data.rlpd")
+        if not rlpd_config or not rlpd_config.get("enable", False):
+            return
+
+        for prefill_batch in iter_rlpd_replay_prefill_batches(self.config, global_steps=self.global_steps):
+            self._submit_rlpd_prefill_batch(prefill_batch)
+
+    def _submit_rlpd_prefill_batch(self, prefill_batch: DataProto) -> None:
+        prefill_batch.meta_info["global_steps"] = self.global_steps
+        prefill_batch.meta_info["global_token_num"] = [0]
+        prefill_batch.meta_info["add_to_offline_replay_only"] = True
+        self.actor_rollout_wg.add_offline_replay_data(prefill_batch)
+
     def _prepare_actor_input(self, rollout_output: Optional[DataProto]) -> DataProto:
         # dones
         complete_any = rollout_output.batch["feedback.terminations"].any(dim=-1)  # (B, T)
@@ -338,6 +353,7 @@ class RobRaySACTrainer(RayPPOTrainer):
 
         # load checkpoint before doing anything
         self._load_checkpoint()
+        self._prefill_replay_pool_from_rlpd()
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
