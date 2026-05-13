@@ -15,6 +15,7 @@
 import torch
 from verl import DataProto
 from verl.single_controller.base.decorator import make_nd_compute_dataproto_dispatch_fn, register
+from verl.utils.debug import marked_timer
 from verl.utils.device import get_device_id, get_device_name
 from verl.workers.config import TrainingWorkerConfig
 from verl.workers.engine_workers import TrainingWorker
@@ -56,6 +57,8 @@ class SFTTrainingWorker(TrainingWorker):
         return torch.ones(len(micro_batch), device=get_device_id(), dtype=torch.float32)
 
     def _update_sft_policy(self, data: DataProto) -> dict[str, float]:
+        timing_raw = {}
+
         self._force_set_lr(self.engine.optimizer, self.actor_config.optim.lr)
 
         mini_batch_size = int(self.actor_config.sft_mini_batch_size)
@@ -65,37 +68,44 @@ class SFTTrainingWorker(TrainingWorker):
         micro_batch_size = int(micro_batch_size)
 
         mini_batches = data.split(mini_batch_size)
-        grad_accum_steps = 0
-        for mini_batch in mini_batches:
-            grad_accum_steps += len(mini_batch.split(micro_batch_size))
+        split_micro_batches = [mini_batch.split(micro_batch_size) for mini_batch in mini_batches]
+        grad_accum_steps = sum(len(micro_batches) for micro_batches in split_micro_batches)
         grad_accum_steps *= torch.distributed.get_world_size()
 
-        self.engine.optimizer_zero_grad()
-
         loss_list = []
-        for mini_batch in mini_batches:
-            for micro_batch in mini_batch.split(micro_batch_size):
-                micro_batch = micro_batch.to(get_device_id())
-                obs = self._extract_sft_obs(micro_batch)
-                actions = self._extract_sft_actions(micro_batch)
-                valids = self._extract_sft_valids(micro_batch)
-                with torch.autocast(device_type=get_device_name(), dtype=torch.bfloat16):
-                    bc_loss = self.engine.module.bc_loss(
-                        obs=obs,
-                        tokenizer=self.tokenizer,
-                        actions=actions,
-                        valids=valids,
-                    )
-                (bc_loss / grad_accum_steps).backward()
-                loss_list.append(bc_loss.detach())
+        with marked_timer("sft_forward_backward", timing_raw, color="red"):
+            self.engine.optimizer_zero_grad()
+            for micro_batches in split_micro_batches:
+                for micro_batch in micro_batches:
+                    micro_batch = micro_batch.to(get_device_id())
+                    obs = self._extract_sft_obs(micro_batch)
+                    actions = self._extract_sft_actions(micro_batch)
+                    valids = self._extract_sft_valids(micro_batch)
+                    with torch.autocast(device_type=get_device_name(), dtype=torch.bfloat16):
+                        bc_loss = self.engine.module.bc_loss(
+                            obs=obs,
+                            tokenizer=self.tokenizer,
+                            actions=actions,
+                            valids=valids,
+                        )
+                    (bc_loss / grad_accum_steps).backward()
+                    loss_list.append(bc_loss.detach())
 
-        grad_norm = self.engine.optimizer_step()
+        with marked_timer("sft_optimizer_step", timing_raw):
+            grad_norm = self.engine.optimizer_step()
+
         mean_loss = torch.stack(loss_list).mean().item() if loss_list else 0.0
-        return {
+
+        metrics = {
             "loss": mean_loss,
             "grad_norm": grad_norm if isinstance(grad_norm, float) else float(grad_norm),
             "sft/lr": self.actor_config.optim.lr,
+            "sft/num_mini_batches": len(mini_batches),
+            "sft/num_micro_batches": sum(len(micro_batches) for micro_batches in split_micro_batches),
+            "sft/grad_accum_steps": grad_accum_steps,
         }
+        metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
+        return metrics
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="train"), blocking=False)
     def train_mini_batch(self, data: DataProto) -> DataProto:

@@ -14,8 +14,6 @@
 
 from __future__ import annotations
 
-import time
-
 import numpy as np
 import torch
 from omegaconf import OmegaConf
@@ -28,6 +26,7 @@ from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer
 from verl.trainer.ppo.utils import Role
 from verl.utils.checkpoint.checkpoint_manager import should_save_ckpt_esi
+from verl.utils.debug import marked_timer
 from verl.utils.metric import reduce_metrics
 
 
@@ -122,36 +121,51 @@ class RobRaySFTTrainer(RayPPOTrainer):
         self.max_steps_duration = 0.0
 
         for epoch in range(total_epochs):
-            for batch in self.sft_dataloader:
-                step_start_time = time.perf_counter()
-                actor_output = self.actor_rollout_wg.update_actor(self._batch_to_dataproto(batch))
-                metrics = reduce_metrics(actor_output.meta_info["metrics"])
-                self.global_steps += 1
+            train_iter = iter(self.sft_dataloader)
+            for _ in range(steps_per_epoch):
+                timing_raw = {}
+
+                with marked_timer("step", timing_raw):
+                    with marked_timer("data_loading", timing_raw):
+                        batch = next(train_iter)
+                        batch_proto = self._batch_to_dataproto(batch)
+
+                    with marked_timer("update_actor", timing_raw, color="red"):
+                        actor_output = self.actor_rollout_wg.update_actor(batch_proto)
+
+                    actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                    self.global_steps += 1
+
+                    is_last_step = self.global_steps >= self.total_training_steps
+
+                    esi_close_to_expiration = should_save_ckpt_esi(
+                        max_steps_duration=self.max_steps_duration,
+                        redundant_time=self.config.trainer.esi_redundant_time,
+                    )
+                    if self.config.trainer.save_freq > 0 and (
+                        is_last_step
+                        or self.global_steps % self.config.trainer.save_freq == 0
+                        or esi_close_to_expiration
+                    ):
+                        with marked_timer("save_checkpoint", timing_raw, color="green"):
+                            self._save_checkpoint()
+
+                steps_duration = timing_raw["step"]
+                self.max_steps_duration = max(self.max_steps_duration, steps_duration)
+
+                metrics = {
+                    "training/global_step": self.global_steps,
+                    "training/epoch": epoch,
+                }
+                metrics.update(actor_output_metrics)
+                metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
+
                 progress_bar.update(1)
                 progress_bar.set_postfix(
                     loss=f"{metrics.get('loss', 0.0):.4f}",
                     grad_norm=f"{metrics.get('grad_norm', 0.0):.4f}",
                 )
-                step_duration = time.perf_counter() - step_start_time
-                self.max_steps_duration = max(self.max_steps_duration, step_duration)
-                metrics.update(
-                    {
-                        "training/global_step": self.global_steps,
-                        "training/epoch": epoch,
-                        "timing_s/step": step_duration,
-                    }
-                )
                 logger.log(data=metrics, step=self.global_steps)
-
-                is_last_step = self.global_steps >= self.total_training_steps
-                esi_close_to_expiration = should_save_ckpt_esi(
-                    max_steps_duration=self.max_steps_duration,
-                    redundant_time=self.config.trainer.esi_redundant_time,
-                )
-                if self.config.trainer.save_freq > 0 and (
-                    is_last_step or self.global_steps % self.config.trainer.save_freq == 0 or esi_close_to_expiration
-                ):
-                    self._save_checkpoint()
 
                 if is_last_step:
                     progress_bar.close()
