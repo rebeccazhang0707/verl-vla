@@ -65,12 +65,16 @@ class RobRaySFTTrainer(RayPPOTrainer):
         else:
             sampler = SequentialSampler(data_source=dataset)
 
+        num_workers = int(sft_config.num_workers)
         return StatefulDataLoader(
             dataset=dataset,
             batch_size=sft_config.batch_size,
-            num_workers=sft_config.num_workers,
+            num_workers=num_workers,
             drop_last=sft_config.get("drop_last", False),
             sampler=sampler,
+            pin_memory=bool(sft_config.get("pin_memory", True)),
+            persistent_workers=bool(sft_config.get("persistent_workers", True)) if num_workers > 0 else False,
+            prefetch_factor=int(sft_config.get("prefetch_factor", 4)) if num_workers > 0 else None,
         )
 
     def init_workers(self):
@@ -122,33 +126,43 @@ class RobRaySFTTrainer(RayPPOTrainer):
 
         for epoch in range(total_epochs):
             train_iter = iter(self.sft_dataloader)
-            for _ in range(steps_per_epoch):
+            actor_output_future = None
+            for step_in_epoch in range(steps_per_epoch):
                 timing_raw = {}
 
                 with marked_timer("step", timing_raw):
-                    with marked_timer("data_loading", timing_raw):
-                        batch = next(train_iter)
-                        batch_proto = self._batch_to_dataproto(batch)
+                    # ensure actor_output_future is ready
+                    if actor_output_future is None:
+                        actor_output_future = self._submit_sft_update(train_iter, timing_raw)
 
-                    with marked_timer("update_actor", timing_raw, color="red"):
-                        actor_output = self.actor_rollout_wg.update_actor(batch_proto)
-
-                    actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
-                    self.global_steps += 1
-
-                    is_last_step = self.global_steps >= self.total_training_steps
-
+                    current_step = self.global_steps + 1
+                    is_last_step = current_step >= self.total_training_steps
+                    has_next_batch = step_in_epoch + 1 < steps_per_epoch
                     esi_close_to_expiration = should_save_ckpt_esi(
                         max_steps_duration=self.max_steps_duration,
                         redundant_time=self.config.trainer.esi_redundant_time,
                     )
-                    if self.config.trainer.save_freq > 0 and (
-                        is_last_step
-                        or self.global_steps % self.config.trainer.save_freq == 0
-                        or esi_close_to_expiration
-                    ):
+                    should_save = self.config.trainer.save_freq > 0 and (
+                        is_last_step or current_step % self.config.trainer.save_freq == 0 or esi_close_to_expiration
+                    )
+
+                    # submit the next update
+                    next_actor_output_future = None
+                    if has_next_batch and not should_save:
+                        next_actor_output_future = self._submit_sft_update(train_iter, timing_raw)
+
+                    # wait for the current update
+                    with marked_timer("update_actor", timing_raw, color="red"):
+                        actor_output = actor_output_future.get()
+
+                    actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                    self.global_steps += 1
+
+                    if should_save:
                         with marked_timer("save_checkpoint", timing_raw, color="green"):
                             self._save_checkpoint()
+
+                    actor_output_future = next_actor_output_future
 
                 steps_duration = timing_raw["step"]
                 self.max_steps_duration = max(self.max_steps_duration, steps_duration)
@@ -172,6 +186,14 @@ class RobRaySFTTrainer(RayPPOTrainer):
                     return
 
         progress_bar.close()
+
+    def _submit_sft_update(self, train_iter, timing_raw):
+        with marked_timer("data_loading", timing_raw):
+            batch = next(train_iter)
+            batch_proto = self._batch_to_dataproto(batch)
+
+        with marked_timer("update_actor", timing_raw, color="red"):
+            return self.actor_rollout_wg.update_actor_async(batch_proto)
 
     def _batch_to_dataproto(self, batch: dict) -> DataProto:
         tensor_batch = {}

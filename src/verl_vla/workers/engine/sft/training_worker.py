@@ -59,42 +59,43 @@ class SFTTrainingWorker(TrainingWorker):
     def _update_sft_policy(self, data: DataProto) -> dict[str, float]:
         timing_raw = {}
 
-        self._force_set_lr(self.engine.optimizer, self.actor_config.optim.lr)
+        with marked_timer("sft_update_policy", timing_raw):
+            self._force_set_lr(self.engine.optimizer, self.actor_config.optim.lr)
 
-        mini_batch_size = int(self.actor_config.sft_mini_batch_size)
-        micro_batch_size = self.actor_config.sft_micro_batch_size_per_gpu
-        if micro_batch_size is None:
-            micro_batch_size = mini_batch_size
-        micro_batch_size = int(micro_batch_size)
+            mini_batch_size = int(self.actor_config.sft_mini_batch_size)
+            micro_batch_size = self.actor_config.sft_micro_batch_size_per_gpu
+            if micro_batch_size is None:
+                micro_batch_size = mini_batch_size
+            micro_batch_size = int(micro_batch_size)
 
-        mini_batches = data.split(mini_batch_size)
-        split_micro_batches = [mini_batch.split(micro_batch_size) for mini_batch in mini_batches]
-        grad_accum_steps = sum(len(micro_batches) for micro_batches in split_micro_batches)
-        grad_accum_steps *= torch.distributed.get_world_size()
+            mini_batches = data.split(mini_batch_size)
+            split_micro_batches = [mini_batch.split(micro_batch_size) for mini_batch in mini_batches]
+            grad_accum_steps = sum(len(micro_batches) for micro_batches in split_micro_batches)
+            grad_accum_steps *= torch.distributed.get_world_size()
 
-        loss_list = []
-        with marked_timer("sft_forward_backward", timing_raw, color="red"):
-            self.engine.optimizer_zero_grad()
-            for micro_batches in split_micro_batches:
-                for micro_batch in micro_batches:
-                    micro_batch = micro_batch.to(get_device_id())
-                    obs = self._extract_sft_obs(micro_batch)
-                    actions = self._extract_sft_actions(micro_batch)
-                    valids = self._extract_sft_valids(micro_batch)
-                    with torch.autocast(device_type=get_device_name(), dtype=torch.bfloat16):
-                        bc_loss = self.engine.module.bc_loss(
-                            obs=obs,
-                            tokenizer=self.tokenizer,
-                            actions=actions,
-                            valids=valids,
-                        )
-                    (bc_loss / grad_accum_steps).backward()
-                    loss_list.append(bc_loss.detach())
+            loss_list = []
+            with marked_timer("sft_forward_backward", timing_raw, color="red"):
+                self.engine.optimizer_zero_grad()
+                for micro_batches in split_micro_batches:
+                    for micro_batch in micro_batches:
+                        micro_batch = micro_batch.to(get_device_id())
+                        obs = self._extract_sft_obs(micro_batch)
+                        actions = self._extract_sft_actions(micro_batch)
+                        valids = self._extract_sft_valids(micro_batch)
+                        with torch.autocast(device_type=get_device_name(), dtype=torch.bfloat16):
+                            bc_loss = self.engine.module.bc_loss(
+                                obs=obs,
+                                tokenizer=self.tokenizer,
+                                actions=actions,
+                                valids=valids,
+                            )
+                        (bc_loss / grad_accum_steps).backward()
+                        loss_list.append(bc_loss.detach())
 
-        with marked_timer("sft_optimizer_step", timing_raw):
-            grad_norm = self.engine.optimizer_step()
+            with marked_timer("sft_optimizer_step", timing_raw):
+                grad_norm = self.engine.optimizer_step()
 
-        mean_loss = torch.stack(loss_list).mean().item() if loss_list else 0.0
+            mean_loss = torch.stack(loss_list).mean().item() if loss_list else 0.0
 
         metrics = {
             "loss": mean_loss,
