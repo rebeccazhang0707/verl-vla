@@ -265,23 +265,25 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         tokenizer: torch.nn.Module,
         actions: dict[str, torch.Tensor],
         valids: torch.Tensor,
+        action_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Calculate the BC loss for the actor."""
 
-        pi0_input_cls, pi0_output_cls = self._get_pi0_policy_classes()
-        action_tensor = pi0_output_cls.from_model_output(
-            {
-                "full_action": actions["action"],
-                "log_probs": torch.zeros(actions["action"].shape[0], device=actions["action"].device),
-            }
-        ).action
+        pi0_input_cls, _ = self._get_pi0_policy_classes()
+        action_tensor = actions["action"]
+        action_horizon = self.model.n_action_steps
+        if action_tensor.shape[1] < action_horizon:
+            raise ValueError(
+                f"SFT action sequence length must be at least {action_horizon}, got {action_tensor.shape[1]}."
+            )
+        action_tensor = action_tensor[:, :action_horizon, : self.model.max_action_dim]
+        if action_mask is not None:
+            action_mask = action_mask[:, :action_horizon]
         action_tensor = torch.nn.functional.pad(
             action_tensor,
             (
                 0,
                 self.model.max_action_dim - action_tensor.shape[-1],
-                0,
-                self.model.n_action_steps - action_tensor.shape[1],
             ),
             value=0.0,
         )
@@ -307,16 +309,16 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         u_t = noise - action_tensor
 
         model_pred = self.model(images, img_masks, lang_tokens, lang_masks, states, x_t, time)
-        action_loss_mask = (
-            (torch.arange(self.model.n_action_steps, device=model_pred.device) < 10)
-            .to(model_pred.dtype)
-            .unsqueeze(0)
-            .expand(model_pred.shape[0], -1)
-        )
         loss = F.mse_loss(u_t, model_pred, reduction="none").mean(dim=-1)
-        loss = loss * action_loss_mask
-        sample_loss = loss.mean(dim=-1)
-        valids = valids.to(device=sample_loss.device, dtype=sample_loss.dtype)
+        valids = valids.to(device=loss.device, dtype=loss.dtype)
+        if action_mask is None:
+            action_mask = torch.ones_like(loss)
+        else:
+            action_mask = action_mask.to(device=loss.device, dtype=loss.dtype)
+            if action_mask.shape[1] != action_horizon:
+                raise ValueError(f"SFT action mask length must be {action_horizon}, got {action_mask.shape[1]}.")
+
+        sample_loss = (loss * action_mask).sum(dim=-1) / action_mask.sum(dim=-1).clamp_min(1.0)
         return (sample_loss * valids).sum() / valids.sum().clamp_min(1.0)
 
     # --- SAC Algorithm Support ---

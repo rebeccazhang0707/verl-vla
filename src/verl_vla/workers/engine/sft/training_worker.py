@@ -84,7 +84,15 @@ class SFTTrainingWorker(TrainingWorker):
     @staticmethod
     def _extract_sft_actions(micro_batch: DataProto) -> dict[str, torch.Tensor]:
         batch = micro_batch.batch
-        return {"action": batch["action"]}
+        action = batch["action"]
+        # TODO(remove after datasets are fixed): compatibility for old LeRobot dumps that
+        # stored action chunks inside each action entry. Standard SFT data is [B, T, D].
+        if action.ndim >= 4:
+            action = action[..., 0, :]
+        elif action.ndim == 3 and "action_is_pad" not in batch:
+            action = action[:, :1, :]
+        # End legacy compatibility block.
+        return {"action": action}
 
     @staticmethod
     def _extract_sft_valids(micro_batch: DataProto) -> torch.Tensor:
@@ -92,6 +100,10 @@ class SFTTrainingWorker(TrainingWorker):
         if batch is not None and "info.valids" in batch:
             return batch["info.valids"].float()
         return torch.ones(len(micro_batch), device=get_device_id(), dtype=torch.float32)
+
+    @staticmethod
+    def _extract_sft_action_mask(micro_batch: DataProto) -> torch.Tensor | None:
+        return (~micro_batch.batch["action_is_pad"].bool()).float()
 
     def _update_sft_policy(self, data: DataProto) -> dict[str, float]:
         if not self.actor_ema_initialized:
@@ -122,12 +134,14 @@ class SFTTrainingWorker(TrainingWorker):
                         obs = self._extract_sft_obs(micro_batch)
                         actions = self._extract_sft_actions(micro_batch)
                         valids = self._extract_sft_valids(micro_batch)
+                        action_mask = self._extract_sft_action_mask(micro_batch)
                         with torch.autocast(device_type=get_device_name(), dtype=torch.bfloat16):
                             bc_loss = self.engine.module.bc_loss(
                                 obs=obs,
                                 tokenizer=self.tokenizer,
                                 actions=actions,
                                 valids=valids,
+                                action_mask=action_mask,
                             )
                         (bc_loss / grad_accum_steps).backward()
                         loss_list.append(bc_loss.detach())

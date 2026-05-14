@@ -167,5 +167,6 @@ class SupportSFTTraining:
         tokenizer: torch.nn.Module,
         actions: dict[str, torch.Tensor],
         valids: torch.Tensor,
+        action_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         raise NotImplementedError("Subclasses must implement bc_loss method.")

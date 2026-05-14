@@ -50,10 +50,21 @@ class RobRaySFTTrainer(RayPPOTrainer):
 
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
+        action_delta_steps = int(sft_config.get("action_delta_steps", 0))
+        delta_timestamps = None
+        if action_delta_steps > 0:
+            probe_dataset = LeRobotDataset(
+                repo_id=sft_config.repo_id,
+                revision=sft_config.get("revision"),
+                video_backend=sft_config.get("video_backend"),
+            )
+            delta_timestamps = {"action": [t / probe_dataset.fps for t in range(action_delta_steps)]}
+
         dataset = LeRobotDataset(
             repo_id=sft_config.repo_id,
             revision=sft_config.get("revision"),
             video_backend=sft_config.get("video_backend"),
+            delta_timestamps=delta_timestamps,
         )
 
         if sft_config.get("shuffle", True):

@@ -21,6 +21,7 @@ data:
     drop_last: False
     seed: null
     video_backend: pyav
+    action_delta_steps: 64
 
 actor_rollout_ref:
   model:
