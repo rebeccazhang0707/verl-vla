@@ -129,7 +129,7 @@ class SACTrainingWorker(TrainingWorker):
     def _sample_rlpd_batch(
         self,
         positive_sample_ratio: float,
-    ) -> tuple[DataProto, dict]:
+    ) -> tuple[list[DataProto], dict]:
         online_batch = None
         online_sample_info = {
             "actual_positive_sample_ratio": 0.0,
@@ -166,8 +166,6 @@ class SACTrainingWorker(TrainingWorker):
         online_sample_count = len(online_batch) if online_batch is not None else 0
         offline_sample_count = len(offline_batch) if offline_batch is not None else 0
 
-        sampled_batches = [batch for batch in (online_batch, offline_batch) if batch is not None]
-        batch = sampled_batches[0] if len(sampled_batches) == 1 else DataProto.concat(sampled_batches)
         sample_info = {
             "online_actual_positive_sample_ratio": online_sample_info["actual_positive_sample_ratio"],
             "online_sample_count": online_sample_count,
@@ -178,7 +176,7 @@ class SACTrainingWorker(TrainingWorker):
             "offline_task_count": offline_sample_info["task_count"],
             "offline_size": len(self.offline_replay_pool),
         }
-        return batch, sample_info
+        return [batch for batch in (online_batch, offline_batch) if batch is not None], sample_info
 
     @property
     def _actor_grad_clip(self) -> float:
@@ -438,11 +436,15 @@ class SACTrainingWorker(TrainingWorker):
         if "empty_batch" not in data.meta_info:
             self._add_data_to_replay_pool(self.replay_pool, data)
 
-        critic_batch, critic_replay_sample_info = self._sample_rlpd_batch(
+        critic_batches, critic_replay_sample_info = self._sample_rlpd_batch(
             positive_sample_ratio=float(self.sac_config.get("critic_replay_positive_sample_ratio", 0.5))
         )
-        micro_batches = critic_batch.split(self.actor_config.sac_micro_batch_size_per_gpu)
-        grad_accum_steps = len(micro_batches) * torch.distributed.get_world_size()
+        critic_micro_batches = [
+            micro_batch
+            for batch in critic_batches
+            for micro_batch in batch.split(self.actor_config.sac_micro_batch_size_per_gpu)
+        ]
+        grad_accum_steps = len(critic_micro_batches) * torch.distributed.get_world_size()
 
         update_actor = (
             global_steps >= self.actor_config.critic_warmup_steps
@@ -453,6 +455,7 @@ class SACTrainingWorker(TrainingWorker):
 
         actor_logprobs_list, actor_qvalues_list = [], []
         critic_qvalues_0_list, critic_qvalues_1_list = [], []
+        critic_valids_list, critic_positive_masks_list = [], []
         actor_loss_list, alpha_loss_list = [], []
         critic_loss_list = []
         critic_loss_metrics_agg: dict[str, list[float]] = defaultdict(list)
@@ -462,8 +465,8 @@ class SACTrainingWorker(TrainingWorker):
             critic_grad_norm = torch.tensor(0.0)
         else:
             self.critic_optimizer.zero_grad()
-            for batch_idx, micro_batch in enumerate(micro_batches):
-                logger.info(f"[{batch_idx + 1}/{len(micro_batches)}] critic micro batch ")
+            for batch_idx, micro_batch in enumerate(critic_micro_batches):
+                logger.info(f"[{batch_idx + 1}/{len(critic_micro_batches)}] critic micro batch ")
                 micro_batch = micro_batch.to(get_device_id())
                 raw_critic_loss, q_values_0, q_values_1, critic_loss_metrics = self._forward_critic(
                     micro_batch, resample=True
@@ -474,6 +477,8 @@ class SACTrainingWorker(TrainingWorker):
                     critic_loss_metrics_agg[key].append(float(value.item()))
                 critic_qvalues_0_list.append(q_values_0.mean(dim=-1).detach())
                 critic_qvalues_1_list.append(q_values_1.detach())
+                critic_valids_list.append(micro_batch.batch["info.valids"].detach())
+                critic_positive_masks_list.append(micro_batch.batch["info.positive_sample_mask"].detach())
             critic_grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.engine.module.sac_get_critic_parameters(), max_norm=self._critic_grad_clip
             )
@@ -482,15 +487,21 @@ class SACTrainingWorker(TrainingWorker):
                 self.critic_scheduler.step()
 
         actor_replay_sample_info = {}
+        actor_micro_batches = []
+        actor_valids_list = []
         if update_actor:
-            actor_batch, actor_replay_sample_info = self._sample_rlpd_batch(
+            actor_batches, actor_replay_sample_info = self._sample_rlpd_batch(
                 positive_sample_ratio=float(self.sac_config.get("actor_replay_positive_sample_ratio", 0.5))
             )
-            micro_batches = actor_batch.split(self.actor_config.sac_micro_batch_size_per_gpu)
+            actor_micro_batches = [
+                micro_batch
+                for batch in actor_batches
+                for micro_batch in batch.split(self.actor_config.sac_micro_batch_size_per_gpu)
+            ]
 
             self.engine.optimizer_zero_grad()
-            for batch_idx, micro_batch in enumerate(micro_batches):
-                logger.info(f"[{batch_idx + 1}/{len(micro_batches)}] actor micro batch ")
+            for batch_idx, micro_batch in enumerate(actor_micro_batches):
+                logger.info(f"[{batch_idx + 1}/{len(actor_micro_batches)}] actor micro batch ")
                 micro_batch = micro_batch.to(get_device_id())
                 raw_actor_loss, log_probs, q_values, actor_forward_metrics_mb = self._forward_actor(
                     micro_batch,
@@ -501,6 +512,7 @@ class SACTrainingWorker(TrainingWorker):
                 if log_probs is not None:
                     actor_logprobs_list.append(log_probs.detach())
                 actor_qvalues_list.append(q_values.detach())
+                actor_valids_list.append(micro_batch.batch["info.valids"].detach())
                 for key, value in actor_forward_metrics_mb.items():
                     actor_forward_metrics[key].append(float(value))
             actor_grad_norm = self.engine.optimizer_step()
@@ -510,7 +522,7 @@ class SACTrainingWorker(TrainingWorker):
 
             if self.auto_entropy and actor_logprobs_list:
                 self.alpha_optimizer.zero_grad()
-                for micro_batch, log_probs in zip(micro_batches, actor_logprobs_list, strict=False):
+                for micro_batch, log_probs in zip(actor_micro_batches, actor_logprobs_list, strict=False):
                     micro_batch = micro_batch.to(get_device_id())
                     raw_alpha_loss = self._calculate_alpha_loss(log_probs, micro_batch.batch["info.valids"])
                     (raw_alpha_loss / grad_accum_steps).backward()
@@ -532,8 +544,14 @@ class SACTrainingWorker(TrainingWorker):
         if global_steps % self.actor_config.replay_pool_save_interval == 0:
             self.replay_pool.save(self.actor_config.replay_pool_save_dir)
 
-        critic_positive_mask = critic_batch.batch["info.positive_sample_mask"].to(torch.bool)
-        critic_valid_mask = critic_batch.batch["info.valids"].to(torch.bool)
+        critic_rewards = torch.cat([batch.batch["info.rewards"] for batch in critic_batches])
+        critic_valids = torch.cat([batch.batch["info.valids"] for batch in critic_batches])
+        critic_positive_mask = (
+            torch.cat(critic_positive_masks_list)
+            if critic_positive_masks_list
+            else torch.cat([batch.batch["info.positive_sample_mask"] for batch in critic_batches])
+        ).to(torch.bool)
+        critic_valid_mask = (torch.cat(critic_valids_list) if critic_valids_list else critic_valids).to(torch.bool)
         critic_qvalues_0 = torch.cat(critic_qvalues_0_list) if critic_qvalues_0_list else None
         positive_qvalue_mean = (
             critic_qvalues_0[(critic_positive_mask & critic_valid_mask).to(critic_qvalues_0.device)]
@@ -556,10 +574,8 @@ class SACTrainingWorker(TrainingWorker):
         critic_grad_norm_post_clip = self._post_clip_norm(critic_grad_norm_pre_clip, self._critic_grad_clip)
 
         metrics = {
-            "data/reward_mean": valid_mean(critic_batch.batch["info.rewards"], critic_batch.batch["info.valids"])
-            .detach()
-            .item(),
-            "data/valid_ratio": critic_batch.batch["info.valids"].float().mean().item(),
+            "data/reward_mean": valid_mean(critic_rewards, critic_valids).detach().item(),
+            "data/valid_ratio": critic_valids.float().mean().item(),
             "sac/critic_online_replay_sampled_ratio": critic_replay_sample_info["online_actual_positive_sample_ratio"],
             "sac/critic_online_sample_count": critic_replay_sample_info["online_sample_count"],
             "sac/critic_offline_sample_count": critic_replay_sample_info["offline_sample_count"],
@@ -599,12 +615,12 @@ class SACTrainingWorker(TrainingWorker):
             "critic/grad_norm_pre_clip": critic_grad_norm_pre_clip,
             "critic/grad_clip_threshold": self._critic_grad_clip,
             "critic/qvalue0_mean": (
-                valid_mean(torch.cat(critic_qvalues_0_list), critic_batch.batch["info.valids"]).detach().item()
+                valid_mean(torch.cat(critic_qvalues_0_list), torch.cat(critic_valids_list)).detach().item()
                 if critic_qvalues_0_list
                 else 0.0
             ),
             "critic/qvalue1_mean": (
-                valid_mean(torch.cat(critic_qvalues_1_list), critic_batch.batch["info.valids"]).detach().item()
+                valid_mean(torch.cat(critic_qvalues_1_list), torch.cat(critic_valids_list)).detach().item()
                 if critic_qvalues_1_list
                 else 0.0
             ),
@@ -623,6 +639,7 @@ class SACTrainingWorker(TrainingWorker):
         )
         if update_actor:
             actor_grad_norm_post_clip = self._post_clip_norm(actor_grad_norm, self._actor_grad_clip)
+            actor_valids = torch.cat(actor_valids_list)
             metrics.update(
                 {
                     "actor/loss": sum(actor_loss_list) / len(actor_loss_list),
@@ -631,13 +648,11 @@ class SACTrainingWorker(TrainingWorker):
                     "actor/grad_norm_pre_clip": actor_grad_norm,
                     "actor/grad_clip_threshold": self._actor_grad_clip,
                     "actor/logprob_mean": (
-                        valid_mean(torch.cat(actor_logprobs_list), actor_batch.batch["info.valids"]).detach().item()
+                        valid_mean(torch.cat(actor_logprobs_list), actor_valids).detach().item()
                         if actor_logprobs_list
                         else 0.0
                     ),
-                    "actor/qvalue_mean": valid_mean(torch.cat(actor_qvalues_list), actor_batch.batch["info.valids"])
-                    .detach()
-                    .item(),
+                    "actor/qvalue_mean": valid_mean(torch.cat(actor_qvalues_list), actor_valids).detach().item(),
                     "sac/alpha_lr": self.alpha_optimizer.param_groups[0]["lr"]
                     if self.auto_entropy and actor_logprobs_list
                     else 0.0,
