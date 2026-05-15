@@ -25,6 +25,7 @@ class PI0TorchConfig(PretrainedConfig):
         self.action_norm_stats = kwargs.get("action_norm_stats", {})
         self.pi05_enabled = kwargs.get("pi05_enabled", False)
         self.policy_type = kwargs.get("policy_type", "libero")
+        self.action_chunk_size = kwargs.get("action_chunk_size", 10)
         self.critic_type = kwargs.get("critic_type", "cross_attn")
         self.critic_num = kwargs.get("critic_num", 1)
         self.critic_task_to_critic = kwargs.get("critic_task_to_critic", None)

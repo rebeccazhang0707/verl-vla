@@ -31,7 +31,10 @@ from verl.utils.debug import marked_timer
 from verl.utils.metric import reduce_metrics
 
 from verl_vla.utils.data import add_transition_prefixes, flatten_trajectories
-from verl_vla.utils.rlpd import iter_rlpd_replay_prefill_batches
+from verl_vla.utils.rlpd import (
+    iter_rlpd_replay_prefill_batches,
+    pad_dataproto_to_divisor_with_valid_mask,
+)
 
 
 def compute_avg_positive_trajectory_length(batch: DataProto) -> float:
@@ -257,6 +260,11 @@ class RobRaySACTrainer(RayPPOTrainer):
             self._submit_rlpd_prefill_batch(prefill_batch)
 
     def _submit_rlpd_prefill_batch(self, prefill_batch: DataProto) -> None:
+        prefill_batch = pad_dataproto_to_divisor_with_valid_mask(
+            prefill_batch,
+            int(self.actor_rollout_wg.world_size),
+            valid_key="info.valids",
+        )
         prefill_batch.meta_info["global_steps"] = self.global_steps
         prefill_batch.meta_info["global_token_num"] = [0]
         prefill_batch.meta_info["add_to_offline_replay_only"] = True

@@ -69,17 +69,20 @@ data:
     # Optional list of episode indices to load.
     episodes: null
 
-    # Maximum number of episodes to prefill. A non-positive value means all.
-    max_episodes: 0
-
-    # Number of DataLoader workers for offline dataset reads.
-    num_workers: 0
-
-    # Whether the offline DataLoader pins host memory.
-    pin_memory: true
+    # Maximum number of offline transitions to prefill. A non-positive value means all.
+    max_transitions: 0
 
     # Flush prefill data to workers after this many transitions. A non-positive value submits once at the end.
     submit_max_transitions: 0
+
+    # Number of DataLoader workers for offline LeRobot reads.
+    num_workers: 0
+
+    # Number of batches prefetched by each DataLoader worker.
+    prefetch_factor: 2
+
+    # Number of low-level LeRobot actions compressed into each SAC action chunk.
+    action_chunk_steps: 10
 
     # Sparse terminal reward assigned when the dataset has no reward field.
     terminal_reward: 1.0
