@@ -64,6 +64,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         self.action_norm_stats = config.action_norm_stats
         self.pi05_enabled = config.pi05_enabled
         self.policy_type = config.policy_type
+        self.action_chunk_size = int(getattr(config, "action_chunk_size", 10))
         self.critic_type = getattr(config, "critic_type", "cross_attn")
 
         assert self.state_norm_stats, "state_norm_stats must be provided in PI0TorchConfig"
@@ -214,6 +215,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             {
                 "full_action": self.action_unnormalize_transform(pred_action),
                 "log_probs": rollout_log_probs,
+                "action_chunk_size": self.action_chunk_size,
             }
         )
         s = {
@@ -241,9 +243,9 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         policy.model = PI0Model.from_pretrained(pretrained_model_name_or_path)
         return policy
 
-    # def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
-    #     filtered_state_dict = {key: value for key, value in state_dict.items() if key.startswith("model.")}
-    #     return super().load_state_dict(filtered_state_dict, strict=False, assign=assign)
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        filtered_state_dict = {key: value for key, value in state_dict.items() if key.startswith("model.")}
+        return super().load_state_dict(filtered_state_dict, strict=False, assign=assign)
 
     def freeze_vision_tower(self) -> None:
         """Freeze the vision tower parameters."""
@@ -574,6 +576,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             {
                 "full_action": self.action_unnormalize_transform(actions),
                 "log_probs": log_probs,
+                "action_chunk_size": self.action_chunk_size,
             }
         )
         return pi0_output.action, pi0_output.log_prob, actor_metrics

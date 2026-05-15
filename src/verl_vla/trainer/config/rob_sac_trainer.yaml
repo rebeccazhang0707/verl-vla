@@ -285,6 +285,10 @@ actor_rollout_ref:
 
       sac_enable: True
 
+
+      # number of action steps returned to the environment by the PI0 policy adapter
+      action_chunk_size: 10
+
       # critic backend type: "cross_attn", "mean_pool", or "multi_cross_attn"
       critic_type: cross_attn
 

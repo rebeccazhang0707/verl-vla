@@ -23,7 +23,6 @@ from verl_vla.utils.image import image_to_float01, is_int8_image_tensor, preproc
 from .base import Pi0Input, Pi0Output
 
 PI0_MAX_STATE_DIM = 32
-PI0_ACTION_CHUNK_SIZE = 10
 LEROBOT_ACTION_DIM = 6
 LEROBOT_IMAGE_CROP_SIZE = 480
 LEROBOT_IMAGE_RESIZE_SIZE = (224, 224)
@@ -141,6 +140,7 @@ class LerobotPi0Output(Pi0Output):
     @classmethod
     def from_model_output(cls, model_output: dict) -> "LerobotPi0Output":
         output = cls()
-        output.action = model_output["full_action"][:, :PI0_ACTION_CHUNK_SIZE, :LEROBOT_ACTION_DIM]
+        action_chunk_size = int(model_output.get("action_chunk_size", model_output["full_action"].shape[1]))
+        output.action = model_output["full_action"][:, :action_chunk_size, :LEROBOT_ACTION_DIM]
         output.log_prob = model_output["log_probs"]
         return output
