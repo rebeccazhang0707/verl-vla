@@ -28,7 +28,7 @@ train:
   reward_coef: 1.0
 
   # Per-step penalty used to encourage shorter successful trajectories.
-  step_penalty: 0.001
+  step_penalty: 0.0
 
   # If True, only run evaluation without training updates.
   only_eval: False

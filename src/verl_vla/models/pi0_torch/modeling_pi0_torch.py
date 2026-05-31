@@ -274,13 +274,27 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         pi0_input_cls, _ = self._get_pi0_policy_classes()
         action_tensor = actions["action"]
         action_horizon = self.model.n_action_steps
-        if action_tensor.shape[1] < action_horizon:
-            raise ValueError(
-                f"SFT action sequence length must be at least {action_horizon}, got {action_tensor.shape[1]}."
-            )
+        action_length = min(action_tensor.shape[1], action_horizon)
         action_tensor = action_tensor[:, :action_horizon, : self.model.max_action_dim]
         if action_mask is not None:
             action_mask = action_mask[:, :action_horizon]
+        if action_tensor.shape[1] < action_horizon:
+            action_tensor = torch.nn.functional.pad(
+                action_tensor,
+                (
+                    0,
+                    0,
+                    0,
+                    action_horizon - action_tensor.shape[1],
+                ),
+                value=0.0,
+            )
+            if action_mask is not None:
+                action_mask = torch.nn.functional.pad(
+                    action_mask,
+                    (0, action_horizon - action_mask.shape[1]),
+                    value=0.0,
+                )
         action_tensor = torch.nn.functional.pad(
             action_tensor,
             (
@@ -314,7 +328,12 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         loss = F.mse_loss(u_t, model_pred, reduction="none").mean(dim=-1)
         valids = valids.to(device=loss.device, dtype=loss.dtype)
         if action_mask is None:
-            action_mask = torch.ones_like(loss)
+            action_mask = (
+                (torch.arange(action_horizon, device=loss.device) < action_length)
+                .to(dtype=loss.dtype)
+                .unsqueeze(0)
+                .expand_as(loss)
+            )
         else:
             action_mask = action_mask.to(device=loss.device, dtype=loss.dtype)
             if action_mask.shape[1] != action_horizon:
@@ -380,7 +399,8 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             task_mask = task_ids == task_id
             if task_mask.any():
                 noise_levels = noise_levels.masked_fill(task_mask, task_noise_scheduler.refresh(noise_control))
-        return noise_levels
+        normal_noise_factors = (torch.randn_like(noise_levels) / 6.0 + 0.5).clamp(0.0, 1.0)
+        return noise_levels * normal_noise_factors
 
     def _sample_actions_flow_sde(
         self,
@@ -554,23 +574,34 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         ],
         task_ids: torch.Tensor | None = None,
         is_first_micro_batch: bool = False,
+        noise_scale: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None, dict[str, float]]:
-        actions, log_probs = self._sample_actions_flow_sde(
-            state_features=state_features,
-            noise_scale=self.flow_sde_train_noise_scale,
-            requires_grad=True,
-            return_log_prob=True,
-            task_ids=task_ids,
-        )
-        if is_first_micro_batch:
-            self.flow_sde_step.add_(1)
         actor_metrics: dict[str, float] = {}
         if self.flow_sde_enable:
+            resolved_noise_scale = self.flow_sde_train_noise_scale if noise_scale is None else noise_scale
+            actions, log_probs = self._sample_actions_flow_sde(
+                state_features=state_features,
+                noise_scale=resolved_noise_scale,
+                requires_grad=True,
+                return_log_prob=True,
+                task_ids=task_ids,
+            )
+            if is_first_micro_batch:
+                self.flow_sde_step.add_(1)
             actor_metrics = {
                 "flow_sde_step": float(self.flow_sde_step.item()),
                 "flow_sde_noise_level": float(self.flow_sde_noise_scheduler.current_value),
                 "flow_sde_noise_control": float(self.flow_sde_noise_scheduler.control_value),
+                "flow_sde_noise_scale": float(resolved_noise_scale),
             }
+        else:
+            actions, log_probs = self._sample_actions_flow_sde(
+                state_features=state_features,
+                noise_scale=0.0,
+                requires_grad=True,
+                return_log_prob=False,
+                task_ids=task_ids,
+            )
         _, pi0_output_cls = self._get_pi0_policy_classes()
         pi0_output = pi0_output_cls.from_model_output(
             {

@@ -166,6 +166,10 @@ sac:
   # Temperature used by the CQL logsumexp penalty
   cql_temperature: 1.0
 
+  # Optional Flow-SDE noise scale override for CQL policy action sampling.
+  # Set null to reuse the actor training noise scale.
+  cql_noise_scale: null
+
   # Whether to skip critic updates on steps that also update actor
   skip_critic_update_when_actor_update: false
 

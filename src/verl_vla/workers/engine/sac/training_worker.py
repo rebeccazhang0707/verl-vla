@@ -111,6 +111,8 @@ class SACTrainingWorker(TrainingWorker):
         self.cql_enabled = bool(self.sac_config.get("cql_enabled", False))
         self.cql_alpha = float(self.sac_config.get("cql_alpha", 1.0))
         self.cql_temperature = float(self.sac_config.get("cql_temperature", 1.0))
+        cql_noise_scale = self.sac_config.get("cql_noise_scale", None)
+        self.cql_noise_scale = None if cql_noise_scale is None else float(cql_noise_scale)
         self.skip_critic_update_when_actor_update = bool(
             self.sac_config.get("skip_critic_update_when_actor_update", False)
         )
@@ -341,6 +343,7 @@ class SACTrainingWorker(TrainingWorker):
                         s0_state_features,
                         task_ids=micro_batch.batch["info.task_ids"],
                         is_first_micro_batch=False,
+                        noise_scale=self.cql_noise_scale,
                     )
                 q_policy_0 = self.engine.module.sac_forward_critic(
                     {"action": policy_actions_0},
@@ -392,20 +395,19 @@ class SACTrainingWorker(TrainingWorker):
                 valids=micro_batch.batch["info.valids"],
             )
             if self.td3_enabled:
-                bc_loss = self.engine.module.bc_loss(
+                td3_bc_valids = micro_batch.batch["info.valids"]
+                bc_sample_loss = self.engine.module.bc_loss(
                     obs=s0,
                     tokenizer=self.tokenizer,
                     actions=a0,
-                    valids=micro_batch.batch["info.valids"],
+                    valids=td3_bc_valids,
+                    reduction="none",
                 )
-                td3_bc_weight = (
-                    valid_mean(q_values_0.abs(), micro_batch.batch["info.valids"]).detach().clamp_min(1e-6)
-                    / self.td3_bc_alpha
-                )
-                actor_loss = sac_loss + td3_bc_weight * bc_loss
+                bc_loss = (bc_sample_loss * td3_bc_valids).sum() / td3_bc_valids.sum().clamp_min(1.0)
+                actor_loss = sac_loss + self.td3_bc_alpha * bc_loss
                 actor_forward_metrics.update(
                     {
-                        "td3_bc_weight": td3_bc_weight.detach().item(),
+                        "td3_bc_weight": self.td3_bc_alpha,
                         "td3_bc_q_loss": sac_loss.detach().item(),
                         "td3_bc_bc_loss": bc_loss.detach().item(),
                     }
@@ -433,7 +435,7 @@ class SACTrainingWorker(TrainingWorker):
                 "sac/offline_replay_prefill_only": 1.0,
             }
 
-        if "empty_batch" not in data.meta_info:
+        if "empty_batch" not in data.meta_info and global_steps < self.actor_config.critic_warmup_steps:
             self._add_data_to_replay_pool(self.replay_pool, data)
 
         critic_batches, critic_replay_sample_info = self._sample_rlpd_batch(
@@ -469,7 +471,7 @@ class SACTrainingWorker(TrainingWorker):
                 logger.info(f"[{batch_idx + 1}/{len(critic_micro_batches)}] critic micro batch ")
                 micro_batch = micro_batch.to(get_device_id())
                 raw_critic_loss, q_values_0, q_values_1, critic_loss_metrics = self._forward_critic(
-                    micro_batch, resample=True
+                    micro_batch, resample=False
                 )
                 (raw_critic_loss / grad_accum_steps).backward()
                 critic_loss_list.append(float(raw_critic_loss.detach().item()))
@@ -482,9 +484,8 @@ class SACTrainingWorker(TrainingWorker):
             critic_grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.engine.module.sac_get_critic_parameters(), max_norm=self._critic_grad_clip
             )
-            if global_steps < self.actor_config.critic_warmup_steps:
-                self.critic_optimizer.step()
-                self.critic_scheduler.step()
+            self.critic_optimizer.step()
+            self.critic_scheduler.step()
 
         actor_replay_sample_info = {}
         actor_micro_batches = []
@@ -595,6 +596,7 @@ class SACTrainingWorker(TrainingWorker):
                     "sac/cql_enabled": float(self.cql_enabled),
                     "sac/cql_alpha": self.cql_alpha,
                     "sac/cql_temperature": self.cql_temperature,
+                    "sac/cql_noise_scale": -1.0 if self.cql_noise_scale is None else self.cql_noise_scale,
                 }
                 if self.cql_enabled
                 else {}

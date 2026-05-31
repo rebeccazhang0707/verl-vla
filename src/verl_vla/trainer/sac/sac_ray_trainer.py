@@ -282,7 +282,7 @@ class RobRaySACTrainer(RayPPOTrainer):
         rollout_output.batch["info.valids"] = (~rollout_output.batch["feedback.terminations"]).any(dim=-1).float()
         step_penalty = float(self.config.env.train.get("step_penalty", 0.0))
         rollout_output.batch["info.rewards"] = sparse_rewards - step_penalty * rollout_output.batch["info.valids"]
-        rollout_output.batch["info.rewards"][:, -2] = -1.0
+        # rollout_output.batch["info.rewards"][:, -2] = -1.0
 
         # mark samples in successful trajectories as positive samples
         rollout_output.batch["info.positive_sample_mask"] = (
@@ -457,6 +457,7 @@ class RobRaySACTrainer(RayPPOTrainer):
                                 )
                                 metrics.update(rollout_output.meta_info["metrics"])
                                 actor_input = self._prepare_actor_input(rollout_output)
+                                actor_input.meta_info["global_steps"] = self.global_steps
 
                         # === update policy ===
                         critic_only_update = training_step < rollout_times + critic_only_steps_after_rollout

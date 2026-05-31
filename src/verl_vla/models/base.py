@@ -110,6 +110,7 @@ class SupportSACTraining:
         state_features: Any,
         task_ids: Optional[torch.Tensor] = None,
         is_first_micro_batch: bool = False,
+        noise_scale: Optional[float] = None,
     ) -> Any:
         """Compute actions and their log probabilities from state features.
 
@@ -119,6 +120,8 @@ class SupportSACTraining:
                 behavior, such as task-specific Flow-SDE noise levels.
             is_first_micro_batch: Whether the current forward corresponds to the first
                 micro batch of the actor update step.
+            noise_scale: Optional Flow-SDE noise scale override. When unset, subclasses use
+                their default training noise scale.
 
         Returns:
             actions: torch.Tensor of shape (B, n_action_steps, action_dim), sampled actions.

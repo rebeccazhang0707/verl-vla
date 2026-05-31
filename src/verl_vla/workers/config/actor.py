@@ -42,6 +42,7 @@ class SACConfig(BaseConfig):
     cql_enabled: bool = False
     cql_alpha: float = 1.0
     cql_temperature: float = 1.0
+    cql_noise_scale: float | None = None
     skip_critic_update_when_actor_update: bool = False
     initial_alpha: float = 0.0
     critic_replay_positive_sample_ratio: float = 0.5
@@ -61,6 +62,8 @@ class SACConfig(BaseConfig):
             raise ValueError(f"cql_alpha must be non-negative, got {self.cql_alpha}")
         if self.cql_temperature <= 0:
             raise ValueError(f"cql_temperature must be positive, got {self.cql_temperature}")
+        if self.cql_noise_scale is not None and self.cql_noise_scale < 0:
+            raise ValueError(f"cql_noise_scale must be non-negative when provided, got {self.cql_noise_scale}")
 
 
 @dataclass
