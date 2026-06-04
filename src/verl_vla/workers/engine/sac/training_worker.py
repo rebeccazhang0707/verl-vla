@@ -395,15 +395,12 @@ class SACTrainingWorker(TrainingWorker):
                 valids=micro_batch.batch["info.valids"],
             )
             if self.td3_enabled:
-                td3_bc_valids = micro_batch.batch["info.valids"]
-                bc_sample_loss = self.engine.module.bc_loss(
+                bc_loss = self.engine.module.bc_loss(
                     obs=s0,
                     tokenizer=self.tokenizer,
                     actions=a0,
-                    valids=td3_bc_valids,
-                    reduction="none",
+                    valids=micro_batch.batch["info.valids"],
                 )
-                bc_loss = (bc_sample_loss * td3_bc_valids).sum() / td3_bc_valids.sum().clamp_min(1.0)
                 actor_loss = sac_loss + self.td3_bc_alpha * bc_loss
                 actor_forward_metrics.update(
                     {
@@ -435,7 +432,7 @@ class SACTrainingWorker(TrainingWorker):
                 "sac/offline_replay_prefill_only": 1.0,
             }
 
-        if "empty_batch" not in data.meta_info and global_steps < self.actor_config.critic_warmup_steps:
+        if "empty_batch" not in data.meta_info:
             self._add_data_to_replay_pool(self.replay_pool, data)
 
         critic_batches, critic_replay_sample_info = self._sample_rlpd_batch(
