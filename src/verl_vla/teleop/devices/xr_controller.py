@@ -52,14 +52,10 @@ class XRControllerDevice(DeviceBase):
     @override
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            controllers = self._latest_frame.get("controllers", {})
             return {
                 "device": self.name,
                 "frame_count": self._frame_count,
                 "timestamp": self._latest_frame.get("timestamp"),
-                "reference_space": self._latest_frame.get("reference_space"),
-                "controllers": controllers,
-                "latest_frame": self._latest_frame,
             }
 
     def latest_frame(self) -> dict[str, Any]:

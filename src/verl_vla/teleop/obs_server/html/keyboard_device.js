@@ -17,6 +17,14 @@ limitations under the License.
 class TeleopKeyboardDevice {
   constructor(socketProvider) {
     this.socketProvider = socketProvider;
+    this.controlCodes = new Set([
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowUp",
+      "PageDown",
+      "PageUp"
+    ]);
     this.handleEvent = this.handleEvent.bind(this);
   }
 
@@ -31,6 +39,9 @@ class TeleopKeyboardDevice {
   }
 
   handleEvent(event) {
+    if (this.controlCodes.has(event.code)) {
+      event.preventDefault();
+    }
     const socket = this.socketProvider();
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return;

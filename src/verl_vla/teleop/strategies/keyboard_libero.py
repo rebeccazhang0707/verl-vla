@@ -84,9 +84,9 @@ class LiberoKeyboardStrategy(InterventionStrategyBase):
         delta_pos = np.zeros(3, dtype=np.float32)
         delta_rot = np.zeros(3, dtype=np.float32)
         for key_name in pressed_keys:
-            if key_name in {"W", "S", "A", "D", "Q", "E"}:
+            if key_name in {"W", "S", "A", "D", "Q", "E", "PAGEUP", "PAGEDOWN"}:
                 delta_pos += self._key_mapping[key_name]
-            elif key_name in {"Z", "X", "T", "G", "C", "V"}:
+            elif key_name in {"Z", "X", "T", "G", "C", "V", "ARROWUP", "ARROWDOWN", "ARROWLEFT", "ARROWRIGHT"}:
                 delta_rot += self._key_mapping[key_name]
         rot_vec = Rotation.from_euler("XYZ", delta_rot).as_rotvec()
         command = np.concatenate([delta_pos, rot_vec]).astype(np.float32)
@@ -127,16 +127,22 @@ class LiberoKeyboardStrategy(InterventionStrategyBase):
 
     def _create_key_mapping(self) -> dict[str, np.ndarray]:
         return {
-            "W": np.asarray([1.0, 0.0, 0.0], dtype=np.float32) * self.cfg.pos_sensitivity,
-            "S": np.asarray([-1.0, 0.0, 0.0], dtype=np.float32) * self.cfg.pos_sensitivity,
-            "A": np.asarray([0.0, -1.0, 0.0], dtype=np.float32) * self.cfg.pos_sensitivity,
-            "D": np.asarray([0.0, 1.0, 0.0], dtype=np.float32) * self.cfg.pos_sensitivity,
+            "W": np.asarray([-1.0, 0.0, 0.0], dtype=np.float32) * self.cfg.pos_sensitivity,
+            "S": np.asarray([1.0, 0.0, 0.0], dtype=np.float32) * self.cfg.pos_sensitivity,
+            "A": np.asarray([0.0, 1.0, 0.0], dtype=np.float32) * self.cfg.pos_sensitivity,
+            "D": np.asarray([0.0, -1.0, 0.0], dtype=np.float32) * self.cfg.pos_sensitivity,
             "Q": np.asarray([0.0, 0.0, 1.0], dtype=np.float32) * self.cfg.pos_sensitivity,
             "E": np.asarray([0.0, 0.0, -1.0], dtype=np.float32) * self.cfg.pos_sensitivity,
+            "PAGEUP": np.asarray([0.0, 0.0, 1.0], dtype=np.float32) * self.cfg.pos_sensitivity,
+            "PAGEDOWN": np.asarray([0.0, 0.0, -1.0], dtype=np.float32) * self.cfg.pos_sensitivity,
             "Z": np.asarray([1.0, 0.0, 0.0], dtype=np.float32) * self.cfg.rot_sensitivity,
             "X": np.asarray([-1.0, 0.0, 0.0], dtype=np.float32) * self.cfg.rot_sensitivity,
             "T": np.asarray([0.0, 1.0, 0.0], dtype=np.float32) * self.cfg.rot_sensitivity,
             "G": np.asarray([0.0, -1.0, 0.0], dtype=np.float32) * self.cfg.rot_sensitivity,
             "C": np.asarray([0.0, 0.0, 1.0], dtype=np.float32) * self.cfg.rot_sensitivity,
             "V": np.asarray([0.0, 0.0, -1.0], dtype=np.float32) * self.cfg.rot_sensitivity,
+            "ARROWUP": np.asarray([0.0, 1.0, 0.0], dtype=np.float32) * self.cfg.rot_sensitivity,
+            "ARROWDOWN": np.asarray([0.0, -1.0, 0.0], dtype=np.float32) * self.cfg.rot_sensitivity,
+            "ARROWLEFT": np.asarray([0.0, 0.0, 1.0], dtype=np.float32) * self.cfg.rot_sensitivity,
+            "ARROWRIGHT": np.asarray([0.0, 0.0, -1.0], dtype=np.float32) * self.cfg.rot_sensitivity,
         }

@@ -100,6 +100,15 @@ train:
       pos_sensitivity: 0.5
       rot_sensitivity: 0.12
 
+    # WebXR controller relative SE(3) action mapping for LIBERO.
+    xr_controller:
+      hand: right
+      pos_sensitivity: 150.0
+      rot_sensitivity: 4.0
+      intervention_button: squeeze
+      gripper_button: trigger
+      button_threshold: 0.5
+
 disagg_sim:
 
   # Whether simulator workers run on separate nodes from training workers.

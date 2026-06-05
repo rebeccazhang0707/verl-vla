@@ -69,12 +69,12 @@ class KeyboardDevice(DeviceBase):
 
     def key_bindings(self) -> dict[str, str]:
         return {
-            "W/S": "+x / -x",
+            "W/S": "-x / +x",
             "A/D": "+y / -y",
-            "Q/E": "+z / -z",
+            "Q/E, PgUp/PgDown": "+z / -z",
             "Z/X": "+roll / -roll",
-            "T/G": "+pitch / -pitch",
-            "C/V": "+yaw / -yaw",
+            "T/G, Up/Down": "+pitch / -pitch",
+            "C/V, Left/Right": "+yaw / -yaw",
             "Space": "toggle intervention",
             "K": "toggle gripper",
             "L": "reset device",

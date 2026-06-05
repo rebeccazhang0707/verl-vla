@@ -89,23 +89,10 @@ class LiberoXRControllerStrategy(InterventionStrategyBase):
 
     @override
     def snapshot(self, device: DeviceBase) -> dict[str, Any]:
-        xr_device = cast(XRControllerDevice, device)
-        frame = xr_device.latest_frame()
-        controller = self._controller_from_frame(frame)
         return {
             "strategy": f"{self.env_type}:{self.device_type}",
             "is_intervening": self._active,
             "active": self._active,
-            "controller_hand": self.cfg.hand,
-            "intervention_button": self.cfg.intervention_button,
-            "intervention_value": self._button_value(controller, str(self.cfg.intervention_button)),
-            "gripper_button": self.cfg.gripper_button,
-            "gripper_value": self._button_value(controller, str(self.cfg.gripper_button)),
-            "position_axes": self._POSITION_AXES,
-            "position_signs": self._POSITION_SIGNS,
-            "rotation_axes": self._ROTATION_AXES,
-            "rotation_signs": self._ROTATION_SIGNS,
-            "rotation_delta_frame": self._ROTATION_DELTA_FRAME,
             "command": self._last_command.astype(float).tolist(),
         }
 
