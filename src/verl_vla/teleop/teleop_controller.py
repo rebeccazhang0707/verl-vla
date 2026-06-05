@@ -1,0 +1,170 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from typing import Any
+
+import numpy as np
+from omegaconf import DictConfig
+
+from verl_vla.teleop.config import load_teleop_config
+from verl_vla.teleop.devices import DeviceBase, KeyboardDevice, KeyboardDeviceCfg
+from verl_vla.teleop.obs_server.teleop_server import TeleopServer
+from verl_vla.teleop.strategies import InterventionStrategyBase, InterventionStrategyCfg, get_strategy
+
+
+class TeleopController:
+    def __init__(
+        self,
+        cfg: DictConfig | Any,
+        *,
+        rank: int,
+        stage_id: int,
+        env_id: int,
+        env_type: str,
+        device: str = "keyboard",
+    ):
+        self.cfg = cfg
+        self.rank = rank
+        self.stage_id = stage_id
+        self.env_id = env_id
+        self.env_type = env_type
+        self.device = device
+        self._teleop_server: TeleopServer | None = None
+        self.teleop_cfg = load_teleop_config(cfg, device=device)
+        self.input_devices: dict[str, DeviceBase] = {}
+        self.strategies: dict[str, InterventionStrategyBase] = {}
+        for device_type in self.teleop_cfg.devices:
+            input_device = self._create_input_device(device_type)
+            self.input_devices[input_device.name] = input_device
+            self.strategies[input_device.name] = self._create_strategy(input_device.name)
+        self._teleop_server = TeleopServer.from_cfg(
+            self.teleop_cfg.server,
+            rank=rank,
+            stage_id=stage_id,
+            env_id=env_id,
+            input_devices=self.input_devices,
+            latest_input_fn=self._get_teleop_info,
+        )
+
+    @classmethod
+    def create(
+        cls,
+        cfg: DictConfig | Any,
+        *,
+        rank: int,
+        stage_id: int,
+        env_id: int,
+        env_type: str,
+        device: str = "keyboard",
+    ) -> "TeleopController | None":
+        manager_cfg = cfg.get("teleop", {}) if hasattr(cfg, "get") else {}
+        if not manager_cfg or not manager_cfg.get("enable", False):
+            return None
+        configured_device = manager_cfg.get("device", device) if hasattr(manager_cfg, "get") else device
+        configured_devices = manager_cfg.get("devices", None) if hasattr(manager_cfg, "get") else None
+        if configured_devices is None:
+            configured_devices = [configured_device]
+        elif isinstance(configured_devices, str):
+            configured_devices = [configured_devices]
+        enabled_devices = [
+            item
+            for item in configured_devices
+            if item is not None and str(item).strip().lower() not in {"", "none", "null"}
+        ]
+        if not enabled_devices:
+            return None
+        return cls(cfg, rank=rank, stage_id=stage_id, env_id=env_id, env_type=env_type, device=device)
+
+    def publish_obs(
+        self,
+        *,
+        images: dict[str, np.ndarray],
+        state: Any | None = None,
+        extra: dict[str, Any] | None = None,
+        task_description: str | None = None,
+    ) -> None:
+        if self._teleop_server is None:
+            return
+        obs_extra = {"env_type": self.env_type, **(extra or {})}
+        self._teleop_server.publish_obs(
+            images=images,
+            state=state,
+            extra=obs_extra,
+            task_description=task_description,
+        )
+
+    def is_intervening(self) -> bool:
+        return any(
+            self.strategies[device_type].is_intervening(input_device)
+            for device_type, input_device in self.input_devices.items()
+        )
+
+    def apply_action(self, action: Any) -> Any:
+        overridden_action = action
+        for device_type, input_device in self.input_devices.items():
+            strategy = self.strategies[device_type]
+            if strategy.is_intervening(input_device):
+                overridden_action = strategy.apply_action(overridden_action, input_device)
+        return overridden_action
+
+    def _get_teleop_info(self) -> dict[str, Any]:
+        device_infos = []
+        active_info = {}
+        for device_type, input_device in self.input_devices.items():
+            strategy = self.strategies[device_type]
+            info = {
+                "device_type": device_type,
+                **input_device.snapshot(),
+                **strategy.snapshot(input_device),
+            }
+            device_infos.append(info)
+            if not active_info and info.get("is_intervening"):
+                active_info = info
+        if not active_info and device_infos:
+            active_info = device_infos[0]
+        return {
+            "env_id": self.env_id,
+            "port": self._teleop_server.port() if self._teleop_server is not None else None,
+            "devices": device_infos,
+            "device_types": list(self.input_devices),
+            **active_info,
+        }
+
+    def reset(self) -> None:
+        for input_device in self.input_devices.values():
+            input_device.reset()
+        for strategy in self.strategies.values():
+            strategy.reset()
+
+    def close(self) -> None:
+        if self._teleop_server is not None:
+            self._teleop_server.close()
+            self._teleop_server = None
+
+    def _create_input_device(self, device_type: str) -> DeviceBase:
+        if device_type == "keyboard":
+            return KeyboardDevice(KeyboardDeviceCfg())
+        raise NotImplementedError(f"Teleop device {device_type} is not implemented")
+
+    def _create_strategy(self, device_type: str) -> InterventionStrategyBase:
+        if device_type == "keyboard":
+            return get_strategy(
+                self.env_type,
+                device_type,
+                InterventionStrategyCfg(
+                    pos_sensitivity=self.teleop_cfg.keyboard.pos_sensitivity,
+                    rot_sensitivity=self.teleop_cfg.keyboard.rot_sensitivity,
+                ),
+            )
+        raise NotImplementedError(f"Teleop strategy for device {device_type} is not implemented")

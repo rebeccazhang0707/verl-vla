@@ -68,6 +68,38 @@ train:
       - agentview
       - robot0_eye_in_hand
 
+  # Lightweight web service for human teleoperation and observation streaming.
+  teleop:
+
+    # Start one observation web server per vectorized LIBERO environment.
+    enable: True
+
+    # Web server settings for observation streaming and browser input.
+    server:
+
+      # Bind host for browser access. Use 127.0.0.1 when tunneling from a remote machine.
+      host: "0.0.0.0"
+
+      # Port formula: base_port + rank * rank_stride + stage_id * stage_stride + env_id.
+      base_port: 18000
+      rank_stride: 10000
+      stage_stride: 1000
+
+      # JPEG quality for streamed observation images.
+      jpeg_quality: 100
+
+      # Uvicorn log level for each small obs server.
+      log_level: warning
+
+    # Human intervention input devices enabled in the browser and backend.
+    devices:
+      - keyboard
+
+    # Keyboard SE(3) relative action sensitivities for LIBERO.
+    keyboard:
+      pos_sensitivity: 0.5
+      rot_sensitivity: 0.12
+
 disagg_sim:
 
   # Whether simulator workers run on separate nodes from training workers.
