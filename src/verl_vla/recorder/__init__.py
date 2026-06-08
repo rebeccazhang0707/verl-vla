@@ -14,6 +14,27 @@
 
 """Dataset recording utilities for VERL-VLA."""
 
-from .recorder import LeRobotRecorder
+from .base import BaseRecorder
+from .config import (
+    LeRobotRecorderConfig,
+    RecorderConfig,
+    VideoRecorderConfig,
+    load_lerobot_recorder_config,
+    load_recorder_config,
+)
+from .impl.lerobot import LeRobotDatasetRecorder, LeRobotRecorder
+from .impl.video import VideoRecorder
+from .recorder import MultiRecorder
 
-__all__ = ["LeRobotRecorder"]
+__all__ = [
+    "BaseRecorder",
+    "LeRobotDatasetRecorder",
+    "LeRobotRecorder",
+    "LeRobotRecorderConfig",
+    "MultiRecorder",
+    "RecorderConfig",
+    "VideoRecorder",
+    "VideoRecorderConfig",
+    "load_lerobot_recorder_config",
+    "load_recorder_config",
+]

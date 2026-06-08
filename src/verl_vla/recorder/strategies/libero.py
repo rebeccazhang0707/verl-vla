@@ -21,7 +21,6 @@ from typing import Any
 import numpy as np
 from typing_extensions import override
 
-from verl_vla.envs.libero_env.utils import get_libero_image, get_libero_wrist_image
 from verl_vla.recorder.strategies.base import BaseLeRobotStrategy
 
 DEFAULT_LIBERO_FPS = 10
@@ -75,9 +74,9 @@ class LiberoLeRobotStrategy(BaseLeRobotStrategy):
                 "shape": (7,),
                 "names": ["action"],
             },
-            "reward": {"dtype": "float32", "shape": (1,), "names": None},
-            "done": {"dtype": "bool", "shape": (1,), "names": None},
-            "truncated": {"dtype": "bool", "shape": (1,), "names": None},
+            "next.reward": {"dtype": "float32", "shape": (1,), "names": None},
+            "next.done": {"dtype": "bool", "shape": (1,), "names": None},
+            "next.truncated": {"dtype": "bool", "shape": (1,), "names": None},
             "is_intervention": {"dtype": "bool", "shape": (1,), "names": None},
         }
         return features
@@ -86,23 +85,22 @@ class LiberoLeRobotStrategy(BaseLeRobotStrategy):
     def make_frame(
         self,
         *,
-        obs: dict[str, Any],
-        state: Any,
+        observation: dict[str, Any],
         action: Any,
         task: str,
-        reward: Any = 0.0,
-        done: Any = False,
-        truncated: Any = False,
+        next_reward: Any = 0.0,
+        next_done: Any = False,
+        next_truncated: Any = False,
         is_intervention: Any = False,
     ) -> dict[str, Any]:
         return {
-            "observation.images.image": np.ascontiguousarray(get_libero_image(obs)),
-            "observation.images.wrist_image": np.ascontiguousarray(get_libero_wrist_image(obs)),
-            "observation.state": np.asarray(state, dtype=np.float32),
+            "observation.images.image": np.ascontiguousarray(observation["observation.images.image"]),
+            "observation.images.wrist_image": np.ascontiguousarray(observation["observation.images.wrist_image"]),
+            "observation.state": np.asarray(observation["observation.state"], dtype=np.float32),
             "action": np.asarray(action, dtype=np.float32),
-            "reward": np.asarray(reward, dtype=np.float32).reshape(1),
-            "done": np.asarray(done, dtype=bool).reshape(1),
-            "truncated": np.asarray(truncated, dtype=bool).reshape(1),
+            "next.reward": np.asarray(next_reward, dtype=np.float32).reshape(1),
+            "next.done": np.asarray(next_done, dtype=bool).reshape(1),
+            "next.truncated": np.asarray(next_truncated, dtype=bool).reshape(1),
             "is_intervention": np.asarray(is_intervention, dtype=bool).reshape(1),
             "task": str(task),
         }

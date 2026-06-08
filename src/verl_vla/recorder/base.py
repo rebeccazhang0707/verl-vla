@@ -12,35 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Base strategy for converting environment steps to LeRobot frames."""
+"""Base recorder interface for rollout side effects."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 
-class BaseLeRobotStrategy(ABC):
-    """Environment-specific LeRobot schema and frame conversion."""
-
-    @property
-    @abstractmethod
-    def fps(self) -> int:
-        """Recording FPS for this environment."""
-
-    @property
-    @abstractmethod
-    def robot_type(self) -> str | None:
-        """Robot type stored in LeRobot metadata."""
+class BaseRecorder(ABC):
+    """Common interface shared by dataset and video recorders."""
 
     @abstractmethod
-    def features(self) -> dict[str, dict[str, Any]]:
-        """Return the LeRobot feature schema."""
-
-    @abstractmethod
-    def make_frame(
+    def record_once(
         self,
         *,
+        env_id: int = 0,
         observation: dict[str, Any],
         action: Any,
         task: str,
@@ -48,5 +36,21 @@ class BaseLeRobotStrategy(ABC):
         next_done: Any = False,
         next_truncated: Any = False,
         is_intervention: Any = False,
-    ) -> dict[str, Any]:
-        """Convert one environment step into one LeRobot frame."""
+    ) -> None:
+        """Record one environment step."""
+
+    @abstractmethod
+    def save_episode(self, env_id: int = 0) -> None:
+        """Flush the current episode for one environment."""
+
+    @abstractmethod
+    def clear_episode(self, env_id: int = 0) -> None:
+        """Discard buffered frames for one environment."""
+
+    def pop_completed(self) -> Path | None:
+        """Return a completed artifact root if this recorder owns one."""
+        return None
+
+    @abstractmethod
+    def finalize(self) -> None:
+        """Release recorder resources and clear temporary state."""

@@ -42,28 +42,48 @@ train:
     # Output directory for saved rollout videos.
     video_base_dir: /tmp/videos
 
-  # Optional LeRobot recorder for simulator rollouts.
-  dataset_recorder:
+  # Optional recorders for simulator rollouts.
+  recorder:
 
-    # If True, create one LeRobotRecorder per environment worker.
-    enable: False
+    # If True, create the selected recorder implementations per environment worker.
+    enable: True
 
-    # Base local root used for per-env recorder directories.
-    root: /tmp/verl_vla_lerobot_records
+    # Recorder implementations to enable. Available: lerobot, video.
+    recorders:
+      - lerobot
+      - video
 
-    # Base repo id. Rank and stage id are appended per recorder.
-    repo_id: local/verl_vla_libero
+    # LeRobot dataset recorder settings.
+    lerobot:
 
-    # Whether LeRobot should encode image observations as videos.
-    use_videos: True
+      # Base local root used for per-env recorder directories.
+      root: /tmp/verl_vla_lerobot_records
 
-    # LeRobot image writer settings.
-    image_writer_processes: 0
-    image_writer_threads: 0
-    batch_encoding_size: 1
-    vcodec: libsvtav1
-    # Keep each episode in a separate video shard to avoid PyAV concat time_base issues.
-    video_files_size_in_mb: 1e-6
+      # Base repo id. Rank and stage id are appended per recorder.
+      repo_id: local/verl_vla_libero
+
+      # Whether LeRobot should encode image observations as videos.
+      use_videos: True
+
+      # LeRobot image writer settings.
+      image_writer_processes: 0
+      image_writer_threads: 0
+      batch_encoding_size: 1
+      vcodec: libsvtav1
+      # Keep each episode in a separate video shard to avoid PyAV concat time_base issues.
+      video_files_size_in_mb: 1e-6
+
+    # Visualization video recorder settings.
+    video:
+
+      # Output root. Videos are saved under rank/stage/env subdirectories.
+      root: /tmp/verl_vla_recorder_videos
+
+      # Frames per second for saved visualization videos.
+      fps: 30
+
+      # Font size for metadata text under visualization videos.
+      font_size: 14
 
   # Number of simulator environments hosted by each env worker.
   num_envs: 16
