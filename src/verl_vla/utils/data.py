@@ -158,11 +158,14 @@ def add_transition_prefixes(data: DataProto) -> DataProto:
         return data
 
     num_steps = batch[step_key].shape[1]
-    if num_steps <= 1:
+    if num_steps < 1:
         return data
 
-    def slice_steps(x, start: int, end: int | None):
-        return x[:, slice(start, end), ...]
+    def next_steps(x):
+        last_step = x[:, -1:, ...]
+        if isinstance(x, torch.Tensor):
+            return torch.cat([x[:, 1:, ...], last_step], dim=1)
+        return np.concatenate([x[:, 1:, ...], last_step], axis=1)
 
     obs_prefix = f"{OBS_KEY}."
     action_prefix = f"{ACTION_KEY}."
@@ -172,20 +175,11 @@ def add_transition_prefixes(data: DataProto) -> DataProto:
     ]
 
     for key in keys:
-        batch[f"t0.{key}"] = slice_steps(batch[key], 0, -1)
-        batch[f"t1.{key}"] = slice_steps(batch[key], 1, None)
+        batch[f"t0.{key}"] = batch[key]
+        batch[f"t1.{key}"] = next_steps(batch[key])
 
     for key in non_tensor_keys:
-        non_tensor_batch[f"t0.{key}"] = slice_steps(non_tensor_batch[key], 0, -1)
-        non_tensor_batch[f"t1.{key}"] = slice_steps(non_tensor_batch[key], 1, None)
-
-    batch_size = batch[step_key].shape[0]
-    for key, tensor in list(batch.items()):
-        if tensor.ndim >= 2 and tensor.shape[0] == batch_size and tensor.shape[1] == num_steps:
-            batch[key] = slice_steps(tensor, 0, -1)
-
-    for key, array in list(non_tensor_batch.items()):
-        if array.ndim >= 2 and array.shape[0] == batch_size and array.shape[1] == num_steps:
-            non_tensor_batch[key] = slice_steps(array, 0, -1)
+        non_tensor_batch[f"t0.{key}"] = non_tensor_batch[key]
+        non_tensor_batch[f"t1.{key}"] = next_steps(non_tensor_batch[key])
 
     return data

@@ -37,19 +37,172 @@ from verl_vla.utils.rlpd import (
 )
 
 
-def compute_avg_positive_trajectory_length(batch: DataProto) -> float:
-    dones = batch.batch["info.dones"].bool()  # (B, T)
-    positive_mask = batch.batch["info.positive_sample_mask"]  # (B, T)
-    positive_traj = positive_mask.any(dim=1)  # (B,)
+def _reduce_time_tensor(value: torch.Tensor, *, reduction: str) -> torch.Tensor:
+    """Reduce chunk/substep dimensions while preserving batch and rollout time."""
+    if value.ndim <= 2:
+        return value
 
-    if positive_traj.sum() == 0:
-        return 0.0
+    while value.ndim > 2:
+        if reduction == "any":
+            value = value.any(dim=-1)
+        elif reduction == "sum":
+            value = value.sum(dim=-1)
+        else:
+            raise ValueError(f"Unsupported reduction: {reduction}")
+    return value
 
-    B, T = dones.shape
-    done_idx = torch.argmax(dones.int(), dim=1)  # (B,)
-    traj_lens = done_idx + 1
 
-    return traj_lens[positive_traj].float().mean().item()
+def _trajectory_masks(done_steps: torch.Tensor, reward_steps: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, dict]:
+    """Build masks for rows that may contain zero, one, or many completed episodes."""
+    valid_mask = torch.zeros_like(done_steps, dtype=torch.bool)
+    positive_mask = torch.zeros_like(done_steps, dtype=torch.bool)
+    completed_returns = []
+    positive_lengths = []
+    success_count = 0
+
+    batch_size, _num_steps = done_steps.shape
+    for batch_idx in range(batch_size):
+        start_idx = 0
+        done_indices = torch.nonzero(done_steps[batch_idx], as_tuple=False).flatten().tolist()
+        for done_idx in done_indices:
+            if done_idx < start_idx:
+                continue
+
+            segment = slice(start_idx, done_idx + 1)
+            segment_return = reward_steps[batch_idx, segment].sum()
+            valid_mask[batch_idx, segment] = True
+            completed_returns.append(segment_return)
+
+            if segment_return > 0:
+                positive_mask[batch_idx, segment] = True
+                positive_lengths.append(done_idx - start_idx + 1)
+                success_count += 1
+
+            start_idx = done_idx + 1
+
+    trajectory_count = len(completed_returns)
+    failed_count = trajectory_count - success_count
+    avg_reward = torch.stack(completed_returns).mean(dtype=torch.float32).item() if completed_returns else 0.0
+    avg_positive_length = float(np.mean(positive_lengths)) if positive_lengths else 0.0
+
+    return (
+        valid_mask,
+        positive_mask,
+        {
+            "data/trajectory_count": trajectory_count,
+            "data/success_trajectory_count": success_count,
+            "data/failed_trajectory_count": failed_count,
+            "data/trajectory_success_rate": success_count / trajectory_count if trajectory_count > 0 else 0.0,
+            "data/trajectory_avg_reward": avg_reward,
+            "data/avg_positive_trajectory_length": avg_positive_length,
+        },
+    )
+
+
+def trajectory_success_stats(next_done: torch.Tensor, next_reward: torch.Tensor) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-row success flags and average positive trajectory lengths."""
+    done_steps = _reduce_time_tensor(next_done.bool(), reduction="any")
+    reward_steps = _reduce_time_tensor(next_reward.float(), reduction="sum")
+    success_flags = []
+    positive_lengths = []
+
+    for batch_idx in range(done_steps.shape[0]):
+        start_idx = 0
+        row_success = False
+        row_positive_lengths = []
+        done_indices = torch.nonzero(done_steps[batch_idx], as_tuple=False).flatten().tolist()
+        for done_idx in done_indices:
+            segment = slice(start_idx, done_idx + 1)
+            if reward_steps[batch_idx, segment].sum() > 0:
+                row_success = True
+                row_positive_lengths.append(done_idx - start_idx + 1)
+            start_idx = done_idx + 1
+        success_flags.append(row_success)
+        positive_lengths.append(float(np.mean(row_positive_lengths)) if row_positive_lengths else 0.0)
+
+    return np.asarray(success_flags, dtype=bool), np.asarray(positive_lengths, dtype=np.float32)
+
+
+def trajectory_row_stats(next_done: torch.Tensor, next_reward: torch.Tensor) -> dict[str, np.ndarray]:
+    """Return completed trajectory counts for each rollout row."""
+    done_steps = _reduce_time_tensor(next_done.bool(), reduction="any")
+    reward_steps = _reduce_time_tensor(next_reward.float(), reduction="sum")
+    trajectory_counts = []
+    success_counts = []
+    positive_length_sums = []
+    positive_length_counts = []
+
+    for batch_idx in range(done_steps.shape[0]):
+        start_idx = 0
+        row_trajectory_count = 0
+        row_success_count = 0
+        row_positive_length_sum = 0.0
+        row_positive_length_count = 0
+        done_indices = torch.nonzero(done_steps[batch_idx], as_tuple=False).flatten().tolist()
+        for done_idx in done_indices:
+            segment = slice(start_idx, done_idx + 1)
+            row_trajectory_count += 1
+            if reward_steps[batch_idx, segment].sum() > 0:
+                row_success_count += 1
+                row_positive_length_sum += done_idx - start_idx + 1
+                row_positive_length_count += 1
+            start_idx = done_idx + 1
+
+        trajectory_counts.append(row_trajectory_count)
+        success_counts.append(row_success_count)
+        positive_length_sums.append(row_positive_length_sum)
+        positive_length_counts.append(row_positive_length_count)
+
+    trajectory_counts = np.asarray(trajectory_counts, dtype=np.int64)
+    success_counts = np.asarray(success_counts, dtype=np.int64)
+    return {
+        "trajectory_count": trajectory_counts,
+        "success_trajectory_count": success_counts,
+        "failed_trajectory_count": trajectory_counts - success_counts,
+        "positive_length_sum": np.asarray(positive_length_sums, dtype=np.float32),
+        "positive_length_count": np.asarray(positive_length_counts, dtype=np.int64),
+    }
+
+
+def prepare_sac_actor_input(
+    rollout_output: DataProto,
+    *,
+    config,
+    global_steps: int,
+) -> DataProto:
+    """Prepare env-loop output for SAC updates."""
+    action_steps = rollout_output.batch["action.action"].shape[1]
+    done_steps = _reduce_time_tensor(rollout_output.batch["next.done"].bool(), reduction="any")
+    reward_steps = _reduce_time_tensor(rollout_output.batch["next.reward"].float(), reduction="sum")
+
+    if done_steps.shape[1] != action_steps:
+        raise ValueError(f"done steps {done_steps.shape} do not match action steps {action_steps}.")
+    if reward_steps.shape[1] != action_steps:
+        raise ValueError(f"reward steps {reward_steps.shape} do not match action steps {action_steps}.")
+
+    valid_mask, positive_mask, metrics = _trajectory_masks(done_steps, reward_steps)
+    step_penalty = float(config.env.train.get("step_penalty", 0.0))
+
+    rollout_output.batch["info.dones"] = done_steps.float()
+    rollout_output.batch["info.valids"] = valid_mask.float()
+    rollout_output.batch["info.rewards"] = (reward_steps - step_penalty) * valid_mask.float()
+    rollout_output.batch["info.positive_sample_mask"] = positive_mask.float()
+
+    task_ids = rollout_output.meta_info["task_ids"]
+    if config.env.train.get("single_env_rollout", False):
+        task_ids = task_ids[:1]
+    rollout_output.batch["info.task_ids"] = torch.as_tensor(
+        task_ids,
+        dtype=torch.long,
+        device=rollout_output.batch["action.action"].device,
+    )
+
+    rollout_output.meta_info["global_token_num"] = [0]
+    rollout_output.meta_info["global_steps"] = global_steps
+    rollout_output.meta_info.update(metrics)
+
+    rollout_output = add_transition_prefixes(rollout_output)
+    return flatten_trajectories(rollout_output)
 
 
 def compute_per_task_trajectory_metrics(rollout_batch: DataProto, metric_prefix: str) -> dict[str, float]:
@@ -57,13 +210,11 @@ def compute_per_task_trajectory_metrics(rollout_batch: DataProto, metric_prefix:
     if task_ids is None:
         return {}
 
-    complete_any = rollout_batch.batch["next.done"].any(dim=-1)  # (B, T)
-    success_np = complete_any.any(dim=-1).detach().float().cpu().numpy()  # (B,)
-    task_ids = np.asarray(task_ids)[: success_np.shape[0]]
-
-    dones = complete_any.detach().cpu()
-    done_idx = torch.argmax(dones.int(), dim=1)
-    traj_lens = (done_idx + 1).float().numpy()
+    row_stats = trajectory_row_stats(
+        rollout_batch.batch["next.done"],
+        rollout_batch.batch["next.reward"],
+    )
+    task_ids = np.asarray(task_ids)[: row_stats["trajectory_count"].shape[0]]
 
     metrics = {}
     for task_id in np.unique(task_ids):
@@ -72,12 +223,20 @@ def compute_per_task_trajectory_metrics(rollout_batch: DataProto, metric_prefix:
             continue
 
         task_key = int(task_id)
-        task_success = success_np[task_mask]
-        metrics[f"{metric_prefix}/per_task_success_rate/task_{task_key}"] = float(task_success.mean())
+        trajectory_count = int(row_stats["trajectory_count"][task_mask].sum())
+        success_count = int(row_stats["success_trajectory_count"][task_mask].sum())
+        failed_count = int(row_stats["failed_trajectory_count"][task_mask].sum())
+        positive_length_count = int(row_stats["positive_length_count"][task_mask].sum())
+        positive_length_sum = float(row_stats["positive_length_sum"][task_mask].sum())
 
-        positive_lens = traj_lens[task_mask][task_success.astype(bool)]
+        metrics[f"{metric_prefix}/per_task_trajectory_count/task_{task_key}"] = trajectory_count
+        metrics[f"{metric_prefix}/per_task_success_trajectory_count/task_{task_key}"] = success_count
+        metrics[f"{metric_prefix}/per_task_failed_trajectory_count/task_{task_key}"] = failed_count
+        metrics[f"{metric_prefix}/per_task_success_rate/task_{task_key}"] = (
+            success_count / trajectory_count if trajectory_count > 0 else 0.0
+        )
         metrics[f"{metric_prefix}/per_task_avg_positive_trajectory_length/task_{task_key}"] = (
-            float(positive_lens.mean()) if len(positive_lens) > 0 else 0.0
+            positive_length_sum / positive_length_count if positive_length_count > 0 else 0.0
         )
 
     return metrics
@@ -271,48 +430,11 @@ class RobRaySACTrainer(RayPPOTrainer):
         self.actor_rollout_wg.add_offline_replay_data(prefill_batch)
 
     def _prepare_actor_input(self, rollout_output: Optional[DataProto]) -> DataProto:
-        # dones
-        complete_any = rollout_output.batch["next.done"].any(dim=-1)  # (B, T)
-        dones_step = complete_any.clone()
-        dones_step[:, -2] = True
-        rollout_output.batch["info.dones"] = dones_step.float()
-
-        # reward (sparse reward with step penalty)
-        sparse_rewards = complete_any.float()
-        rollout_output.batch["info.valids"] = (~rollout_output.batch["next.done"]).any(dim=-1).float()
-        step_penalty = float(self.config.env.train.get("step_penalty", 0.0))
-        rollout_output.batch["info.rewards"] = sparse_rewards - step_penalty * rollout_output.batch["info.valids"]
-        # rollout_output.batch["info.rewards"][:, -2] = -1.0
-
-        # mark samples in successful trajectories as positive samples
-        rollout_output.batch["info.positive_sample_mask"] = (
-            sparse_rewards.any(dim=-1)
-            .unsqueeze(-1)
-            .repeat_interleave(rollout_output.batch["action.action"].shape[1], dim=-1)
+        return prepare_sac_actor_input(
+            rollout_output,
+            config=self.config,
+            global_steps=self.global_steps,
         )
-
-        # task id
-        task_ids = rollout_output.meta_info["task_ids"]
-        if self.config.env.train.get("single_env_rollout", False):
-            task_ids = task_ids[:1]
-        rollout_output.batch["info.task_ids"] = torch.as_tensor(
-            task_ids,
-            dtype=torch.long,
-            device=rollout_output.batch["action.action"].device,
-        )
-
-        rollout_output.meta_info["global_token_num"] = [0]
-        rollout_output.meta_info["data/trajectory_avg_reward"] = (
-            sparse_rewards.any(dim=-1).mean(dtype=torch.float32).item()
-        )
-        rollout_output.meta_info["data/avg_positive_trajectory_length"] = compute_avg_positive_trajectory_length(
-            rollout_output
-        )
-
-        rollout_output = add_transition_prefixes(rollout_output)
-        rollout_output = flatten_trajectories(rollout_output)
-
-        return rollout_output
 
     @staticmethod
     def _pad_validation_batch(batch: DataProto, target_batch_size: int) -> DataProto:
@@ -543,10 +665,9 @@ class RobRaySACTrainer(RayPPOTrainer):
                     )
                     metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
                     if actor_input is not None:
-                        metrics["data/trajectory_avg_reward"] = actor_input.meta_info["data/trajectory_avg_reward"]
-                        metrics["data/avg_positive_trajectory_length"] = actor_input.meta_info[
-                            "data/avg_positive_trajectory_length"
-                        ]
+                        metrics.update(
+                            {key: value for key, value in actor_input.meta_info.items() if key.startswith("data/")}
+                        )
                     logger.log(data=metrics, step=self.global_steps)
 
                     progress_bar.update(1)
@@ -594,19 +715,28 @@ class RobRaySACTrainer(RayPPOTrainer):
                 per_task_metric_lists.setdefault(key, []).append(value)
 
             actor_input = self._prepare_actor_input(valid_rollout_output)
+            actor_metrics = {key: value for key, value in actor_input.meta_info.items() if key.startswith("data/")}
 
             metric_list.append(
                 {
-                    "val/avg_reward": actor_input.meta_info["data/trajectory_avg_reward"],
-                    "val/avg_positive_trajectory_length": actor_input.meta_info["data/avg_positive_trajectory_length"],
+                    "val/avg_reward": actor_metrics["data/trajectory_avg_reward"],
+                    "val/avg_positive_trajectory_length": actor_metrics["data/avg_positive_trajectory_length"],
+                    "val/trajectory_count": actor_metrics["data/trajectory_count"],
+                    "val/success_trajectory_count": actor_metrics["data/success_trajectory_count"],
+                    "val/failed_trajectory_count": actor_metrics["data/failed_trajectory_count"],
+                    "val/trajectory_success_rate": actor_metrics["data/trajectory_success_rate"],
                 }
             )
 
         metrics = {}
         if metric_list:
-            metrics["val/avg_reward"] = np.mean([m["val/avg_reward"] for m in metric_list])
-            metrics["val/avg_positive_trajectory_length"] = np.mean(
-                [m["val/avg_positive_trajectory_length"] for m in metric_list]
+            count_keys = {"val/trajectory_count", "val/success_trajectory_count", "val/failed_trajectory_count"}
+            for key in metric_list[0]:
+                values = [m[key] for m in metric_list]
+                metrics[key] = float(np.sum(values)) if key in count_keys else float(np.mean(values))
+            trajectory_count = metrics["val/trajectory_count"]
+            metrics["val/trajectory_success_rate"] = (
+                metrics["val/success_trajectory_count"] / trajectory_count if trajectory_count > 0 else 0.0
             )
         for key, values in per_task_metric_lists.items():
             metrics[key] = float(np.mean(values))

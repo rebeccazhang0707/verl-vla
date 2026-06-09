@@ -33,7 +33,7 @@ from verl.utils.debug import marked_timer
 from verl.utils.metric import reduce_metrics
 from verl.utils.tracking import Tracking
 
-from verl_vla.utils.data import add_transition_prefixes, flatten_trajectories
+from verl_vla.trainer.sac.sac_ray_trainer import prepare_sac_actor_input, trajectory_row_stats
 
 logger = logging.getLogger(__name__)
 
@@ -56,32 +56,16 @@ def update_actor_task(actor_wg, batch):
     return actor_output
 
 
-def compute_avg_positive_trajectory_length(batch: DataProto) -> float:
-    dones = batch.batch["info.dones"].bool()  # (B, T)
-    positive_mask = batch.batch["info.positive_sample_mask"]  # (B, T)
-    positive_traj = positive_mask.any(dim=1)  # (B,)
-
-    if positive_traj.sum() == 0:
-        return 0.0
-
-    B, T = dones.shape
-    done_idx = torch.argmax(dones.int(), dim=1)  # (B,)
-    traj_lens = done_idx + 1
-
-    return traj_lens[positive_traj].float().mean().item()
-
-
 def compute_per_task_trajectory_metrics(rollout_batch: DataProto, metric_prefix: str) -> dict[str, float]:
     task_ids = rollout_batch.meta_info.get("task_ids")
     if task_ids is None:
         return {}
 
-    complete_any = rollout_batch.batch["next.done"].any(dim=-1)  # (B, T)
-    success_np = complete_any.any(dim=-1).detach().float().cpu().numpy()  # (B,)
-
-    dones = complete_any.detach().cpu()
-    done_idx = torch.argmax(dones.int(), dim=1)
-    traj_lens = (done_idx + 1).float().numpy()
+    row_stats = trajectory_row_stats(
+        rollout_batch.batch["next.done"],
+        rollout_batch.batch["next.reward"],
+    )
+    task_ids = np.asarray(task_ids)[: row_stats["trajectory_count"].shape[0]]
 
     metrics = {}
     for task_id in np.unique(task_ids):
@@ -90,12 +74,20 @@ def compute_per_task_trajectory_metrics(rollout_batch: DataProto, metric_prefix:
             continue
 
         task_key = int(task_id)
-        task_success = success_np[task_mask]
-        metrics[f"{metric_prefix}/per_task_success_rate/task_{task_key}"] = float(task_success.mean())
+        trajectory_count = int(row_stats["trajectory_count"][task_mask].sum())
+        success_count = int(row_stats["success_trajectory_count"][task_mask].sum())
+        failed_count = int(row_stats["failed_trajectory_count"][task_mask].sum())
+        positive_length_count = int(row_stats["positive_length_count"][task_mask].sum())
+        positive_length_sum = float(row_stats["positive_length_sum"][task_mask].sum())
 
-        positive_lens = traj_lens[task_mask][task_success.astype(bool)]
+        metrics[f"{metric_prefix}/per_task_trajectory_count/task_{task_key}"] = trajectory_count
+        metrics[f"{metric_prefix}/per_task_success_trajectory_count/task_{task_key}"] = success_count
+        metrics[f"{metric_prefix}/per_task_failed_trajectory_count/task_{task_key}"] = failed_count
+        metrics[f"{metric_prefix}/per_task_success_rate/task_{task_key}"] = (
+            success_count / trajectory_count if trajectory_count > 0 else 0.0
+        )
         metrics[f"{metric_prefix}/per_task_avg_positive_trajectory_length/task_{task_key}"] = (
-            float(positive_lens.mean()) if len(positive_lens) > 0 else 0.0
+            positive_length_sum / positive_length_count if positive_length_count > 0 else 0.0
         )
 
     return metrics
@@ -299,48 +291,11 @@ class RobRaySACSeparateTrainInference(RayPPOTrainer):
         return rollout_batch
 
     def _prepare_actor_input(self, rollout_output: Optional[DataProto]) -> DataProto:
-        # dones
-        complete_any = rollout_output.batch["next.done"].any(dim=-1)  # (B, T)
-        dones_step = complete_any.clone()
-        dones_step[:, -2] = True
-        rollout_output.batch["info.dones"] = dones_step.float()
-
-        # reward (sparse reward with step penalty)
-        sparse_rewards = complete_any.float()
-        rollout_output.batch["info.valids"] = (~rollout_output.batch["next.done"]).any(dim=-1).float()
-        step_penalty = float(self.config.env.train.get("step_penalty", 0.0))
-        rollout_output.batch["info.rewards"] = sparse_rewards - step_penalty * rollout_output.batch["info.valids"]
-        rollout_output.batch["info.rewards"][:, -2] = -1.0
-
-        # mark samples in successful trajectories as positive samples
-        rollout_output.batch["info.positive_sample_mask"] = (
-            sparse_rewards.any(dim=-1)
-            .unsqueeze(-1)
-            .repeat_interleave(rollout_output.batch["action.action"].shape[1], dim=-1)
+        return prepare_sac_actor_input(
+            rollout_output,
+            config=self.config,
+            global_steps=self.global_steps,
         )
-
-        # task id
-        task_ids = rollout_output.meta_info["task_ids"]
-        if self.config.env.train.get("single_env_rollout", False):
-            task_ids = task_ids[:1]
-        rollout_output.batch["info.task_ids"] = torch.as_tensor(
-            task_ids,
-            dtype=torch.long,
-            device=rollout_output.batch["action.action"].device,
-        )
-
-        rollout_output.meta_info["global_token_num"] = [0]
-        rollout_output.meta_info["data/trajectory_avg_reward"] = (
-            sparse_rewards.any(dim=-1).mean(dtype=torch.float32).item()
-        )
-        rollout_output.meta_info["data/avg_positive_trajectory_length"] = compute_avg_positive_trajectory_length(
-            rollout_output
-        )
-
-        rollout_output = add_transition_prefixes(rollout_output)
-        rollout_output = flatten_trajectories(rollout_output)
-
-        return rollout_output
 
     @staticmethod
     def _pad_validation_batch(batch: DataProto, target_batch_size: int) -> DataProto:
@@ -593,10 +548,9 @@ class RobRaySACSeparateTrainInference(RayPPOTrainer):
                     )
                     metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
                     if actor_input is not None:
-                        metrics["data/trajectory_avg_reward"] = actor_input.meta_info["data/trajectory_avg_reward"]
-                        metrics["data/avg_positive_trajectory_length"] = actor_input.meta_info[
-                            "data/avg_positive_trajectory_length"
-                        ]
+                        metrics.update(
+                            {key: value for key, value in actor_input.meta_info.items() if key.startswith("data/")}
+                        )
                     logger.log(data=metrics, step=self.global_steps)
 
                     progress_bar.update(1)
@@ -649,19 +603,28 @@ class RobRaySACSeparateTrainInference(RayPPOTrainer):
                 per_task_metric_lists.setdefault(key, []).append(value)
 
             actor_input = self._prepare_actor_input(valid_rollout_output)
+            actor_metrics = {key: value for key, value in actor_input.meta_info.items() if key.startswith("data/")}
 
             metric_list.append(
                 {
-                    "val/avg_reward": actor_input.meta_info["data/trajectory_avg_reward"],
-                    "val/avg_positive_trajectory_length": actor_input.meta_info["data/avg_positive_trajectory_length"],
+                    "val/avg_reward": actor_metrics["data/trajectory_avg_reward"],
+                    "val/avg_positive_trajectory_length": actor_metrics["data/avg_positive_trajectory_length"],
+                    "val/trajectory_count": actor_metrics["data/trajectory_count"],
+                    "val/success_trajectory_count": actor_metrics["data/success_trajectory_count"],
+                    "val/failed_trajectory_count": actor_metrics["data/failed_trajectory_count"],
+                    "val/trajectory_success_rate": actor_metrics["data/trajectory_success_rate"],
                 }
             )
 
         metrics = {}
         if metric_list:
-            metrics["val/avg_reward"] = np.mean([m["val/avg_reward"] for m in metric_list])
-            metrics["val/avg_positive_trajectory_length"] = np.mean(
-                [m["val/avg_positive_trajectory_length"] for m in metric_list]
+            count_keys = {"val/trajectory_count", "val/success_trajectory_count", "val/failed_trajectory_count"}
+            for key in metric_list[0]:
+                values = [m[key] for m in metric_list]
+                metrics[key] = float(np.sum(values)) if key in count_keys else float(np.mean(values))
+            trajectory_count = metrics["val/trajectory_count"]
+            metrics["val/trajectory_success_rate"] = (
+                metrics["val/success_trajectory_count"] / trajectory_count if trajectory_count > 0 else 0.0
             )
         for key, values in per_task_metric_lists.items():
             metrics[key] = float(np.mean(values))
