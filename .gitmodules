@@ -1,0 +1,4 @@
+[submodule "_isaaclab_arena"]
+	path = _isaaclab_arena
+	url = git@github.com:rebeccazhang0707/IsaacLab-Arena.git
+	branch = reb/arena-verl

@@ -15,6 +15,8 @@
 
 """Utility helpers to register custom VLA models with Hugging Face Auto classes."""
 
+import logging
+
 from transformers import AutoConfig, AutoImageProcessor, AutoProcessor
 from verl.utils.transformers_compat import get_auto_model_for_vision2seq
 
@@ -23,9 +25,12 @@ from .openvla_oft.modeling_prismatic import OpenVLAForActionPrediction
 from .openvla_oft.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 from .pi0_torch import PI0ForActionPrediction, PI0TorchConfig
 
+logger = logging.getLogger(__name__)
+
 _REGISTERED_MODELS = {
     "openvla_oft": False,
     "pi0_torch": False,
+    "gr00t": False,
 }
 AutoModelForVision2Seq = get_auto_model_for_vision2seq()
 
@@ -54,7 +59,28 @@ def register_pi0_torch_model() -> None:
     _REGISTERED_MODELS["pi0_torch"] = True
 
 
+def register_gr00t_model() -> None:
+    """Register the GR00T N1.6 SAC model — **guarded**.
+
+    The gr00t dependency lives only in the training Docker image. The top-level
+    ``from gr00t... import Gr00tN1d6`` in ``modeling_gr00t_sac`` raises
+    ``ImportError`` wherever gr00t is absent; we swallow it so the pi0 / openvla
+    registrations above are never affected.
+    """
+    if _REGISTERED_MODELS["gr00t"]:
+        return
+
+    try:
+        from .gr00t.modeling_gr00t_sac import register_gr00t_sac
+
+        register_gr00t_sac()
+        _REGISTERED_MODELS["gr00t"] = True
+    except ImportError as e:
+        logger.warning("gr00t SAC not registered (deps absent): %s", e)
+
+
 def register_vla_models() -> None:
     """Register all custom VLA models with Hugging Face."""
     register_openvla_oft()
     register_pi0_torch_model()
+    register_gr00t_model()

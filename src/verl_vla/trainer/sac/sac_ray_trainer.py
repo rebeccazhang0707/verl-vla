@@ -34,6 +34,25 @@ from verl_vla.utils.data import add_transition_prefixes, flatten_trajectories
 from verl_vla.utils.rlpd import iter_rlpd_replay_prefill_batches
 
 
+def infer_num_subtasks(graded_rews: torch.Tensor, max_subtasks: int = 16) -> int:
+    """Infer the SEQUENTIAL subtask count N from a graded-progress tensor.
+
+    The graded subtask reward is ``completed / total`` so every value is an exact
+    fraction ``k / N``. N is the smallest denominator that makes every observed
+    *partial* level (strictly between 0 and 1) integral when multiplied by it.
+    Returns 1 when there is no partial progress (e.g. a plain 0/1 success reward),
+    so callers degrade gracefully to a single composite metric.
+    """
+    levels = torch.unique(graded_rews.reshape(-1))
+    levels = levels[(levels > 1e-6) & (levels < 1.0 - 1e-6)].tolist()
+    if not levels:
+        return 1
+    for n in range(2, max_subtasks + 1):
+        if all(abs(v * n - round(v * n)) < 1e-3 for v in levels):
+            return n
+    return 1
+
+
 def compute_avg_positive_trajectory_length(batch: DataProto) -> float:
     dones = batch.batch["info.dones"].bool()  # (B, T)
     positive_mask = batch.batch["info.positive_sample_mask"]  # (B, T)
@@ -263,18 +282,61 @@ class RobRaySACTrainer(RayPPOTrainer):
         self.actor_rollout_wg.add_offline_replay_data(prefill_batch)
 
     def _prepare_actor_input(self, rollout_output: Optional[DataProto]) -> DataProto:
-        # dones
-        complete_any = rollout_output.batch["feedback.terminations"].any(dim=-1)  # (B, T)
-        dones_step = complete_any.clone()
-        dones_step[:, -2] = True
-        rollout_output.batch["info.dones"] = dones_step.float()
-
-        # reward (sparse reward with step penalty)
+        # dones / reward
+        complete_any = rollout_output.batch["feedback.terminations"].any(dim=-1)  # (B, T), latched success
         sparse_rewards = complete_any.float()
-        rollout_output.batch["info.valids"] = (~rollout_output.batch["feedback.terminations"]).any(dim=-1).float()
         step_penalty = float(self.config.env.train.get("step_penalty", 0.0))
-        rollout_output.batch["info.rewards"] = sparse_rewards - step_penalty * rollout_output.batch["info.valids"]
-        rollout_output.batch["info.rewards"][:, -2] = -1.0
+        dense = bool(self.config.env.train.get("dense_success_reward", False))
+        subtask = (
+            bool(self.config.env.train.get("subtask_reward", False))
+            and "feedback.rewards" in rollout_output.batch
+        )
+
+        if subtask:
+            # Graded subtask reward for the long-horizon SEQUENTIAL task. `feedback.rewards`
+            # (B, T, chunk) carries the latched per-substep progress level (0/0.5/1.0 = fraction
+            # of subtasks done); use the chunk-end level as the per-chunk-step reward, dense (all
+            # steps valid). `feedback.terminations` is the COMPOSITE success (both subtasks; arena
+            # chunk_step derives it from reward>=1.0), so done/positive/success stay tied to full
+            # success. The -1 timeout applies only to never-composite trajectories.
+            graded = rollout_output.batch["feedback.rewards"][..., -1].float()  # (B, T) chunk-end level
+            ever_success = complete_any.any(dim=-1)  # (B,) reached composite
+            valids = torch.ones_like(complete_any, dtype=torch.float32)
+            rewards = graded - step_penalty * valids
+            failed = ~ever_success
+            rewards[:, -2] = torch.where(failed, torch.full_like(rewards[:, -2], -1.0), rewards[:, -2])
+            dones_step = complete_any.clone()
+            dones_step[:, -2] = dones_step[:, -2] | failed
+            rollout_output.batch["info.dones"] = dones_step.float()
+            rollout_output.batch["info.valids"] = valids
+            rollout_output.batch["info.rewards"] = rewards
+        elif dense:
+            # Dense success reward: keep post-success steps VALID so the latched +1 (task stays
+            # solved → reward>0 every step) enters the pool for all of them (many +1 anchors), and
+            # apply the -1 timeout penalty ONLY to trajectories that never succeeded (removes the
+            # contradictory -1 on success-path states). Mitigates the Q~=0 fixed point on the
+            # near-solved task where the default one-+1-per-success signal is too sparse.
+            ever_success = complete_any.any(dim=-1)  # (B,)
+            valids = torch.ones_like(complete_any, dtype=torch.float32)
+            rewards = sparse_rewards - step_penalty * valids
+            failed = ~ever_success
+            rewards[:, -2] = torch.where(failed, torch.full_like(rewards[:, -2], -1.0), rewards[:, -2])
+            dones_step = complete_any.clone()
+            dones_step[:, -2] = dones_step[:, -2] | failed
+            rollout_output.batch["info.dones"] = dones_step.float()
+            rollout_output.batch["info.valids"] = valids
+            rollout_output.batch["info.rewards"] = rewards
+        else:
+            dones_step = complete_any.clone()
+            dones_step[:, -2] = True
+            rollout_output.batch["info.dones"] = dones_step.float()
+            rollout_output.batch["info.valids"] = (
+                ~rollout_output.batch["feedback.terminations"]
+            ).any(dim=-1).float()
+            rollout_output.batch["info.rewards"] = (
+                sparse_rewards - step_penalty * rollout_output.batch["info.valids"]
+            )
+            rollout_output.batch["info.rewards"][:, -2] = -1.0
 
         # mark samples in successful trajectories as positive samples
         rollout_output.batch["info.positive_sample_mask"] = (
@@ -300,6 +362,23 @@ class RobRaySACTrainer(RayPPOTrainer):
         rollout_output.meta_info["data/avg_positive_trajectory_length"] = compute_avg_positive_trajectory_length(
             rollout_output
         )
+
+        # Per-subtask success rate (reward-independent ground truth) from the graded progress
+        # carried in `feedback.rewards` = fraction of subtasks done (k/N, latched). For an
+        # N-subtask SEQUENTIAL task the levels are {0, 1/N, ..., 1}; we report the SR of reaching
+        # each subtask k (max_level >= k/N) as `sr_subtask{k}`, plus `sr_composite` = reaching all
+        # N. N comes from `env.train.num_subtasks` when set, else is inferred from the distinct
+        # graded levels. Gated on subtask_reward (no graded levels without it).
+        # NOTE: these reflect the policy at *rollout* time — at warmup they are the INITIAL policy.
+        if subtask:
+            graded_rews = rollout_output.batch["feedback.rewards"]
+            max_level = graded_rews.reshape(graded_rews.shape[0], -1).amax(dim=-1)
+            num_subtasks = self.config.env.train.get("num_subtasks", None) or infer_num_subtasks(graded_rews)
+            for k in range(1, num_subtasks):
+                rollout_output.meta_info[f"data/sr_subtask{k}"] = (
+                    (max_level >= k / num_subtasks - 1e-6).float().mean().item()
+                )
+            rollout_output.meta_info["data/sr_composite"] = (max_level >= 1.0 - 1e-6).float().mean().item()
 
         rollout_output = add_transition_prefixes(rollout_output)
         rollout_output = flatten_trajectories(rollout_output)
@@ -538,6 +617,9 @@ class RobRaySACTrainer(RayPPOTrainer):
                         metrics["data/avg_positive_trajectory_length"] = actor_input.meta_info[
                             "data/avg_positive_trajectory_length"
                         ]
+                        for _k in ("data/sr_composite", "data/sr_subtask1"):
+                            if _k in actor_input.meta_info:
+                                metrics[_k] = actor_input.meta_info[_k]
                     logger.log(data=metrics, step=self.global_steps)
 
                     progress_bar.update(1)

@@ -71,7 +71,13 @@ class SACTrainingWorker(TrainingWorker):
             single_pool_capacity=self.actor_config.replay_pool_single_size,
             sample_device=get_device_name(),
         )
-        self.replay_pool.load(self.actor_config.replay_pool_save_dir)
+        # "From scratch" enforcement: only resume the replay pool when explicitly enabled.
+        # Default True preserves prior behaviour (crash-recovery resume); the arena experiments
+        # set this False so every run starts with an empty pool (mirrors trainer.resume_mode=
+        # disable, which skips only the model checkpoint — not the replay pool, which would
+        # otherwise load unconditionally).
+        if self.actor_config.get("load_replay_pool", True):
+            self.replay_pool.load(self.actor_config.replay_pool_save_dir)
         self.offline_replay_pool = SACReplayPool(
             single_pool_capacity=self.actor_config.offline_replay_pool_single_size,
             sample_device=get_device_name(),
@@ -108,6 +114,11 @@ class SACTrainingWorker(TrainingWorker):
         self.actor_ema_initialized = False
         self.td3_enabled = bool(self.sac_config.get("td3_enabled", False))
         self.td3_bc_alpha = float(self.sac_config.get("td3_bc_alpha", 2.5))
+        # Fixed-coefficient BC anchor (source SAC recipe). Default 0.0 -> OFF, so
+        # existing pi05/libero runs are unchanged. Mutually exclusive with TD3+BC:
+        # when td3_enabled is True we use the adaptive TD3+BC weight and ignore this;
+        # otherwise, when bc_loss_coef > 0 we add bc_loss_coef * bc_loss to sac_loss.
+        self.bc_loss_coef = float(self.sac_config.get("bc_loss_coef", 0.0))
         self.cql_enabled = bool(self.sac_config.get("cql_enabled", False))
         self.cql_alpha = float(self.sac_config.get("cql_alpha", 1.0))
         self.cql_temperature = float(self.sac_config.get("cql_temperature", 1.0))
@@ -410,6 +421,26 @@ class SACTrainingWorker(TrainingWorker):
                         "td3_bc_bc_loss": bc_loss.detach().item(),
                     }
                 )
+            elif self.bc_loss_coef > 0:
+                # Fixed-coefficient BC anchor (source SAC recipe):
+                #   actor_loss = sac_loss + bc_loss_coef * bc_loss
+                # Only reached when td3_enabled is False (the two BC paths are mutually
+                # exclusive). Default bc_loss_coef == 0.0 skips this entirely, so the
+                # existing pi05/libero behavior is preserved exactly.
+                bc_loss = self.engine.module.bc_loss(
+                    obs=s0,
+                    tokenizer=self.tokenizer,
+                    actions=a0,
+                    valids=micro_batch.batch["info.valids"],
+                )
+                actor_loss = sac_loss + self.bc_loss_coef * bc_loss
+                actor_forward_metrics.update(
+                    {
+                        "bc_loss_coef": self.bc_loss_coef,
+                        "bc_anchor_q_loss": sac_loss.detach().item(),
+                        "bc_anchor_bc_loss": bc_loss.detach().item(),
+                    }
+                )
             else:
                 actor_loss = sac_loss
         return actor_loss, log_probs_0, q_values_0, actor_forward_metrics
@@ -587,6 +618,7 @@ class SACTrainingWorker(TrainingWorker):
             "sac/actor_online_sample_count": actor_replay_sample_info["online_sample_count"] if update_actor else 0,
             "sac/actor_offline_sample_count": actor_replay_sample_info["offline_sample_count"] if update_actor else 0,
             "sac/td3_enabled": float(self.td3_enabled),
+            "sac/bc_loss_coef": float(self.bc_loss_coef),
             "sac/critic_only_update": float(critic_only_update),
             "sac/skip_critic_update_when_actor_update": float(self.skip_critic_update_when_actor_update),
             "sac/critic_update_skipped": float(skip_critic_update),

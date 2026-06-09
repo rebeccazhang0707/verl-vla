@@ -30,6 +30,23 @@ train:
   # Per-step penalty used to encourage shorter successful trajectories.
   step_penalty: 0.001
 
+  # Dense success reward (arena): keep post-success steps valid so the latched +1 enters the
+  # pool for all of them; -1 timeout only on never-successful trajectories. Default False =
+  # legacy single-+1-per-success behaviour (bit-identical for pi0.5/libero/isaac).
+  dense_success_reward: False
+
+  # Graded SUBTASK reward (arena, SEQUENTIAL tasks): reward = fraction of subtasks done
+  # (0/0.5/1.0). Supersedes dense_success_reward when True. Default False = composite-only.
+  subtask_reward: False
+
+  # Number of sequential subtasks for the sr_subtask{k} metrics; null = infer from graded levels.
+  num_subtasks: null
+
+  # Asymmetric actor-critic: privileged critic-only obs (arena `critic_privileged` obs group).
+  # The env passes the group through to the critic; pair with model-side
+  # override_config.critic_privileged_obs(_dim). Arena-only; default off elsewhere.
+  critic_privileged_obs: False
+
   # If True, only run evaluation without training updates.
   only_eval: False
 

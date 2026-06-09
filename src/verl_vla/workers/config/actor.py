@@ -39,6 +39,10 @@ class SACConfig(BaseConfig):
     force_critic_tau_one_in_warmup: bool = True
     td3_enabled: bool = False
     td3_bc_alpha: float = 2.5
+    # Fixed-coefficient BC anchor (source SAC recipe). Default 0.0 keeps the BC anchor
+    # OFF so existing pi05/libero runs are byte-for-byte unchanged. When > 0 (and
+    # td3_enabled is False) the actor loss becomes sac_loss + bc_loss_coef * bc_loss.
+    bc_loss_coef: float = 0.0
     cql_enabled: bool = False
     cql_alpha: float = 1.0
     cql_temperature: float = 1.0
@@ -57,6 +61,8 @@ class SACConfig(BaseConfig):
             raise ValueError(f"Invalid alpha_type: {self.alpha_type}. Must be one of {valid_alpha_types}")
         if self.td3_bc_alpha <= 0:
             raise ValueError(f"td3_bc_alpha must be positive, got {self.td3_bc_alpha}")
+        if self.bc_loss_coef < 0:
+            raise ValueError(f"bc_loss_coef must be non-negative, got {self.bc_loss_coef}")
         if self.cql_alpha < 0:
             raise ValueError(f"cql_alpha must be non-negative, got {self.cql_alpha}")
         if self.cql_temperature <= 0:
@@ -117,6 +123,10 @@ class ActorConfig(BaseVLAActorConfig):
     replay_pool_single_size: int = 1000
     offline_replay_pool_single_size: int = 1000
     replay_pool_save_dir: str = "/tmp/replay_pools"
+    # Resume the replay pool from replay_pool_save_dir on init. Default True preserves
+    # crash-recovery behaviour; arena runs set False to always start from an empty pool
+    # (mirrors trainer.resume_mode=disable, which skips only the model checkpoint).
+    load_replay_pool: bool = True
 
     def __post_init__(self):
         super().__post_init__()

@@ -157,6 +157,11 @@ sac:
   # TD3+BC alpha coefficient used in lambda = alpha / mean(|Q|)
   td3_bc_alpha: 2.5
 
+  # Fixed-coefficient BC anchor weight (source SAC recipe). Default 0.0 keeps the BC
+  # anchor OFF so existing pi05/libero runs are unchanged. When > 0 (and td3_enabled
+  # is false) actor_loss = sac_loss + bc_loss_coef * bc_loss.
+  bc_loss_coef: 0.0
+
   # Whether to enable conservative Q-learning regularization for critic updates
   cql_enabled: false
 
