@@ -155,11 +155,11 @@ class EnvLoop:
                 stage_timing[stage_id]["env_wait_s"] += time.perf_counter() - env_wait_start_t
                 stage_timing[stage_id]["env_wait_calls"] += 1.0
 
-                feedback = self._strip_meta_info(get_dataproto_from_prefix(env_result, FEEDBACK_KEY, "."))
+                next_step = self._strip_meta_info(get_dataproto_from_prefix(env_result, FEEDBACK_KEY, "."))
                 next_obs = self._strip_meta_info(get_dataproto_from_prefix(env_result, OBS_KEY, "."))
 
                 current_slot = trajectories[stage_id].pop()
-                current_slot[FEEDBACK_KEY] = feedback
+                current_slot[FEEDBACK_KEY] = next_step
                 trajectories[stage_id].append(current_slot)
 
                 stage_timing[stage_id]["effective_steps"] += 1.0
@@ -294,8 +294,8 @@ class EnvLoop:
         batch_dict = {}
         for field_key in [OBS_KEY, ACTION_KEY, FEEDBACK_KEY]:
             batch_dict.update(stack_dataproto_with_padding([step[field_key] for step in flat_trajs], field_key))
-        if "feedback.terminations" in batch_dict:
-            batch_dict["complete"] = batch_dict["feedback.terminations"].clone()
+        if "next.done" in batch_dict:
+            batch_dict["complete"] = batch_dict["next.done"].clone()
         batch_dict["env_state_id"] = torch.from_numpy(initial_state_ids.astype(int))
 
         return DataProto.from_single_dict(batch_dict, meta_info=meta_info)

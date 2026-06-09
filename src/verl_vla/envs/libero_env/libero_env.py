@@ -277,6 +277,8 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
             )
         return observations
 
+    ### Main API ###
+
     def get_recorder_strategy_kwargs(self):
         return {
             "image_shape": (
@@ -285,8 +287,6 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
                 3,
             )
         }
-
-    ### Main API ###
 
     def env_reset(
         self,

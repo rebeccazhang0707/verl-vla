@@ -14,4 +14,4 @@
 
 OBS_KEY = "obs"
 ACTION_KEY = "action"
-FEEDBACK_KEY = "feedback"
+FEEDBACK_KEY = "next"

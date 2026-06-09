@@ -53,14 +53,21 @@ def create_env_batch(obs, rews, dones, infos, meta=None):
     return ret_dict
 
 
-def create_env_batch_dataproto(obs, rews, terminations, truncations, infos, meta=None):
-    ret_dict = {"obs": obs, "rewards": rews, "terminations": terminations, "truncations": truncations, "infos": infos}
+def create_env_batch_dataproto(obs, rewards, dones, truncations, infos, meta=None):
+    step_result = {
+        "observation": obs["observation"],
+        "task": obs["task"],
+        "next.reward": rewards,
+        "next.done": dones,
+        "next.truncated": truncations,
+        "info": infos,
+    }
     if meta is not None:
-        ret_dict.update(meta=meta)
+        step_result["meta"] = meta
 
-    ret_dict = put_tensor_cpu(ret_dict)
+    step_result = put_tensor_cpu(step_result)
     obs_tensor_batch = {}
-    observations = ret_dict["obs"]["observation"]
+    observations = step_result["observation"]
     if observations:
         for key in observations[0]:
             obs_tensor_batch[f"obs.{key}"] = torch.as_tensor(
@@ -68,11 +75,11 @@ def create_env_batch_dataproto(obs, rews, terminations, truncations, infos, meta
             )
     tensor_batch = {
         **obs_tensor_batch,
-        "feedback.rewards": ret_dict["rewards"],
-        "feedback.terminations": ret_dict["terminations"],
-        "feedback.truncations": ret_dict["truncations"],
+        "next.reward": step_result["next.reward"],
+        "next.done": step_result["next.done"],
+        "next.truncated": step_result["next.truncated"],
     }
-    non_tensor_batch = {"obs.task": obs["task"]}
+    non_tensor_batch = {"obs.task": step_result["task"]}
     output = DataProto.from_dict(tensors=tensor_batch, non_tensors=non_tensor_batch)
 
     return output
@@ -198,21 +205,21 @@ class EnvWorker(Worker, DistProfilerExtension):
 
         env_info_list = {}
 
-        extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos = self.simulator_list[stage_id].step(
+        extracted_obs, chunk_rewards, chunk_dones, chunk_truncations, infos = self.simulator_list[stage_id].step(
             chunk_actions, chunk_values=chunk_values
         )
-        chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
+        chunk_completes = torch.logical_or(chunk_dones, chunk_truncations)
 
-        if chunk_dones.any():
+        if chunk_completes.any():
             if "final_info" in infos:
                 final_info = infos["final_info"]
                 for key in final_info["episode"]:
-                    env_info_list[key] = final_info["episode"][key][chunk_dones[:, -1]].cpu()
+                    env_info_list[key] = final_info["episode"][key][chunk_completes[:, -1]].cpu()
 
         env_batch = create_env_batch_dataproto(
             obs=extracted_obs,
-            rews=chunk_rewards,
-            terminations=chunk_terminations,
+            rewards=chunk_rewards,
+            dones=chunk_dones,
             truncations=chunk_truncations,
             infos=infos,
             meta=env_info_list,
