@@ -182,7 +182,55 @@ chunk** instead of every physics step (~32× fewer renders, lossless for the pol
 
 ---
 
-## 5. Pitfalls (handled in-repo / by the scripts)
+## 5. Testing
+
+The arena/GR00T unit tests are **CPU-only** — no GPU, Isaac Sim, or GR00T checkpoint needed.
+They build the model via `object.__new__` (bypassing the real `from_pretrained`) and inject fake
+`isaaclab_arena*` modules, so they run on any dev host. Test config lives in `pyproject.toml`
+(`[tool.pytest.ini_options]`: `testpaths=["tests"]`, `pythonpath=["src"]`).
+
+```bash
+pip install pytest                       # torch is the only heavy dep these tests import
+
+# Run the full arena/GR00T suite (71 tests, all green on CPU).
+# NOTE: list tests/envs/arena_env BEFORE tests/models/gr00t — the modeling test registers a
+# stand-in `verl_vla.models.gr00t` in sys.modules, which would otherwise shadow the real
+# package and make arena_env_test skip itself ("not a package"). Ordering arena first makes it
+# import the real package before the stand-in is installed. `python -m pytest tests/` is also
+# fine (alphabetical order puts arena_env first).
+python -m pytest \
+    tests/envs/arena_env \
+    tests/env_loop \
+    tests/workers/engine/sac \
+    tests/workers/rollout/naive_rollout_gr00t_test.py \
+    tests/examples/arena_sac \
+    tests/models/gr00t \
+    -q
+```
+
+| Test file | Covers |
+| --- | --- |
+| `tests/models/gr00t/modeling_gr00t_sac_test.py` | critic heads, cross-attn pool (`nn.Embedding` query + NaN guards), `freeze_vision_tower`, target Polyak, encoded-state width |
+| `tests/models/gr00t/utils_test.py` | GR1 state-group dims, flat-state split, embodiment-id resolution |
+| `tests/envs/arena_env/arena_env_test.py` | obs packing (scheme Y), whole-chunk decode vs fixed base, `chunk_step` done semantics |
+| `tests/envs/arena_env/embodiment_test.py` | GR1 ⇄ Arena joint-space gather/scatter |
+| `tests/env_loop/test_gr00t_transition_prefix_chain.py` | obs/action → `t0./t1.` transition-prefix chain |
+| `tests/workers/engine/sac/training_worker_bc_test.py` | SAC vs TD3+BC vs fixed-coef BC loss gating |
+| `tests/workers/rollout/naive_rollout_gr00t_test.py` | rollout output schema + action-horizon invariant |
+| `tests/examples/arena_sac/eval_smoke_cpu_test.py` | eval-script smoke (CPU) |
+
+> The privileged-obs (`critic_privileged_obs`) and graded-subtask (`subtask_reward`) code paths
+> default **off**, so these tests build with them off (matching production defaults) — the gated
+> paths are no-ops and `critic_input_dim` is unchanged.
+
+> `tests/workers/rollout/test_sample_transfer.py` and `test_weight_sync.py` are **not** part of
+> the arena/GR00T suite and depend on extra infra: the async tests need `pip install
+> pytest-asyncio`, and `test_sample_transfer` needs a `tensordict`-compatible `DataProto` stub.
+> They are unrelated to the arena channel.
+
+---
+
+## 6. Pitfalls (handled in-repo / by the scripts)
 
 - **Arena task has no reward term** → converted to a `RewTerm` + terminations nulled (§4).
 - **`No available node types {'train_rollout': …}`** → disagg pools need Ray resources
@@ -197,7 +245,7 @@ chunk** instead of every physics step (~32× fewer renders, lossless for the pol
 
 ---
 
-## 6. File map
+## 7. File map
 
 | File | Purpose |
 | --- | --- |

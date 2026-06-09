@@ -76,6 +76,11 @@ def _make_env(num_envs: int = 4, cfg=None) -> IsaacLabArenaEnv:
     env.kitchen_style = cfg.get("kitchen_style", 2)
     env.arena_object_set = cfg.get("object_set", None)
     env.cfg = _Cfg(cfg)
+    # Asymmetric-AC privileged critic obs (set in __init__; OFF by default for these tests).
+    env.critic_privileged_obs = bool(cfg.get("critic_privileged_obs", False))
+    env.PRIV_OBS_GROUP = cfg.get("priv_obs_group", "critic_privileged")
+    env.PRIV_OBS_DIM = None
+    env._priv_warned = False
     return env
 
 
@@ -144,6 +149,12 @@ def _make_io_env(num_envs: int = 2, adapter=None) -> IsaacLabArenaEnv:
     env.video_cfg = _Cfg(save_video=False)
     env._last_state26 = np.zeros((num_envs, POLICY_DIM), dtype=np.float32)
     env._last_full_image = None
+    env.cfg = _Cfg({})
+    # Asymmetric-AC privileged critic obs (set in __init__; OFF for the I/O-path tests).
+    env.critic_privileged_obs = False
+    env.PRIV_OBS_GROUP = "critic_privileged"
+    env.PRIV_OBS_DIM = None
+    env._priv_warned = False
     return env
 
 
