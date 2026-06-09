@@ -54,10 +54,10 @@ Benchmark.get_task_init_states = patched_get_task_init_states
 class LiberoResetStateMixin:
     """LIBERO benchmark reset-state and task reconfiguration helpers."""
 
-    def init_libero_env(self, cfg):
+    def init_libero_env(self, cfg, *, async_reset: bool = False):
         self.init_random()
         self.task_suite: Benchmark = get_benchmark(cfg.task_suite_name)()
-        self.init_reset_states()
+        self.init_reset_states(async_reset=async_reset)
         self._init_env()
 
     def init_random(self):
@@ -117,11 +117,11 @@ class LiberoResetStateMixin:
 
     ### Reset State Helpers ###
 
-    def init_reset_states(self):
+    def init_reset_states(self, *, async_reset: bool = False):
         self._compute_total_num_group_envs()
         self.reset_state_ids_all = self.get_reset_state_ids_all()
         self.reset_state_ids = self._get_ordered_reset_state_ids(self.num_envs)
-        self._init_task_and_trial_ids()
+        self._init_task_and_trial_ids(async_reset=async_reset)
 
     def get_all_state_ids(self):
         """Returns all possible state IDs from the entire benchmark."""
@@ -141,8 +141,16 @@ class LiberoResetStateMixin:
 
         self.cumsum_trial_id_bins = np.cumsum(self.trial_id_bins)
 
-    def _init_task_and_trial_ids(self):
-        self.task_ids, self.trial_ids = self._get_task_and_trial_ids_from_reset_state_ids(self.reset_state_ids)
+    def _init_task_and_trial_ids(self, *, async_reset: bool = False):
+        if not async_reset:
+            self.task_ids, self.trial_ids = self._get_task_and_trial_ids_from_reset_state_ids(self.reset_state_ids)
+            return
+
+        num_tasks = self.task_suite.get_num_tasks()
+        stage_num = int(getattr(self.cfg, "pipeline_stage_num", 1))
+        base_global_idx = (self.rank * stage_num + self.stage_id) * self.num_envs
+        self.task_ids = np.array([(base_global_idx + env_id) % num_tasks for env_id in range(self.num_envs)])
+        self.trial_ids = np.zeros(self.num_envs, dtype=int)
 
     def _get_random_reset_state_ids(self, num_reset_states):
         reset_state_ids = self._generator.integers(low=0, high=self.total_num_group_envs, size=(num_reset_states,))
@@ -194,6 +202,29 @@ class LiberoResetStateMixin:
         ]
         return init_state
 
+    def _get_global_state_id(self, task_id, trial_id):
+        if task_id == 0:
+            return trial_id
+        return self.cumsum_trial_id_bins[task_id - 1] + trial_id
+
+    def _reconfigure_random_trial(self, env_idx):
+        trial_ids = []
+        for env_id in env_idx:
+            task_id = self.task_ids[env_id]
+            num_trials = self.trial_id_bins[task_id]
+            trial_ids.append(self._generator.integers(low=0, high=num_trials))
+
+        for trial_id, env_id in zip(trial_ids, env_idx, strict=False):
+            self.trial_ids[env_id] = trial_id
+            self.reset_state_ids[env_id] = self._get_global_state_id(self.task_ids[env_id], trial_id)
+
+        seed_list = [
+            compose_seed(self.seed, self.rank, self.stage_id, self.rollout_id, int(env_id), 0) for env_id in env_idx
+        ]
+        self.env.seed(seed_list)
+        self.env.reset(id=env_idx)
+        self.env.set_init_state(init_state=self._get_reset_states(env_idx=env_idx), id=env_idx)
+
     def _reconfigure(self, reset_state_ids, env_idx):
         reconfig_env_idx = []
         task_ids, trial_ids = self._get_task_and_trial_ids_from_reset_state_ids(reset_state_ids)
@@ -202,6 +233,7 @@ class LiberoResetStateMixin:
                 reconfig_env_idx.append(env_id)
             self.task_ids[env_id] = task_ids[j]
             self.trial_ids[env_id] = trial_ids[j]
+            self.reset_state_ids[env_id] = reset_state_ids[j]
         if reconfig_env_idx:
             env_fn_params = self.get_env_fn_params(reconfig_env_idx)
             self.env.reconfigure_env_fns(env_fn_params, reconfig_env_idx)
@@ -220,9 +252,10 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
 
     def __init__(self, cfg, rank, world_size, stage_id: int = 0):
         super().__init__(cfg, rank, world_size, stage_id=stage_id)
-
-        self.init_libero_env(cfg)
         self._init_metrics()
+
+    def env_init(self, *, async_reset: bool) -> None:
+        self.init_libero_env(self.cfg, async_reset=async_reset)
 
     ### Metrics ###
 
@@ -253,7 +286,12 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         episode_info["success_once"] = self.success_once.copy()
         episode_info["return"] = self.returns.copy()
         episode_info["episode_len"] = self._elapsed_steps.copy()
-        episode_info["reward"] = episode_info["return"] / episode_info["episode_len"]
+        episode_info["reward"] = np.divide(
+            episode_info["return"],
+            episode_info["episode_len"],
+            out=np.zeros_like(episode_info["return"]),
+            where=episode_info["episode_len"] != 0,
+        )
         infos["episode"] = to_tensor(episode_info)
         return infos
 
@@ -294,31 +332,44 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         env_ids,
         reset_state_ids=None,
         task_ids=None,
+        async_reset: bool = False,
     ):
         """Reset LIBERO envs.
 
         LIBERO reset state ids are global benchmark ids. Each id already
         determines both the task id and the trial id, so the separately supplied
-        task ids are redundant for this environment.
+        task ids are redundant for this environment. In async reset mode, task
+        ids are fixed by ``env_init`` and only the trial/init state is sampled.
         """
         del task_ids
 
         # configure envs with the given reset state ids, then reset them and set their init states.
-        self.rollout_id += 1
         env_ids = np.asarray(env_ids, dtype=np.int64)
-        if reset_state_ids is None:
-            reset_state_ids = self._get_random_reset_state_ids(len(env_ids))
-        self._reconfigure(reset_state_ids, env_ids)
+        if async_reset:
+            self._reconfigure_random_trial(env_ids)
+        else:
+            self.rollout_id += 1
+            if reset_state_ids is None:
+                reset_state_ids = self._get_random_reset_state_ids(len(env_ids))
+            self._reconfigure(reset_state_ids, env_ids)
 
         # Perform extra warmup steps after reset to let the observations settle.
         raw_obs = None
         reset_warmup_steps = int(getattr(self.cfg, "reset_warmup_steps", 10))
-        for _ in range(reset_warmup_steps):
+        if async_reset:
+            zero_actions = np.zeros((len(env_ids), LIBERO_ACTION_DIM))
+            for _ in range(reset_warmup_steps):
+                raw_obs, _reward, terminations, info_lists = self.env.step(zero_actions, id=env_ids)
+            tasks = [self.task_descriptions[env_id] for env_id in env_ids]
+        else:
             zero_actions = np.zeros((self.num_envs, LIBERO_ACTION_DIM))
-            raw_obs, _reward, terminations, info_lists = self.env.step(zero_actions)
+            for _ in range(reset_warmup_steps):
+                raw_obs, _reward, terminations, info_lists = self.env.step(zero_actions)
+            tasks = self.task_descriptions
+
         obs = {
             "observation": self._make_observations(raw_obs),
-            "task": self.task_descriptions,
+            "task": tasks,
         }
         self._reset_metrics(env_ids)
 
@@ -330,6 +381,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         raw_obs, _reward, terminations, info_lists = self.env.step(actions, id=env_ids)
         infos = list_of_dict_to_dict_of_list(info_lists)
         truncations = self._elapsed_steps[env_ids] >= self.cfg.max_episode_steps
+        dones = np.logical_or(terminations, truncations)
 
         step_reward = np.asarray(_reward)
         infos = self._record_metrics(step_reward, terminations, infos, env_ids)
@@ -338,7 +390,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
             "observation": self._make_observations(raw_obs),
             "task": [self.task_descriptions[env_id] for env_id in env_ids],
             "next.reward": to_tensor(step_reward),
-            "next.done": to_tensor(np.asarray(terminations, dtype=bool)),
+            "next.done": to_tensor(np.asarray(dones, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(truncations, dtype=bool)),
             "info": infos,
         }
