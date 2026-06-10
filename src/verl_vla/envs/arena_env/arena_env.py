@@ -24,6 +24,7 @@ import numpy as np
 import torch
 from typing_extensions import override
 
+from verl_vla.envs.arena_env.config import load_arena_config
 from verl_vla.envs.arena_env.utils import (
     apply_rl_reward_and_disable_autoreset,
     build_env_cfg_without_recorder,
@@ -43,23 +44,13 @@ class IsaacLabArenaEnv(BaseEnv):
     def __init__(self, cfg, rank: int, world_size: int, stage_id: int = 0):
         disable_lightwheel_ssl_verify()
 
+        self.arena_cfg = load_arena_config(cfg)
         self.seed = int(cfg.seed) + int(rank)
         self.device = cfg.get("device", "cuda:0")
-        self.enable_cameras = bool(cfg.get("enable_cameras", True))
-        self.camera_names = self._normalize_camera_names(
-            cfg.get("camera_names", cfg.get("camera_name", "robot_head_cam_rgb"))
-        )
-        self.arena_env_name = cfg.get("arena_env_name", "put_item_in_fridge_and_close_door")
-        self.arena_object = cfg.get("arena_object", "ranch_dressing_hope_robolab")
-        self.arena_embodiment = cfg.get("arena_embodiment", "gr1_joint")
-        self.arena_object_set = cfg.get("object_set", None)
-        self.kitchen_style = cfg.get("kitchen_style", 2)
-        self.task_description = cfg.get(
-            "task_description",
-            "Place the sauce bottle on the top shelf of the fridge, and close the fridge door.",
-        )
-
-        self.subtask_reward = bool(cfg.get("subtask_reward", False))
+        self.enable_cameras = self.arena_cfg.enable_cameras
+        self.camera_names = list(self.arena_cfg.camera_names)
+        self.task_description = self.arena_cfg.task_description
+        self.subtask_reward = self.arena_cfg.subtask_reward
         self._elapsed_steps = np.zeros(int(cfg.num_envs), dtype=np.int32)
         self.max_episode_steps = int(cfg.max_episode_steps)
 
@@ -82,22 +73,22 @@ class IsaacLabArenaEnv(BaseEnv):
     def _build_args(self) -> argparse.Namespace:
         return argparse.Namespace(
             num_envs=self.num_envs,
-            env_spacing=float(self.cfg.get("env_spacing", 30.0)),
-            disable_fabric=bool(self.cfg.get("disable_fabric", False)),
+            env_spacing=self.arena_cfg.env_spacing,
+            disable_fabric=self.arena_cfg.disable_fabric,
             device=self.device,
             seed=self.seed,
-            solve_relations=bool(self.cfg.get("solve_relations", True)),
+            solve_relations=self.arena_cfg.solve_relations,
             mimic=False,
-            enable_pinocchio=bool(self.cfg.get("enable_pinocchio", True)),
-            placement_seed=self.cfg.get("placement_seed", None),
-            resolve_on_reset=self.cfg.get("resolve_on_reset", None),
-            presets=self.cfg.get("presets", None),
-            object=self.arena_object,
-            embodiment=self.arena_embodiment,
+            enable_pinocchio=self.arena_cfg.enable_pinocchio,
+            placement_seed=self.arena_cfg.placement_seed,
+            resolve_on_reset=self.arena_cfg.resolve_on_reset,
+            presets=self.arena_cfg.presets,
+            object=self.arena_cfg.object,
+            embodiment=self.arena_cfg.embodiment,
             enable_cameras=self.enable_cameras,
             teleop_device=None,
-            kitchen_style=int(self.kitchen_style),
-            object_set=self.arena_object_set,
+            kitchen_style=self.arena_cfg.kitchen_style,
+            object_set=self.arena_cfg.object_set,
         )
 
     def _init_env(self) -> None:
@@ -115,12 +106,12 @@ class IsaacLabArenaEnv(BaseEnv):
 
         disable_lightwheel_ssl_verify()
         args = self._build_args()
-        if self.arena_env_name not in ExampleEnvironments:
+        if self.arena_cfg.env_name not in ExampleEnvironments:
             raise ValueError(
-                f"Arena env '{self.arena_env_name}' not found. Available: {sorted(ExampleEnvironments.keys())}"
+                f"Arena env '{self.arena_cfg.env_name}' not found. Available: {sorted(ExampleEnvironments.keys())}"
             )
 
-        arena_env = ExampleEnvironments[self.arena_env_name]().get_env(args)
+        arena_env = ExampleEnvironments[self.arena_cfg.env_name]().get_env(args)
         task = getattr(arena_env, "task", None)
         if task is not None and hasattr(task, "get_task_description"):
             desc = task.get_task_description()
@@ -129,7 +120,7 @@ class IsaacLabArenaEnv(BaseEnv):
 
         env_builder = ArenaEnvBuilder(arena_env, args)
         env_cfg = build_env_cfg_without_recorder(env_builder)
-        if bool(self.cfg.get("rl_success_reward", True)):
+        if self.arena_cfg.rl_success_reward:
             apply_rl_reward_and_disable_autoreset(env_cfg, subtask_reward=self.subtask_reward)
         self.env = env_builder.make_registered(env_cfg=env_cfg)
 
@@ -233,7 +224,7 @@ class IsaacLabArenaEnv(BaseEnv):
             "fps": int(self.cfg.get("recorder", {}).get("video", {}).get("fps", 50))
             if hasattr(self.cfg, "get")
             else 50,
-            "robot_type": str(self.arena_embodiment),
+            "robot_type": self.arena_cfg.embodiment,
         }
 
     ### Observation formatting ###
@@ -297,7 +288,7 @@ class IsaacLabArenaEnv(BaseEnv):
 
     def _image_shape(self) -> tuple[int, int, int]:
         if self.enable_cameras:
-            return tuple(int(v) for v in self.cfg.get("image_shape", (480, 640, 3)))
+            return self.arena_cfg.image_shape
         return (1, 1, 3)
 
     @staticmethod
