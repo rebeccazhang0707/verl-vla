@@ -161,21 +161,21 @@ def _build_cfg(args):
 
 
 def _full_image_and_tasks(obs, env):
-    """Pull (full_image[B,H,W,C] uint8, state26[B,26] float32, tasks[list]) for the policy path.
+    """Pull (full_image[B,H,W,C] uint8, policy_state[B, policy_dim] float32, tasks[list]) for the policy path.
 
     Scheme-Y obs keep ``full_image`` at the top level (video only) and pack the
-    model-ready eagle tensors under ``images_and_states``. The raw 26-DOF joint state
-    fed to the last ``build_inputs`` is cached on the env as ``_last_state26``.
+    model-ready eagle tensors under ``images_and_states``. The raw policy-order joint
+    state fed to the last ``build_inputs`` is cached on the env as ``_last_policy_state``.
     """
     full_image = obs["full_image"]
     if isinstance(full_image, torch.Tensor):
         full_image = full_image.cpu().numpy()
-    state26 = np.asarray(env._last_state26, dtype=np.float32)
+    policy_state = np.asarray(env._last_policy_state, dtype=np.float32)
     tasks = obs.get(
         "task_descriptions",
         ["Place the sauce bottle on the top shelf of the fridge, and close the fridge door."],
     )
-    return full_image, state26, list(tasks)
+    return full_image, policy_state, list(tasks)
 
 
 def main() -> int:

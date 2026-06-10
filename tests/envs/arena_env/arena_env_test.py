@@ -147,7 +147,7 @@ def _make_io_env(num_envs: int = 2, adapter=None) -> IsaacLabArenaEnv:
     env.render_on_chunk_boundary = False
     env._chunk_render_interval_set = False
     env.video_cfg = _Cfg(save_video=False)
-    env._last_state26 = np.zeros((num_envs, POLICY_DIM), dtype=np.float32)
+    env._last_policy_state = np.zeros((num_envs, POLICY_DIM), dtype=np.float32)
     env._last_full_image = None
     env.cfg = _Cfg({})
     # Asymmetric-AC privileged critic obs (set in __init__; OFF for the I/O-path tests).
@@ -329,8 +329,8 @@ def test_wrap_obs_packs_eagle_keys_and_caches_state():
     assert len(obs["task_descriptions"]) == env.num_envs
     # full_image kept at the top level for video (NOT inside images_and_states).
     assert "full_image" in obs and "full_image" not in ias
-    # raw 26-DOF joint state cached for the next step's action decode.
-    assert env._last_state26.shape == (env.num_envs, POLICY_DIM)
+    # raw policy-order joint state cached for the next step's action decode.
+    assert env._last_policy_state.shape == (env.num_envs, POLICY_DIM)
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +372,7 @@ def test_chunk_step_decodes_whole_chunk_against_fixed_base():
     """P0 relative-action fix: the WHOLE chunk is decoded once against the
     chunk-start state, NOT per-step against the (drifting) live state.
 
-    A drifting sim updates ``_last_state26`` every step; a correct fixed-base
+    A drifting sim updates ``_last_policy_state`` every step; a correct fixed-base
     decode must ignore those mid-chunk updates so step i yields ``base + delta_i``
     (not ``base + delta_{i-1} + delta_i``).
     """
@@ -413,7 +413,7 @@ def test_chunk_step_decodes_whole_chunk_against_fixed_base():
             "policy": {"robot_joint_pos": base_rjp},
         }
     )
-    chunk_start_state = env._last_state26.copy()  # (B, 26)
+    chunk_start_state = env._last_policy_state.copy()  # (B, policy_dim)
     adapter.calls.clear()
     adapter.decode_bases.clear()
 

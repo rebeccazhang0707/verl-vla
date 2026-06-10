@@ -388,7 +388,7 @@ own decoded `action` would collide. So obs packing + action decoding must live i
 ### B. The three scheme-Y changes
 
 1. **Env packs obs** (`IsaacLabArenaEnv._wrap_obs`): runs
-   `GR00TN16Adapter.build_inputs(full_image, state_26, task_descriptions)` and returns the eagle
+   `GR00TN16Adapter.build_inputs(full_image, policy_state, task_descriptions)` and returns the eagle
    tensors `images / lang_tokens / lang_masks / states` as the `images_and_states` keys (eagle
    `pixel_values` list → stacked `(B, n_patches, C, H, W)`). The pipeline turns these into
    `obs.images/...` → `t0.obs.*`, exactly the slots `Gr00tN1d6ForSAC._obs_to_state_dict` reads
@@ -396,11 +396,11 @@ own decoded `action` would collide. So obs packing + action decoding must live i
    video only (`create_env_batch_dataproto` ignores it).
 2. **Env decodes the action** (`IsaacLabArenaEnv.chunk_step`, **corrected in the P0 fix §8.J**):
    at chunk entry, `_decode_chunk_to_policy_actions(chunk_actions)` builds the base
-   `raw_state_groups` **once** from the chunk-start state (`_last_state26`) and decodes the **whole**
+   `raw_state_groups` **once** from the chunk-start state (`_last_policy_state`) and decodes the **whole**
    normalised chunk in a single `adapter.decode_actions_flat(chunk_actions, base_groups)` →
    `(B, chunk, 26)`. The per-step `step` then only `joint_map.scatter_action`-expands the already
    decoded `decoded[:, i]` 26 → 36 sim joints (no per-step decode, no live-state base). `_wrap_obs`
-   still updates `_last_state26` so it serves as the base for the **next** chunk (one inference per
+   still updates `_last_policy_state` so it serves as the base for the **next** chunk (one inference per
    chunk, matching the env-loop cadence).
 3. **Rollout simplified** (`naive_rollout_gr00t.py`): reads the already-packed obs from
    `prompts.batch["images"/"lang_tokens"/"lang_masks"/"states"]`, calls `sac_sample_actions(prompts)`,
@@ -511,7 +511,7 @@ the 2 arena modules now run). `ruff check` clean on all touched files.
 ## 8.J Phase 4 **P0 fix** — chunk-level fixed-base action decode (correctness)
 
 **Bug.** The Phase-4 scheme-Y env (§8.B.2) decoded the action **per env step** inside `step()`,
-rebuilding the relative→absolute base from the **live** `_last_state26` that `_wrap_obs` updates
+rebuilding the relative→absolute base from the **live** `_last_policy_state` that `_wrap_obs` updates
 every step. The checkpoint is `use_relative_action=true`, so a per-step live base makes offsets
 **accumulate** (`base + δ[i-1] + δ[i] + …`) and the joint targets diverge — whereas the source
 decodes every step relative to a **single** chunk-start base (`base + δ[i]`). Left unfixed this
@@ -526,9 +526,9 @@ chunk in one `adapter.decode_actions_flat(full_action_norm, raw_state_groups)` c
 | Method | Before (bug) | After (fix) |
 |---|---|---|
 | `chunk_step` | loop calls `step(chunk_actions[:, i])`; each `step` decodes | decodes the whole chunk **once** at entry: `decoded = _decode_chunk_to_policy_actions(chunk_actions)` → `(B, chunk, 26)`; loop calls `step(decoded[:, i])` |
-| `_decode_to_policy_action` *(removed)* → `_decode_chunk_to_policy_actions` *(new)* | `decode_actions_flat(actions[:, None, :], live raw_state_groups)` per step → `(B,1,26)` | builds base `raw_state_groups` **once** from chunk-start `_last_state26`, `decode_actions_flat(chunk_actions, base_groups)` → `(B, chunk, 26)` |
+| `_decode_to_policy_action` *(removed)* → `_decode_chunk_to_policy_actions` *(new)* | `decode_actions_flat(actions[:, None, :], live raw_state_groups)` per step → `(B,1,26)` | builds base `raw_state_groups` **once** from chunk-start `_last_policy_state`, `decode_actions_flat(chunk_actions, base_groups)` → `(B, chunk, 26)` |
 | `step` | `policy_action = _decode_to_policy_action(actions)` then 26→36 scatter | `policy_action = actions` (already-decoded 26-DOF) then 26→36 scatter only |
-| `_wrap_obs` | updates `_last_state26` (also used as per-step base) | unchanged — `_last_state26` now serves as the base for the **next** chunk only |
+| `_wrap_obs` | updates `_last_policy_state` (also used as per-step base) | unchanged — `_last_policy_state` now serves as the base for the **next** chunk only |
 
 **Stub test changes (`tests/envs/arena_env/arena_env_test.py`).** `_StubAdapter.decode_actions_flat`
 dropped the hard `shape[1]==1` assert and now accepts the whole `(B, chunk, max_action_dim)`,
@@ -787,7 +787,7 @@ run.
   - assert the env `chunk_step` `decoded_chunk` (`_decode_chunk_to_policy_actions`) equals the
     source-style one-shot `decode_actions_flat(full_chunk, base_groups)` **element-wise**
     (`atol=1e-5`); and
-  - perturb `env._last_state26` **after** the chunk-start capture and assert the decoded values are
+  - perturb `env._last_policy_state` **after** the chunk-start capture and assert the decoded values are
     **unchanged** (proves the base is fixed at chunk entry — the §8.J P0 fix). The `smoke` script's
     steps 2+3 already exercise sample→decode on real weights; extend with the two asserts above.
 

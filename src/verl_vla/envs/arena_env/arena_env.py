@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""IsaacLabArenaEnv: drop-in replacement for IsaacEnv that runs IsaacLab Arena environments.
+"""IsaacLabArenaEnv: Isaac Lab Arena env wrapped as a verl-compatible gym env.
 
 GR00T data channel (scheme Y — env owns packing + decoding, see
 ``docs/MIGRATION_gr00t_arena.md``):
@@ -23,7 +23,7 @@ GR00T data channel (scheme Y — env owns packing + decoding, see
     ``obs.*`` → ``t0.obs.*`` exactly like the pi05 channel (no rollout-side
     packing; ``Gr00tN1d6ForSAC._obs_to_state_dict`` reads them unchanged).
   * **action decoding** — ``chunk_step`` decodes the **whole normalised chunk**
-    (max_action_dim) into 26-DOF policy joints via
+    (max_action_dim) into policy joints via
     ``GR00TN16Adapter.decode_actions_flat`` **once, against a single base state
     captured at chunk start** (the obs that fed this chunk's inference). This
     replicates the source rollout (``sac/naive_rollout_gr00t.py``), which decodes
@@ -32,15 +32,15 @@ GR00T data channel (scheme Y — env owns packing + decoding, see
     this yields ``base + δ[i]`` per step; decoding per-step against the *live*
     joint state would instead give ``base + δ[i-1] + δ[i]`` (offsets accumulate,
     joint targets diverge → policy learns on a corrupted action space). The
-    per-step ``step`` then only scatters the already-decoded 26 → 36 sim joints.
-    The rollout only emits the normalised action, so replay/critic operate in the
-    normalised space.
+    per-step ``step`` then only scatters the already-decoded policy joints into
+    the sim joints. The rollout only emits the normalised action, so replay/critic
+    operate in the normalised space.
 
 Joint-space conversion (derived from the embodiment config YAMLs) is owned by
-``ArenaJointMapping`` / ``GR1_ARENA`` in ``embodiment.py`` and reached via
-``self.joint_map``:
-  54-DOF full robot state → 26-DOF GR00T state  (``joint_map.gather_state``)
-  26-DOF GR00T actions   → 36-DOF sim actions   (``joint_map.scatter_action``)
+the ``ArenaJointMapping`` / embodiment definition in ``embodiment.py`` and
+reached via ``self.joint_map``:
+  full robot state → policy state    (``joint_map.gather_state``)
+  policy actions   → sim actions     (``joint_map.scatter_action``)
 """
 
 import argparse
@@ -49,20 +49,22 @@ import os
 from collections import OrderedDict
 from typing import Optional
 
+import gymnasium as gym
 import numpy as np
 import torch
-import gymnasium as gym
 
-from verl_vla.envs.arena_env.embodiment import GR1_ARENA
+from verl_vla.envs.arena_env.embodiment import ArenaJointMapping
 from verl_vla.envs.arena_env.utils import (
     apply_rl_reward_and_disable_autoreset,
     build_env_cfg_without_recorder,
     disable_lightwheel_ssl_verify,
 )
 from verl_vla.models.gr00t.gr00t_policy import GR00TN16Adapter
-from verl_vla.models.gr00t.utils import GR1, split_flat_state_to_groups
+from verl_vla.models.gr00t.utils import get_embodiment_spec, split_flat_state_to_groups
 from verl_vla.utils.envs.action import to_tensor
+
 logger = logging.getLogger(__name__)
+
 
 class IsaacLabArenaEnv(gym.Env):
     """Isaac Lab Arena env wrapped as a verl-compatible gymnasium env.
@@ -82,9 +84,13 @@ class IsaacLabArenaEnv(gym.Env):
         self.world_size = world_size
         self.seed = cfg.seed + rank
         self.num_envs = cfg.num_envs
-        self.action_dim = cfg.get("action_dim", GR1.action_dim)
-        # GR1 ⇄ Arena-sim joint-space conversions (gather_state / scatter_action).
-        self.joint_map = GR1_ARENA
+        # GR00T model-side embodiment (the policy's joint groups / action width). The
+        # joint_map (gather_state / scatter_action) is derived from this spec so it
+        # always tracks ``embodiment_tag`` instead of a hardcoded GR1 singleton.
+        self.embodiment_tag = cfg.get("embodiment_tag", "gr1")
+        self.embodiment_spec = get_embodiment_spec(self.embodiment_tag)
+        self.joint_map = ArenaJointMapping.from_spec(self.embodiment_spec)
+        self.action_dim = cfg.get("action_dim", self.embodiment_spec.action_dim)
         self.device = cfg.get("device", "cuda:0")
         self.camera_name = cfg.get("camera_name", "robot_pov_cam_rgb")
         self.arena_env_name = cfg.get("arena_env_name", "put_item_in_fridge_and_close_door")
@@ -114,16 +120,19 @@ class IsaacLabArenaEnv(gym.Env):
         # normalised action chunk (decode_actions_flat). Built once per worker from
         # the checkpoint path; loads the HF processor (no Isaac dependency).
         self.gr00t_model_path = cfg.get("gr00t_model_path", None) or cfg.get("model_path", None)
-        self.embodiment_tag = cfg.get("embodiment_tag", "gr1")
         self.adapter = GR00TN16Adapter(self.gr00t_model_path, embodiment_tag=self.embodiment_tag)
+
+        # Graded subtask reward (0/0.5/1.0) vs single composite +1; drives the
+        # full-success threshold used for done / success_once (see _success_reward_thresh).
+        self.subtask_reward = bool(cfg.get("subtask_reward", False))
 
         self._generator = np.random.default_rng(seed=self.seed)
         self.env = None
         self.prev_step_reward = np.zeros(self.num_envs)
-        self.use_rel_reward = False
-        # Latest raw 26-DOF policy-order joint state; the action decoder converts the
-        # model's relative action to absolute joints against this live state.
-        self._last_state26 = np.zeros((self.num_envs, GR1.action_dim), dtype=np.float32)
+        self.use_rel_reward = bool(cfg.get("use_rel_reward", False))
+        # Latest raw policy-order joint state; the action decoder converts the model's
+        # relative action to absolute joints against this live state.
+        self._last_policy_state = np.zeros((self.num_envs, self.embodiment_spec.action_dim), dtype=np.float32)
         self._last_full_image = None
 
         self._init_metrics()
@@ -231,9 +240,7 @@ class IsaacLabArenaEnv(gym.Env):
         env_cfg = build_env_cfg_without_recorder(env_builder)
         # Turn composite-success into an RL reward + disable auto-reset (LIBERO-style).
         if bool(self.cfg.get("rl_success_reward", True)):
-            apply_rl_reward_and_disable_autoreset(
-                env_cfg, subtask_reward=bool(self.cfg.get("subtask_reward", False))
-            )
+            apply_rl_reward_and_disable_autoreset(env_cfg, subtask_reward=self.subtask_reward)
         self.env = env_builder.make_registered(env_cfg=env_cfg)
 
         # Resolve the privileged-obs width from the task's declared obs group now that the
@@ -257,6 +264,17 @@ class IsaacLabArenaEnv(gym.Env):
     def elapsed_steps(self) -> np.ndarray:
         return self._elapsed_steps
 
+    @property
+    def _success_reward_thresh(self) -> float:
+        """Reward above which the task counts as FULLY solved.
+
+        With the graded subtask reward, a value in (0, 1) is a partial milestone, so
+        full success requires the composite reward (>= 1.0). With the plain success
+        reward (0/1) this reduces to ``> 0``. Used for both ``done`` (chunk_step) and
+        ``success_once`` (_record_metrics) so the two stay consistent.
+        """
+        return 1.0 - 1e-6 if self.subtask_reward else 0.0
+
     def _init_metrics(self):
         self.success_once = np.zeros(self.num_envs, dtype=bool)
         self.returns = np.zeros(self.num_envs)
@@ -275,10 +293,10 @@ class IsaacLabArenaEnv(gym.Env):
             self.returns[:] = 0.0
             self._elapsed_steps[:] = 0
 
-    def _record_metrics(self, step_reward, terminations, infos):
+    def _record_metrics(self, step_reward, infos):
         episode_info = {}
         self.returns += step_reward
-        self.success_once = self.success_once | (step_reward > 0)
+        self.success_once = self.success_once | (step_reward > self._success_reward_thresh)
         episode_info["success_once"] = self.success_once.copy()
         episode_info["return"] = self.returns.copy()
         episode_info["episode_len"] = self.elapsed_steps.copy()
@@ -320,12 +338,10 @@ class IsaacLabArenaEnv(gym.Env):
 
         self._elapsed_steps += 1
         raw_obs, _reward, terminations, _, infos = self.env.step(sim_actions)
-        self.last_obs = raw_obs
-        self.last_infos = infos
 
         obs = self._wrap_obs(raw_obs)
         step_reward = self._calc_step_reward(_reward.cpu().numpy())
-        infos = self._record_metrics(step_reward, terminations, infos)
+        infos = self._record_metrics(step_reward, infos)
 
         if self.video_cfg.save_video:
             plot_infos = {
@@ -382,13 +398,13 @@ class IsaacLabArenaEnv(gym.Env):
         """Execute a chunk of actions, tracking first-done semantics.
 
         The whole **normalised** chunk is decoded into 26-DOF policy joints **once**
-        here, against a single base state captured at chunk entry (``_last_state26``
+        here, against a single base state captured at chunk entry (``_last_policy_state``
         = the obs that fed this chunk's inference; ``env_loop`` runs exactly one
         inference per chunk). This mirrors the source rollout's single fixed-base
         ``decode_actions_flat`` over the full horizon and is required for
         relative-action checkpoints (see the module docstring): per-step decoding
         against the live state would accumulate offsets and diverge. ``_wrap_obs``
-        keeps updating ``_last_state26`` so the *next* chunk decodes against its own
+        keeps updating ``_last_policy_state`` so the *next* chunk decodes against its own
         chunk-start state.
 
         Args:
@@ -423,12 +439,8 @@ class IsaacLabArenaEnv(gym.Env):
                 if isinstance(step_reward, torch.Tensor)
                 else torch.as_tensor(step_reward)
             )
-            # Composite-success threshold: with the graded subtask reward, reward in (0,1)
-            # means a partial (e.g. PnP-only) milestone, NOT full success — so success/`complete`
-            # must require reward>=1.0 (both subtasks). With the plain success reward (0/1) this
-            # is equivalent to reward>0.
-            done_thresh = 1.0 - 1e-6 if bool(self.cfg.get("subtask_reward", False)) else 0.0
-            ever_done = ever_done | (reward_val > done_thresh).view(-1)
+            # Full-success threshold (subtask mode: reward in (0,1) is partial, not done).
+            ever_done = ever_done | (reward_val > self._success_reward_thresh).view(-1)
             raw_chunk_terminations.append(ever_done.clone())
             chunk_rewards.append(step_reward)
             raw_chunk_truncations.append(truncations)
@@ -445,14 +457,14 @@ class IsaacLabArenaEnv(gym.Env):
     def _build_raw_state_groups(self) -> "OrderedDict[str, np.ndarray]":
         """Per-modality raw (un-normalised) joint state {group: (B, 1, d)}.
 
-        Built from the cached 26-DOF policy-order joint state ``_last_state26``.
+        Built from the cached policy-order joint state ``_last_policy_state``.
         Called once per chunk (from ``chunk_step``), so this is the chunk-start
         (inference) state — the single ``base`` against which ``decode_action``
         converts the whole relative-action chunk to absolute joints. The group
         split (left_arm / right_arm / left_hand / right_hand) comes from the
         embodiment spec bound to ``self.joint_map``.
         """
-        groups = split_flat_state_to_groups(self._last_state26, self.joint_map.spec.state_group_dims)
+        groups = split_flat_state_to_groups(self._last_policy_state, self.joint_map.spec.state_group_dims)
         return OrderedDict(
             (key, value.reshape(self.num_envs, 1, -1).astype(np.float32)) for key, value in groups.items()
         )
@@ -461,7 +473,7 @@ class IsaacLabArenaEnv(gym.Env):
         """Decode a whole normalised chunk (B, chunk, max_action_dim) → (B, chunk, 26).
 
         The base ``raw_state_groups`` is built **once** from the chunk-start joint
-        state (``_last_state26``) and broadcast across the whole horizon — exactly
+        state (``_last_policy_state``) and broadcast across the whole horizon — exactly
         the source rollout's single ``decode_actions_flat(full_chunk, base_groups)``
         call (``raw_state_groups`` T=1). For relative-action checkpoints this gives
         ``base + δ[i]`` per step (NOT ``base + δ[i-1] + δ[i]`` as live-state per-step
@@ -491,13 +503,13 @@ class IsaacLabArenaEnv(gym.Env):
         ``Gr00tN1d6ForSAC._obs_to_state_dict`` reads. ``full_image`` is kept at the
         top level for video only (``create_env_batch_dataproto`` ignores it).
         """
-        full_image, state_26 = self._extract_image_and_state(raw_obs)
+        full_image, policy_state = self._extract_image_and_state(raw_obs)
         # Cache the live raw joint state for the next step's action decode.
-        self._last_state26 = state_26
+        self._last_policy_state = policy_state
         self._last_full_image = full_image
         task_descriptions = [self.task_description] * self.num_envs
 
-        inputs, _ = self.adapter.build_inputs(full_image, state_26, task_descriptions)
+        inputs, _ = self.adapter.build_inputs(full_image, policy_state, task_descriptions)
         # Eagle pixel_values is a per-sample list of (n_patches, C, H, W) tensors;
         # stack to (B, n_patches, C, H, W) so the replay buffer can store it.
         pixel_values = inputs["pixel_values"]
@@ -611,7 +623,7 @@ class IsaacLabArenaEnv(gym.Env):
         return out
 
     def _extract_image_and_state(self, obs) -> "tuple[np.ndarray, np.ndarray]":
-        """Return ``(full_image (B,H,W,C) uint8, state_26 (B,26) float32)``."""
+        """Return ``(full_image (B,H,W,C) uint8, policy_state (B, policy_dim) float32)``."""
         # --- image ---
         camera_obs = obs.get("camera_obs", {})
         if self.camera_name in camera_obs:
@@ -635,15 +647,15 @@ class IsaacLabArenaEnv(gym.Env):
         else:
             full_image = rgb
 
-        # --- state: extract 26 GR00T joints from 54-DOF robot_joint_pos ---
-        robot_joint_pos = obs["policy"]["robot_joint_pos"]  # (B, 54+)
+        # --- state: gather the policy-order joints from the full robot_joint_pos ---
+        robot_joint_pos = obs["policy"]["robot_joint_pos"]  # (B, state_full_dim+)
         if isinstance(robot_joint_pos, torch.Tensor):
             robot_joint_pos_np = robot_joint_pos.cpu().numpy()
         else:
             robot_joint_pos_np = np.asarray(robot_joint_pos)
 
-        state_26 = self.joint_map.gather_state(robot_joint_pos_np)  # (B, 26)
-        return full_image, state_26.astype(np.float32)
+        policy_state = self.joint_map.gather_state(robot_joint_pos_np)  # (B, policy_dim)
+        return full_image, policy_state.astype(np.float32)
 
     # ------------------------------------------------------------------
     # Misc helpers

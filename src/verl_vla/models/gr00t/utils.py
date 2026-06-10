@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "GR00TDim",
+    "JointSpaceYamls",
     "EmbodimentSpec",
     "GR1",
     "EMBODIMENTS",
@@ -69,6 +70,23 @@ class GR00TDim(IntEnum):
 
 
 @dataclass(frozen=True)
+class JointSpaceYamls:
+    """Joint-space YAML filenames defining an embodiment's DOF layouts.
+
+    These are the **single source of truth** for the policy ⇄ sim index tables
+    (see ``verl_vla.envs.arena_env``); they ship under
+    ``isaaclab_arena_gr00t/embodiments/<tag>``:
+        policy: GR00T policy joint space (group -> [joint_name, ...]).
+        action: full sim action joint space (joint_name -> column index).
+        state:  full sim state joint space (joint_name -> column index).
+    """
+
+    policy: str
+    action: str
+    state: str
+
+
+@dataclass(frozen=True)
 class EmbodimentSpec:
     """Embodiment-specific GR00T constants, grouped in one place.
 
@@ -77,15 +95,18 @@ class EmbodimentSpec:
     modality config for ``state_group_dims`` and the action width).
 
     Fields:
-        name:             embodiment tag (matches ``gr00t.data.EmbodimentTag``).
-        embodiment_id:    projector index into the action head.
-        state_group_dims: per-modality split of the flat policy-order state/action
-                          vector, in joint-space yaml order.
+        name:              embodiment tag (matches ``gr00t.data.EmbodimentTag``).
+        embodiment_id:     projector index into the action head.
+        state_group_dims:  per-modality split of the flat policy-order state/action
+                           vector, in joint-space yaml order.
+        joint_space_yamls: filenames of this embodiment's joint-space YAMLs (policy /
+                           action / state DOF layouts); ``None`` if not applicable.
     """
 
     name: str
     embodiment_id: int
     state_group_dims: "OrderedDict[str, int]"
+    joint_space_yamls: Optional[JointSpaceYamls] = None
 
     @property
     def action_dim(self) -> int:
@@ -147,11 +168,17 @@ def load_embodiment_id(tag: str, model_path: Optional[str] = None) -> int:
 
 
 # GR1 arms-only: joint groups in the order of gr00t_26dof_joint_space.yaml, plus
-# the projector index from the embodiment_id table (``"gr1": 20``).
+# the projector index from the embodiment_id table (``"gr1": 20``) and the Arena
+# joint-space YAML filenames (26-DOF policy / 36-DOF action / 54-DOF state).
 GR1 = EmbodimentSpec(
     name="gr1",
     embodiment_id=EMBODIMENT_ID_FALLBACK["gr1"],
     state_group_dims=OrderedDict(left_arm=7, right_arm=7, left_hand=6, right_hand=6),
+    joint_space_yamls=JointSpaceYamls(
+        policy="gr00t_26dof_joint_space.yaml",
+        action="36dof_joint_space.yaml",
+        state="54dof_joint_space.yaml",
+    ),
 )
 assert GR1.action_dim == 26
 

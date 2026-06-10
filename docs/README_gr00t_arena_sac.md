@@ -140,7 +140,7 @@ Key tunables (anchors as shipped):
 > These are **docker-only** (real verl + Isaac Sim + gr00t + GPU). None run on a CPU dev host. Full detail: `docs/MIGRATION_gr00t_arena.md §11.C`.
 
 - **Gate 0 — real compose.** `python -m verl_vla.trainer.main_sac --cfg job` with the run-script overrides; replaces the CPU proxy. (Also resolves the `actor.grad_clip` `+`-prefix question.)
-- **Gate 1 — #1 decode numerical equivalence (HARD GATE).** With the real checkpoint + real `GR00TN16Adapter`: assert the env `chunk_step` decoded chunk equals one-shot `decode_actions_flat(full_chunk, base_groups)` element-wise (`atol=1e-5`); then perturb `env._last_state26` **after** chunk-start capture and assert decoded values are **unchanged** (proves fixed base — the §8.J P0 fix).
+- **Gate 1 — #1 decode numerical equivalence (HARD GATE).** With the real checkpoint + real `GR00TN16Adapter`: assert the env `chunk_step` decoded chunk equals one-shot `decode_actions_flat(full_chunk, base_groups)` element-wise (`atol=1e-5`); then perturb `env._last_policy_state` **after** chunk-start capture and assert decoded values are **unchanged** (proves fixed base — the §8.J P0 fix).
 - **Gate 2 — end-to-end.** 1–2 `rollout_interval`s; assert replay carries `t0.obs.images`, `t0.action.action` (normalised), `feedback.terminations`, correctly-shaped `info.*`.
 - **Gate 3 — FSDP2 forward.** `sac_sample_actions` / `sac_get_critic_value` / `bc_loss` run under FSDP2 without DTensor errors; `wrap_policy.transformer_layer_cls_to_wrap` covers all action-head submodules.
 - **Gate 4 — smoke.** `smoke_test_gr00t_arena.py --num-envs 2 --denoise-steps 2` → `8/8 PASS`; then `eval_arena_gr00t.py --reset-only`; then a short `--actor sac` eval.
