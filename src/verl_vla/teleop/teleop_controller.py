@@ -83,13 +83,6 @@ class TeleopController:
             configured_devices = [configured_device]
         elif isinstance(configured_devices, str):
             configured_devices = [configured_devices]
-        enabled_devices = [
-            item
-            for item in configured_devices
-            if item is not None and str(item).strip().lower() not in {"", "none", "null"}
-        ]
-        if not enabled_devices:
-            return None
         return cls(cfg, rank=rank, stage_id=stage_id, env_id=env_id, env_type=env_type, device=device)
 
     def publish_obs(

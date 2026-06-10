@@ -274,7 +274,7 @@ class BaseEnv(gym.Env):
 
     def create_teleops(self):
         teleop_cfg = load_teleop_config(self.cfg)
-        if not teleop_cfg.enable or not teleop_cfg.devices:
+        if not teleop_cfg.enable:
             return []
 
         return [

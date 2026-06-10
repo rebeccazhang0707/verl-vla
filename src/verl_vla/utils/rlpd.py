@@ -23,10 +23,6 @@ from tqdm import tqdm
 from verl import DataProto
 from verl.protocol import pad_dataproto_to_divisor
 
-from verl_vla.utils.dataloader.lerobot import (
-    RLPDTransitionDataset,
-)
-
 
 def pad_dataproto_to_divisor_with_valid_mask(
     batch: DataProto,
@@ -57,6 +53,8 @@ def iter_rlpd_replay_prefill_batches(config, global_steps: int):
     num_workers = int(rlpd_config.get("num_workers", 0))
     prefetch_factor = int(rlpd_config.get("prefetch_factor", 2))
     requested_episodes = OmegaConf.to_container(rlpd_config.get("episodes")) if rlpd_config.get("episodes") else None
+
+    from verl_vla.utils.dataloader.lerobot import RLPDTransitionDataset
 
     transition_dataset = RLPDTransitionDataset(
         repo_id=rlpd_config.repo_id,
