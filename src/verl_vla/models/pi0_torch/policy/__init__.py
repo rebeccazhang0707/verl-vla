@@ -12,11 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .arena_policy import ArenaPi0Input, ArenaPi0Output
 from .base import Pi0Input, Pi0Output
 from .lerobot_policy import LerobotPi0Input, LerobotPi0Output
 from .libero_policy import LiberoPi0Input, LiberoPi0Output
 
 _PI0_POLICY_REGISTRY = {
+    "arena": (ArenaPi0Input, ArenaPi0Output),
     "libero": (LiberoPi0Input, LiberoPi0Output),
     "lerobot": (LerobotPi0Input, LerobotPi0Output),
 }

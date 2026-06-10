@@ -18,12 +18,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from .arena import ArenaLeRobotStrategy
 from .base import BaseLeRobotStrategy
 from .libero import LiberoLeRobotStrategy
 
 StrategyFactory = Callable[..., BaseLeRobotStrategy]
 
 _REGISTRY: dict[str, StrategyFactory] = {
+    "arena": ArenaLeRobotStrategy,
     "libero": LiberoLeRobotStrategy,
 }
 

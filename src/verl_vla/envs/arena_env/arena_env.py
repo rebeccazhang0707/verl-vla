@@ -130,7 +130,14 @@ class IsaacLabArenaEnv(BaseEnv):
         action_mgr = getattr(base, "action_manager", None)
         if action_mgr is not None:
             self.action_dim = int(action_mgr.total_action_dim)
-        logger.info("Arena environment initialised: action_dim=%d cameras=%s", self.action_dim, self.camera_names)
+        joint_pos_space = self.observation_space["policy"]["robot_joint_pos"]
+        self.state_dim = int(np.prod(joint_pos_space.shape))
+        logger.info(
+            "Arena environment initialised: action_dim=%d state_dim=%d cameras=%s",
+            self.action_dim,
+            self.state_dim,
+            self.camera_names,
+        )
 
     @property
     def _raw_env(self):
