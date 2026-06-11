@@ -40,6 +40,8 @@ class IsaacLabArenaEnv(BaseEnv):
     """Arena vector environment with BaseEnv-owned chunking, recording and teleop."""
 
     env_type = "arena"
+    USE_POLICY_ACTION = False
+    _DEFAULT_BASE_HEIGHT_COMMAND = 0.75
 
     def __init__(self, cfg, rank: int, world_size: int, stage_id: int = 0):
         disable_lightwheel_ssl_verify()
@@ -58,6 +60,8 @@ class IsaacLabArenaEnv(BaseEnv):
         self.state_dim = int(cfg.get("state_dim", self.action_dim))
         self.env = None
         self.app = None
+        self._stable_actions = np.zeros((int(cfg.num_envs), self.action_dim), dtype=np.float32)
+        self._stable_actions[:, 46] = self._DEFAULT_BASE_HEIGHT_COMMAND
 
         from isaaclab.app import AppLauncher
 
@@ -160,6 +164,8 @@ class IsaacLabArenaEnv(BaseEnv):
         self.success_once[env_ids] = False
         self.returns[env_ids] = 0.0
         self._elapsed_steps[env_ids] = 0
+        self._stable_actions[env_ids] = 0.0
+        self._stable_actions[env_ids, 46] = self._DEFAULT_BASE_HEIGHT_COMMAND
 
     def _record_metrics(self, step_reward, infos, env_ids):
         env_ids = np.asarray(env_ids, dtype=np.int64)
@@ -188,7 +194,10 @@ class IsaacLabArenaEnv(BaseEnv):
         reset_env_ids = torch.as_tensor(env_ids, dtype=torch.int64, device=self.device)
         raw_obs, infos = self._raw_env.reset(env_ids=reset_env_ids)
         self._reset_metrics(env_ids)
-        return self._make_obs(raw_obs, env_ids=env_ids), infos
+        obs = self._make_obs(raw_obs, env_ids=env_ids)
+        if not self.USE_POLICY_ACTION:
+            self._update_stable_actions_from_obs(obs["observation"], env_ids)
+        return obs, infos
 
     @override
     def env_step(self, action, *, env_ids):
@@ -211,6 +220,36 @@ class IsaacLabArenaEnv(BaseEnv):
             "next.truncated": to_tensor(np.asarray(timeouts, dtype=bool)),
             "info": infos,
         }
+
+    # Stable-action adapter: temporarily replace policy actions with a held pose.
+
+    @override
+    def step_with_teleop_and_recording(self, action, critic_value=None):
+        if not self.USE_POLICY_ACTION:
+            action = self._replace_with_stable_actions(action)
+        return super().step_with_teleop_and_recording(action, critic_value=critic_value)
+
+    def _replace_with_stable_actions(self, action) -> np.ndarray:
+        action = np.asarray(action).copy()
+        n = min(self.num_envs, action.shape[0])
+        action[:n] = self._stable_actions[:n]
+        return action
+
+    @override
+    def apply_teleop_action(self, action):
+        action = action if self.USE_POLICY_ACTION else self._replace_with_stable_actions(action)
+        action, intervention_mask = super().apply_teleop_action(action)
+        if not self.USE_POLICY_ACTION:
+            self._stable_actions[intervention_mask, :43] = action[intervention_mask, :43]
+            self._stable_actions[intervention_mask, 46] = action[intervention_mask, 46]
+        return action, intervention_mask
+
+    def _update_stable_actions_from_obs(self, observations: list[dict[str, Any]], env_ids: np.ndarray) -> None:
+        for obs, env_id in zip(observations, np.asarray(env_ids, dtype=np.int64), strict=True):
+            state = np.asarray(obs["observation.state"], dtype=np.float32)
+            self._stable_actions[int(env_id), :43] = state[:43]
+
+    # End stable-action adapter.
 
     @override
     def env_close(self) -> None:

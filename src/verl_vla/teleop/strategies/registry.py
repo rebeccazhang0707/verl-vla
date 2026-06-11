@@ -16,6 +16,7 @@ from typing import Any
 
 from verl_vla.teleop.strategies.base import InterventionStrategyBase
 from verl_vla.teleop.strategies.keyboard_libero import LiberoKeyboardStrategy
+from verl_vla.teleop.strategies.xr_controller_arena import ArenaXRControllerStrategy
 from verl_vla.teleop.strategies.xr_controller_libero import LiberoXRControllerStrategy
 
 
@@ -39,6 +40,7 @@ class InterventionStrategyRegistry:
 _REGISTRY = InterventionStrategyRegistry()
 _REGISTRY.register(LiberoKeyboardStrategy)
 _REGISTRY.register(LiberoXRControllerStrategy)
+_REGISTRY.register(ArenaXRControllerStrategy)
 
 
 def get_strategy(env_type: str, device_type: str, cfg: Any) -> InterventionStrategyBase:
