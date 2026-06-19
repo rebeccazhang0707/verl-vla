@@ -16,7 +16,6 @@ import asyncio
 import logging
 import os
 import time
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -26,7 +25,6 @@ from verl.single_controller.ray import RayWorkerGroup
 
 from verl_vla.utils.data import get_dataproto_from_prefix, stack_dataproto_with_padding
 from verl_vla.utils.keys import ACTION_KEY, FEEDBACK_KEY, OBS_KEY
-from verl_vla.utils.recorder import merge_lerobot_datasets
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -54,7 +52,10 @@ class EnvLoop:
         self.envs_per_stage = self.total_envs // self.stage_num
 
         self.default_max_interactions = config.env.train.max_episode_steps // config.env.actor.model.num_action_chunks
-        self.configured_max_interactions = config.env.train.get("max_interactions", self.default_max_interactions)
+        configured_max_interactions = config.env.train.get("max_interactions", None)
+        self.configured_max_interactions = (
+            self.default_max_interactions if configured_max_interactions is None else configured_max_interactions
+        )
         self.max_interactions = self.configured_max_interactions
         self.warmup_max_interactions = False
 
@@ -189,8 +190,6 @@ class EnvLoop:
 
         await asyncio.gather(*[asyncio.create_task(_stage_loop(sid)) for sid in range(self.stage_num)])
         self.env_wg.finish_rollout()
-        # lerobot_dataset = self._pop_lerobot_dataset()
-
         collated_state_ids = np.concatenate(staged_state_ids, axis=0)
         collated_meta_info = dict(prompts.meta_info)
         if any(task_ids is not None for task_ids in staged_task_ids):
@@ -219,25 +218,6 @@ class EnvLoop:
             "count/env_loop_rollout_wait_calls": rollout_wait_calls,
         }
         return output, run_metrics
-
-    def _pop_lerobot_dataset(self):
-        recorder_cfg = self.config.env.train.get("dataset_recorder", {})
-        if not recorder_cfg.get("enable", False):
-            return None
-
-        rank_datasets = [dataset for dataset in self.env_wg.pop_lerobot_dataset() if dataset is not None]
-        if not rank_datasets:
-            return None
-
-        root = Path(recorder_cfg.get("root", "/tmp/verl_vla_lerobot_records"))
-        repo_id = recorder_cfg.get("repo_id", "local/verl_vla_libero")
-        return merge_lerobot_datasets(
-            roots=[dataset["root"] for dataset in rank_datasets],
-            output_root=root / repo_id,
-            repo_id=repo_id,
-            repo_ids=[dataset["repo_id"] for dataset in rank_datasets],
-            append=True,
-        )
 
     def _restructure_obs_data(self, data_proto: DataProto) -> list[DataProto]:
         num_workers = self.env_wg.world_size

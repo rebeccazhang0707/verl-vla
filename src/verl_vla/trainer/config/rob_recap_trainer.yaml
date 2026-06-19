@@ -1,0 +1,36 @@
+defaults:
+  - model_engine: dp
+  - ./actor@actor_rollout_ref.actor: ${model_engine}_actor
+  - data@data: legacy_data
+  - ref@actor_rollout_ref.ref: ${model_engine}_ref
+  - rollout@actor_rollout_ref.rollout: rollout
+  - model@actor_rollout_ref.model: hf_model
+  - critic@critic: ${model_engine}_critic
+  - legacy_reward_impl
+  - reward@reward: reward
+  - ./env@env: rob_sac_env
+  - _self_
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+trainer:
+  project_name: recap
+  experiment_name: env_loop
+  logger: ["console"]
+  nnodes: 1
+  n_gpus_per_node: 1
+  n_env_workers_per_node: 1
+  ray_wait_register_center_timeout: 300
+  device: cuda
+  separate_train_inference: false
+
+recap:
+  num_rollouts: 1
+  task_id: 0
+  state_id: 0
+  returns:
+    c_fail_coef: 1.0
+    clip_min: -1.0
+    clip_max: 0.0
