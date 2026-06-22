@@ -395,7 +395,7 @@ class SACTrainingWorker(TrainingWorker):
                 valids=micro_batch.batch["info.valids"],
             )
             if self.td3_enabled:
-                bc_loss = self.engine.module.bc_loss(
+                bc_loss = self.engine.module.sft_loss(
                     obs=s0,
                     tokenizer=self.tokenizer,
                     actions=a0,

@@ -24,6 +24,16 @@ LIBERO_ACTION_DIM = 7
 
 
 class LiberoPi0Input(Pi0Input):
+    @staticmethod
+    def _to_bchw(image: torch.Tensor) -> torch.Tensor:
+        if image.ndim != 4:
+            raise ValueError(f"Expected batched image tensor with 4 dims, got shape={tuple(image.shape)}.")
+        if image.shape[1] == 3:
+            return image
+        if image.shape[-1] == 3:
+            return image.permute(0, 3, 1, 2)
+        raise ValueError(f"Expected image tensor in BCHW or BHWC format, got shape={tuple(image.shape)}.")
+
     @override
     @classmethod
     def from_env_obs(cls, env_obs: DataProto) -> "LiberoPi0Input":
@@ -35,8 +45,8 @@ class LiberoPi0Input(Pi0Input):
         device = images.device
 
         batch_size = images.shape[0]
-        cam_high = images.permute(0, 3, 1, 2)
-        left_wrist = wrist_images.permute(0, 3, 1, 2)  # (B, H, W, C) -> (B, C, H, W)
+        cam_high = cls._to_bchw(images)
+        left_wrist = cls._to_bchw(wrist_images)
         empty_images = torch.zeros(
             (batch_size, 3, cam_high.shape[2], cam_high.shape[3]),
             device=device,

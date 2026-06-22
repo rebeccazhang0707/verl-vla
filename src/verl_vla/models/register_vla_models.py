@@ -15,17 +15,22 @@
 
 """Utility helpers to register custom VLA models with Hugging Face Auto classes."""
 
-from transformers import AutoConfig, AutoImageProcessor, AutoProcessor
+from transformers import AutoConfig, AutoImageProcessor, AutoModel, AutoProcessor
 from verl.utils.transformers_compat import get_auto_model_for_vision2seq
 
 from .openvla_oft.configuration_prismatic import OpenVLAConfig
 from .openvla_oft.modeling_prismatic import OpenVLAForActionPrediction
 from .openvla_oft.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 from .pi0_torch import PI0ForActionPrediction, PI0TorchConfig
+from .recap_value_critic import (
+    ReCapValueCriticConfig,
+    ReCapValueCriticForConditionalGeneration,
+)
 
 _REGISTERED_MODELS = {
     "openvla_oft": False,
     "pi0_torch": False,
+    "recap_value_critic": False,
 }
 AutoModelForVision2Seq = get_auto_model_for_vision2seq()
 
@@ -54,7 +59,20 @@ def register_pi0_torch_model() -> None:
     _REGISTERED_MODELS["pi0_torch"] = True
 
 
+def register_recap_value_critic_model() -> None:
+    """Register the RECAP value critic with the HF auto classes."""
+    if _REGISTERED_MODELS["recap_value_critic"]:
+        return
+
+    AutoConfig.register("recap_value_critic", ReCapValueCriticConfig)
+    AutoModel.register(ReCapValueCriticConfig, ReCapValueCriticForConditionalGeneration)
+    AutoModelForVision2Seq.register(ReCapValueCriticConfig, ReCapValueCriticForConditionalGeneration)
+
+    _REGISTERED_MODELS["recap_value_critic"] = True
+
+
 def register_vla_models() -> None:
     """Register all custom VLA models with Hugging Face."""
     register_openvla_oft()
     register_pi0_torch_model()
+    register_recap_value_critic_model()

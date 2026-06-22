@@ -59,6 +59,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
 
     def __init__(self, config: PI0TorchConfig):
         super().__init__(config)
+        SupportSFTTraining.__init__(self, config)
         self.model: PI0Model = None
         self.state_norm_stats = config.state_norm_stats
         self.action_norm_stats = config.action_norm_stats
@@ -256,21 +257,25 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         vision_tower.requires_grad_(False)
         vision_tower.eval()
 
+    @override
     def sft_init(self):
-        """Initialize the model for supervised fine-tuning."""
+        """Override SupportSFTTraining.sft_init for PI0 SFT setup."""
         self.freeze_vision_tower()
-        register_fsdp_forward_method(self, "bc_loss")
+        register_fsdp_forward_method(self, "sft_loss")
 
-    def bc_loss(
+    @override
+    def sft_loss(
         self,
         obs: DataProto,
         tokenizer: torch.nn.Module,
         actions: dict[str, torch.Tensor],
         valids: torch.Tensor,
         action_mask: torch.Tensor | None = None,
+        target_values: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Calculate the BC loss for the actor."""
+        """Override SupportSFTTraining.sft_loss for PI0 BC training."""
 
+        del target_values
         pi0_input_cls, _ = self._get_pi0_policy_classes()
         action_tensor = actions["action"]
         action_horizon = self.model.n_action_steps
@@ -519,7 +524,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
 
         self.freeze_vision_tower()
         forward_methods = [
-            "bc_loss",
+            "sft_loss",
             "sac_sample_actions",
             "sac_forward_critic",
             "sac_forward_actor",

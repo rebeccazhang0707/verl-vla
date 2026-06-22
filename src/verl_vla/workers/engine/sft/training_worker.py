@@ -20,6 +20,7 @@ from verl.utils.device import get_device_id, get_device_name
 from verl.workers.config import TrainingWorkerConfig
 from verl.workers.engine_workers import TrainingWorker
 
+from verl_vla.trainer.recap.returns import RECAP_RETURN_FIELD
 from verl_vla.workers.config import SFTActorConfig
 
 
@@ -84,6 +85,8 @@ class SFTTrainingWorker(TrainingWorker):
     @staticmethod
     def _extract_sft_actions(micro_batch: DataProto) -> dict[str, torch.Tensor]:
         batch = micro_batch.batch
+        if "action" not in batch:
+            return {}
         action = batch["action"]
         # TODO(remove after datasets are fixed): compatibility for old LeRobot dumps that
         # stored action chunks inside each action entry. Standard SFT data is [B, T, D].
@@ -103,7 +106,15 @@ class SFTTrainingWorker(TrainingWorker):
 
     @staticmethod
     def _extract_sft_action_mask(micro_batch: DataProto) -> torch.Tensor | None:
+        if "action_is_pad" not in micro_batch.batch:
+            return None
         return (~micro_batch.batch["action_is_pad"].bool()).float()
+
+    @staticmethod
+    def _extract_sft_target_values(micro_batch: DataProto) -> torch.Tensor | None:
+        if RECAP_RETURN_FIELD not in micro_batch.batch:
+            return None
+        return micro_batch.batch[RECAP_RETURN_FIELD]
 
     def _update_sft_policy(self, data: DataProto) -> dict[str, float]:
         if not self.actor_ema_initialized:
@@ -126,25 +137,30 @@ class SFTTrainingWorker(TrainingWorker):
             grad_accum_steps *= torch.distributed.get_world_size()
 
             loss_list = []
+            sft_metric_lists: dict[str, list[torch.Tensor]] = {}
             with marked_timer("sft_forward_backward", timing_raw, color="red"):
                 self.engine.optimizer_zero_grad()
                 for micro_batches in split_micro_batches:
                     for micro_batch in micro_batches:
                         micro_batch = micro_batch.to(get_device_id())
                         obs = self._extract_sft_obs(micro_batch)
-                        actions = self._extract_sft_actions(micro_batch)
                         valids = self._extract_sft_valids(micro_batch)
+                        actions = self._extract_sft_actions(micro_batch)
                         action_mask = self._extract_sft_action_mask(micro_batch)
+                        target_values = self._extract_sft_target_values(micro_batch)
                         with torch.autocast(device_type=get_device_name(), dtype=torch.bfloat16):
-                            bc_loss = self.engine.module.bc_loss(
+                            sft_loss = self.engine.module.sft_loss(
                                 obs=obs,
                                 tokenizer=self.tokenizer,
                                 actions=actions,
                                 valids=valids,
                                 action_mask=action_mask,
+                                target_values=target_values,
                             )
-                        (bc_loss / grad_accum_steps).backward()
-                        loss_list.append(bc_loss.detach())
+                        (sft_loss / grad_accum_steps).backward()
+                        loss_list.append(sft_loss.detach())
+                        for name, value in getattr(self.engine.module, "sft_metrics", {}).items():
+                            sft_metric_lists.setdefault(name, []).append(value.detach().float())
 
             with marked_timer("sft_optimizer_step", timing_raw):
                 grad_norm = self.engine.optimizer_step()
@@ -152,17 +168,30 @@ class SFTTrainingWorker(TrainingWorker):
                 self._apply_actor_ema_to_actor_module()
 
             mean_loss = torch.stack(loss_list).mean().item() if loss_list else 0.0
+            sft_metrics = {
+                name: torch.stack(values).mean().item() for name, values in sft_metric_lists.items() if values
+            }
+            grad_norm_before_clip = grad_norm if isinstance(grad_norm, float) else float(grad_norm)
+            grad_clip = float(self.engine.optimizer_config.clip_grad)
+            if torch.isfinite(torch.tensor(grad_norm_before_clip)):
+                grad_norm_after_clip = min(grad_norm_before_clip, grad_clip)
+            else:
+                grad_norm_after_clip = grad_norm_before_clip
 
         metrics = {
-            "loss": mean_loss,
-            "grad_norm": grad_norm if isinstance(grad_norm, float) else float(grad_norm),
+            "sft/loss": mean_loss,
+            "sft/grad_norm": grad_norm_before_clip,
+            "sft/grad_norm_before_clip": grad_norm_before_clip,
+            "sft/grad_norm_after_clip": grad_norm_after_clip,
             "sft/lr": self.actor_config.optim.lr,
+            "sft/grad_clip": grad_clip,
             "sft/num_mini_batches": len(mini_batches),
             "sft/num_micro_batches": sum(len(micro_batches) for micro_batches in split_micro_batches),
             "sft/grad_accum_steps": grad_accum_steps,
             "sft/actor_ema_enabled": float(self.actor_ema_enabled),
             "sft/actor_ema_decay": self.actor_ema_decay,
         }
+        metrics.update(sft_metrics)
         metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
         return metrics
 

@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .value_head import DistributionalValueHead
+from .configuration_recap_value_critic import ReCapValueCriticConfig
+from .modeling_recap_value_critic import ReCapValueCriticForConditionalGeneration, ReCapValueCriticForPrediction
 
-__all__ = ["DistributionalValueHead"]
+__all__ = [
+    "ReCapValueCriticConfig",
+    "ReCapValueCriticForConditionalGeneration",
+    "ReCapValueCriticForPrediction",
+]

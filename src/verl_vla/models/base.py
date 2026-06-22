@@ -155,21 +155,32 @@ class SupportSACTraining:
 
 class SupportSFTTraining:
     """
-    Base class for models that support SFT/BC-style supervised updates.
+    Base class for models that expose one unified SFT loss interface.
 
     This intentionally does NOT inherit from `abc.ABC` because model classes may
     be wrapped or rewritten by FSDP at runtime.
     """
 
-    def sft_init(self):
-        raise NotImplementedError("Subclasses must implement sft_init method.")
+    def __init__(self, config: Any):
+        self.config = config
+        self.sft_metrics: dict[str, torch.Tensor] = {}
 
-    def bc_loss(
+    def sft_init(self):
+        self.sft_metrics = {}
+        try:
+            from torch.distributed.fsdp import register_fsdp_forward_method
+        except ImportError:
+            return
+        register_fsdp_forward_method(self, "sft_loss")
+
+    def sft_loss(
         self,
         obs: DataProto,
         tokenizer: torch.nn.Module,
         actions: dict[str, torch.Tensor],
         valids: torch.Tensor,
         action_mask: torch.Tensor | None = None,
+        target_values: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        raise NotImplementedError("Subclasses must implement bc_loss method.")
+        del obs, tokenizer, actions, valids, action_mask, target_values
+        raise NotImplementedError("Subclasses must implement sft_loss method.")
