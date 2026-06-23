@@ -18,7 +18,16 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
+
+
+def list_lerobot_data_files(dataset_root: str | Path) -> list[Path]:
+    data_files = sorted((Path(dataset_root) / "data").glob("chunk-*/file-*.parquet"))
+    if not data_files:
+        raise FileNotFoundError(f"No LeRobot data files found under {Path(dataset_root) / 'data'}.")
+    return data_files
 
 
 def load_lerobot_feature_names(dataset_root: str | Path) -> set[str]:
@@ -35,6 +44,64 @@ def collect_lerobot_columns(data_files: list[str | Path]) -> set[str]:
     for parquet_path in data_files:
         columns.update(pq.ParquetFile(parquet_path).schema_arrow.names)
     return columns
+
+
+def iter_lerobot_frame_records(
+    dataset_root: str | Path,
+    *,
+    columns: list[str],
+    optional_columns: dict[str, Any] | None = None,
+):
+    optional_columns = optional_columns or {}
+    for data_file in list_lerobot_data_files(dataset_root):
+        names = set(pq.ParquetFile(data_file).schema_arrow.names)
+        missing_columns = [column for column in columns if column not in names]
+        if missing_columns:
+            raise KeyError(f"Missing LeRobot columns in {data_file}: {missing_columns}")
+
+        read_columns = [*columns, *[column for column in optional_columns if column in names and column not in columns]]
+        table = pq.read_table(data_file, columns=read_columns)
+        column_values = {column: table[column].to_numpy() for column in columns}
+        row_count = len(next(iter(column_values.values()), []))
+        for column, fallback in optional_columns.items():
+            if column in names:
+                column_values[column] = table[column].to_numpy()
+            else:
+                column_values[column] = np.full(row_count, fallback)
+
+        for row_idx in range(row_count):
+            yield {column: values[row_idx] for column, values in column_values.items()}
+
+
+def write_lerobot_frame_columns(
+    dataset_root: str | Path,
+    *,
+    columns_by_index: dict[str, dict[int, Any]],
+    dtypes: dict[str, np.dtype],
+) -> None:
+    for data_file in list_lerobot_data_files(dataset_root):
+        table = pq.read_table(data_file, columns=["index"])
+        indices = table["index"].to_numpy().astype(np.int64, copy=False)
+        columns = {
+            field: np.asarray([values[int(index)] for index in indices], dtype=dtypes[field])
+            for field, values in columns_by_index.items()
+        }
+        write_parquet_columns(parquet_path=data_file, columns=columns)
+
+
+def write_parquet_columns(parquet_path: Path, columns: dict[str, np.ndarray]) -> None:
+    table = pq.read_table(parquet_path)
+    for field, values in columns.items():
+        table = set_parquet_column(table=table, field=field, values=values)
+    pq.write_table(table, parquet_path, compression="snappy")
+
+
+def set_parquet_column(table: pa.Table, field: str, values: np.ndarray) -> pa.Table:
+    array = pa.array(values)
+    field_index = table.schema.get_field_index(field)
+    if field_index >= 0:
+        return table.set_column(field_index, field, array)
+    return table.append_column(field, array)
 
 
 def update_lerobot_feature_metadata(dataset_root: str | Path, feature_infos: dict[str, dict[str, Any]]) -> None:

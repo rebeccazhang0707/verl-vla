@@ -19,6 +19,28 @@ from verl import DataProto
 from verl_vla.utils.keys import ACTION_KEY, OBS_KEY
 
 
+def dataloader_batch_to_dataproto(batch: dict) -> DataProto:
+    tensor_batch = {}
+    non_tensor_batch = {}
+    batch_size = None
+    for key, value in batch.items():
+        if isinstance(value, torch.Tensor):
+            tensor_batch[key] = value
+            if batch_size is None:
+                batch_size = value.shape[0]
+        else:
+            non_tensor_batch[key] = np.array(value, dtype=object)
+            if batch_size is None and hasattr(value, "__len__"):
+                batch_size = len(value)
+    if batch_size is None:
+        batch_size = 1
+    return DataProto.from_dict(
+        tensors=tensor_batch,
+        non_tensors=non_tensor_batch,
+        meta_info={"global_token_num": [0] * batch_size},
+    )
+
+
 def get_dataproto_from_prefix(data: DataProto, prefix: str, separator: str = "") -> DataProto:
     match_prefix = prefix if not separator or prefix.endswith(separator) else f"{prefix}{separator}"
     prefix_length = len(match_prefix)

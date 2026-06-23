@@ -17,14 +17,12 @@ from __future__ import annotations
 import logging
 import os
 
-import numpy as np
 import torch
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from torch.utils.data import RandomSampler, SequentialSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
-from verl import DataProto
 from verl.single_controller.ray import RayClassWithInitArgs
 from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer
@@ -34,7 +32,9 @@ from verl.utils.debug import marked_timer
 from verl.utils.fs import local_mkdir_safe
 from verl.utils.metric import reduce_metrics
 
+from verl_vla.utils.data import dataloader_batch_to_dataproto
 from verl_vla.utils.dataloader import LeRobotDataLoaderConfig
+from verl_vla.utils.dataloader.lerobot import build_lerobot_sft_dataset
 
 from .config import SFTTrainerConfig
 
@@ -57,26 +57,7 @@ class RobRaySFTTrainer(RayPPOTrainer):
         self.actor_rollout_wg = None
 
     def _create_sft_dataloader(self, data_config: LeRobotDataLoaderConfig) -> StatefulDataLoader:
-        from lerobot.datasets.lerobot_dataset import LeRobotDataset
-
-        action_delta_steps = int(data_config.action_delta_steps)
-        delta_timestamps = None
-        if action_delta_steps > 0:
-            probe_dataset = LeRobotDataset(
-                repo_id=data_config.repo_id,
-                root=data_config.root,
-                revision=data_config.revision,
-                video_backend=data_config.video_backend,
-            )
-            delta_timestamps = {"action": [t / probe_dataset.fps for t in range(action_delta_steps)]}
-
-        dataset = LeRobotDataset(
-            repo_id=data_config.repo_id,
-            root=data_config.root,
-            revision=data_config.revision,
-            video_backend=data_config.video_backend,
-            delta_timestamps=delta_timestamps,
-        )
+        dataset = build_lerobot_sft_dataset(data_config)
 
         batch_size = int(data_config.batch_size)
         train_world_size = int(self.trainer_config.n_gpus_per_node) * int(self.trainer_config.nnodes)
@@ -330,27 +311,7 @@ class RobRaySFTTrainer(RayPPOTrainer):
     def _submit_sft_update(self, train_iter, timing_raw):
         with marked_timer("data_loading", timing_raw):
             batch = next(train_iter)
-            batch_proto = self._batch_to_dataproto(batch)
+            batch_proto = dataloader_batch_to_dataproto(batch)
 
         with marked_timer("update_actor", timing_raw, color="red"):
             return self.actor_rollout_wg.update_actor_async(batch_proto)
-
-    def _batch_to_dataproto(self, batch: dict) -> DataProto:
-        tensor_batch = {}
-        non_tensor_batch = {}
-        batch_size = None
-        for key, value in batch.items():
-            if isinstance(value, torch.Tensor):
-                tensor_batch[key] = value
-                if batch_size is None:
-                    batch_size = value.shape[0]
-            else:
-                non_tensor_batch[key] = np.array(value, dtype=object)
-                if batch_size is None and hasattr(value, "__len__"):
-                    batch_size = len(value)
-        if batch_size is None:
-            batch_size = 1
-        meta_info = {
-            "global_token_num": [0] * batch_size,
-        }
-        return DataProto.from_dict(tensors=tensor_batch, non_tensors=non_tensor_batch, meta_info=meta_info)

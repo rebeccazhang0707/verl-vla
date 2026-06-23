@@ -99,7 +99,7 @@ def run_env_loop(config):
     env_wg = all_wg["env"]
 
     env_loop = EnvLoop(config=config, rollout_wg=actor_rollout_wg, env_wg=env_wg)
-    for rollout_idx in range(int(config.recap.num_rollouts)):
+    for rollout_idx in range(int(config.recap.collect.num_rollouts)):
         prompts = build_rollout_prompts(config, env_loop, rollout_idx)
         reset_future = env_wg.reset_envs_to_state_ids(
             DataProto.from_dict(
@@ -159,8 +159,8 @@ def build_rollout_prompts(config, env_loop: EnvLoop, global_step: int) -> DataPr
         total_envs = (
             env_loop.env_wg.world_size * int(config.env.train.num_envs) * int(config.env.rollout.pipeline_stage_num)
         )
-    task_ids = np.full(total_envs, int(config.recap.task_id), dtype=np.int64)
-    state_ids = np.full(total_envs, int(config.recap.state_id), dtype=np.int64)
+    task_ids = np.full(total_envs, int(config.recap.collect.task_id), dtype=np.int64)
+    state_ids = np.full(total_envs, int(config.recap.collect.state_id), dtype=np.int64)
     return DataProto.from_dict(
         non_tensors={
             "state_ids": state_ids,

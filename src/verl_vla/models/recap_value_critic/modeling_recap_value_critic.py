@@ -28,6 +28,7 @@ from verl import DataProto
 
 from verl_vla.models.base import SupportSFTTraining
 from verl_vla.models.pi0_torch.model.paligemma_with_expert import RoPEEmbedding
+from verl_vla.utils.dtype import precision_to_torch_dtype
 from verl_vla.utils.models.value_head import DistributionalValueHead
 
 from .configuration_recap_value_critic import ReCapValueCriticConfig, get_gemma_expert_config
@@ -220,12 +221,7 @@ class ReCapValueExpert(nn.Module):
         self._set_requires_grad()
 
     def _apply_precision(self, precision: str) -> None:
-        if precision in {"bf16", "bfloat16", "bf16-mixed"}:
-            dtype = torch.bfloat16
-        elif precision in {"fp16", "float16", "16", "16-mixed"}:
-            dtype = torch.float16
-        else:
-            dtype = torch.float32
+        dtype = precision_to_torch_dtype(precision)
         self.vision_tower.to(dtype=dtype)
         self.gemma3.to(dtype=dtype)
         self.value_expert.to(dtype=dtype)
@@ -470,6 +466,11 @@ class ReCapValueCriticForPrediction(PreTrainedModel, SupportSFTTraining):
             suffix_ar_masks=suffix_ar_masks,
         )
         return suffix_out[:, -1, :]
+
+    def forward(self, obs: DataProto, tokenizer: torch.nn.Module | None = None) -> torch.Tensor:
+        features = self.value_model_forward_features(obs=obs, tokenizer=tokenizer)
+        values, _, _ = self.value_head(features)
+        return values
 
     def sft_loss(
         self,

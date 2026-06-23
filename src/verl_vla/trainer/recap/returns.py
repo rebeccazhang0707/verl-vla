@@ -17,13 +17,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pyarrow as pa
 import pyarrow.parquet as pq
 
 from verl_vla.utils.lerobot import (
     collect_lerobot_columns,
+    list_lerobot_data_files,
     load_lerobot_feature_names,
     update_lerobot_feature_metadata,
+    write_parquet_columns,
 )
 
 DatasetInfo = dict[str, str | Path]
@@ -50,10 +51,7 @@ def _ensure_recap_fields_for_dataset(
 ) -> None:
     """Ensure a LeRobot dataset has all RECAP columns and compute normalized returns."""
     dataset_root = Path(dataset["root"])
-    repo_id = str(dataset["repo_id"])
-    data_files = sorted((dataset_root / "data").glob("chunk-*/file-*.parquet"))
-    if not data_files:
-        raise FileNotFoundError(f"No LeRobot parquet files found for {repo_id} under {dataset_root / 'data'}.")
+    data_files = list_lerobot_data_files(dataset_root)
 
     existing_fields = load_lerobot_feature_names(dataset_root)
     missing_fields = [field for field in RECAP_FIELDS if field not in existing_fields]
@@ -185,24 +183,16 @@ def _ensure_recap_columns_for_file(
 ) -> None:
     table = pq.read_table(parquet_path)
     indices = table["index"].to_numpy().astype(np.int64, copy=False)
-    new_table = table
     fields_to_write = [RECAP_RETURN_FIELD, *[field for field in missing_columns if field != RECAP_RETURN_FIELD]]
+    columns = {}
     for field in fields_to_write:
         if field == RECAP_RETURN_FIELD:
-            values = np.asarray([return_lookup[int(index)] for index in indices], dtype=np.float32)
-            array = pa.array(values, type=pa.float32())
+            columns[field] = np.asarray([return_lookup[int(index)] for index in indices], dtype=np.float32)
         elif RECAP_FIELDS[field]["dtype"] == "float32":
-            values = np.full(len(indices), np.nan, dtype=np.float32)
-            array = pa.array(values, type=pa.float32())
+            columns[field] = np.full(len(indices), np.nan, dtype=np.float32)
         elif RECAP_FIELDS[field]["dtype"] == "int64":
-            values = np.zeros(len(indices), dtype=np.int64)
-            array = pa.array(values, type=pa.int64())
+            columns[field] = np.zeros(len(indices), dtype=np.int64)
         else:
             raise ValueError(f"Unsupported RECAP field dtype: {field} -> {RECAP_FIELDS[field]['dtype']}")
-        field_index = new_table.schema.get_field_index(field)
-        if field_index >= 0:
-            new_table = new_table.set_column(field_index, field, array)
-        else:
-            new_table = new_table.append_column(field, array)
 
-    pq.write_table(new_table, parquet_path, compression="snappy")
+    write_parquet_columns(parquet_path=parquet_path, columns=columns)

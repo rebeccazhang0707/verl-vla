@@ -15,6 +15,33 @@
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from torch.utils.data import Dataset
 
+from .config import LeRobotDataLoaderConfig
+
+
+def build_lerobot_dataset(
+    data_config: LeRobotDataLoaderConfig,
+    *,
+    repo_id: str | None = None,
+    root: str | None = None,
+    delta_timestamps: dict[str, list[float]] | None = None,
+):
+    return LeRobotDataset(
+        repo_id=repo_id or data_config.repo_id,
+        root=root if root is not None else data_config.root,
+        revision=data_config.revision,
+        video_backend=data_config.video_backend,
+        delta_timestamps=delta_timestamps,
+    )
+
+
+def build_lerobot_sft_dataset(data_config: LeRobotDataLoaderConfig):
+    action_delta_steps = int(data_config.action_delta_steps)
+    delta_timestamps = None
+    if action_delta_steps > 0:
+        probe_dataset = build_lerobot_dataset(data_config)
+        delta_timestamps = {"action": [t / probe_dataset.fps for t in range(action_delta_steps)]}
+    return build_lerobot_dataset(data_config, delta_timestamps=delta_timestamps)
+
 
 class RLPDTransitionDataset(Dataset):
     def __init__(

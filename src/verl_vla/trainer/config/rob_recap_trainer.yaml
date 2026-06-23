@@ -9,6 +9,8 @@ defaults:
   - legacy_reward_impl
   - reward@reward: reward
   - ./env@env: rob_sac_env
+  - /rob_sft_trainer@recap.value_model.config
+  - data@recap.value_infer.data: lerobot_dataloader
   - _self_
 
 hydra:
@@ -20,17 +22,92 @@ trainer:
   experiment_name: env_loop
   logger: ["console"]
   nnodes: 1
-  n_gpus_per_node: 1
+  n_gpus_per_node: 8
   n_env_workers_per_node: 1
   ray_wait_register_center_timeout: 300
   device: cuda
   separate_train_inference: false
 
+actor_rollout_ref:
+  model:
+    path: /file_system/liujincheng/models/pi05_libero_torch
+    tokenizer_path: ${actor_rollout_ref.model.path}
+    enable_gradient_checkpointing: False
+    use_remove_padding: False
+    trust_remote_code: False
+    override_config:
+      policy_type: libero
+
 recap:
-  num_rollouts: 1
-  task_id: 0
-  state_id: 0
+  collect:
+    enable: true
+    num_rollouts: 1
+    task_id: 0
+    state_id: 0
   returns:
+    enable: true
+    dataset:
+      root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
+      repo_id: local/verl_vla_libero_collected
     c_fail_coef: 1.0
     clip_min: -1.0
     clip_max: 0.0
+  value_model:
+    enable: true
+    model_path: null
+    root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
+    repo_id: local/verl_vla_libero_collected
+    config:
+      data:
+        action_delta_steps: 0
+      actor_rollout_ref:
+        model:
+          path: /file_system/liujincheng/Projects/verl-vla/examples/recap_value_critic_hf
+          tokenizer_path: google/gemma-3-270m
+          trust_remote_code: true
+          override_config:
+            policy_type: libero
+            sft_type: value_model
+            sac_enable: false
+            siglip_path: google/siglip-so400m-patch14-384
+            gemma3_path: google/gemma-3-270m
+            tokenizer_path: google/gemma-3-270m
+            critic_expert_variant: gemma3_100m
+            image_size: 384
+            freeze_vision_encoder: true
+            freeze_vlm: true
+            stop_gradient_to_vlm: true
+            precision: bfloat16
+            value_head_hidden_dim: 0
+            value_head_num_bins: 201
+            value_head_v_min: -1.0
+            value_head_v_max: 0.0
+            value_head_dropout: 0.0
+        actor:
+          data_keys:
+            action_mask: null
+          checkpoint:
+            save_contents: ["model", "optimizer", "extra", "hf_model"]
+            load_contents: ["model", "optimizer", "extra"]
+          fsdp_config:
+            wrap_policy:
+              transformer_layer_cls_to_wrap: ["ReCapValueDualStreamLayer"]
+      trainer:
+        project_name: recap
+        experiment_name: value_model
+  value_infer:
+    enable: true
+    model_path: null
+    root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
+    repo_id: local/verl_vla_libero_collected
+    data:
+      batch_size: 64
+      num_workers: 2
+      shuffle: false
+      drop_last: false
+    num_gpus: ${trainer.n_gpus_per_node}
+    n_step: 10
+    positive_ratio: 0.3
+    force_intervention_positive: true
+    device: cuda
+    precision: bfloat16
