@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import numpy as np
 import torch
 from verl import DataProto
 from verl.single_controller.base.decorator import make_nd_compute_dataproto_dispatch_fn, register
@@ -78,6 +79,26 @@ class SFTTrainingWorker(TrainingWorker):
         for name, param in self._get_named_actor_parameters():
             param.copy_(self.actor_ema_shadow[name].to(device=param.device, dtype=param.dtype))
 
+    def _apply_acp_prompt_tags(self, micro_batch: DataProto) -> DataProto:
+        acp_config = self.actor_config.acp
+        data_keys = self.actor_config.data_keys
+        if not acp_config.enable:
+            return micro_batch
+
+        indicators = micro_batch.batch[data_keys.indicator].reshape(-1)
+        tasks = micro_batch.non_tensor_batch[data_keys.task]
+        tagged_tasks = tasks.copy()
+        keep_original = torch.rand(len(indicators), device=indicators.device) < float(acp_config.indicator_dropout_prob)
+        indicators = indicators.detach().cpu().numpy()
+        keep_original = keep_original.detach().cpu().numpy()
+        for idx, indicator in enumerate(indicators):
+            if keep_original[idx]:
+                continue
+            tag = acp_config.positive_tag if int(indicator) > 0 else acp_config.negative_tag
+            tagged_tasks[idx] = f"{tasks[idx]}\n{tag}"
+        micro_batch.non_tensor_batch[data_keys.task] = np.asarray(tagged_tasks, dtype=object)
+        return micro_batch
+
     def _update_sft_policy(self, data: DataProto) -> dict[str, float]:
         if not self.actor_ema_initialized:
             self._init_actor_ema()
@@ -105,6 +126,7 @@ class SFTTrainingWorker(TrainingWorker):
                 for micro_batches in split_micro_batches:
                     for micro_batch in micro_batches:
                         micro_batch = micro_batch.to(get_device_id())
+                        micro_batch = self._apply_acp_prompt_tags(micro_batch)
                         batch = micro_batch.batch
                         data_keys = self.actor_config.data_keys
                         obs = micro_batch

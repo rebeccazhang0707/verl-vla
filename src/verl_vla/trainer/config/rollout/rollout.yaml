@@ -64,6 +64,15 @@ layered_summon: false
 # Whether HF rollout emits critic_value for visualization
 output_critic_value: true
 
+# Advantage-conditioned prompt tagging during rollout
+acp:
+
+  # Whether to append the positive ACP tag before policy rollout
+  enable: false
+
+  # Prompt suffix used when ACP rollout is enabled
+  positive_tag: "Advantage: positive"
+
 # Validation sampling parameters
 val_kwargs:
 

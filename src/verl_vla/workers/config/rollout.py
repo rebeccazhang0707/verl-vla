@@ -18,7 +18,15 @@ from typing import Optional
 from verl.base_config import BaseConfig
 from verl.workers.config import CheckpointEngineConfig, MultiTurnConfig, SamplingConfig
 
-__all__ = ["RolloutConfig"]
+__all__ = ["RolloutACPConfig", "RolloutConfig"]
+
+
+@dataclass
+class RolloutACPConfig(BaseConfig):
+    """ACP prompt tagging used during policy rollout."""
+
+    enable: bool = False
+    positive_tag: str = "Advantage: positive"
 
 
 @dataclass
@@ -49,6 +57,7 @@ class RolloutConfig(BaseConfig):
     load_format: str = "dummy"
     layered_summon: bool = False
     output_critic_value: bool = True
+    acp: RolloutACPConfig = field(default_factory=RolloutACPConfig)
     val_kwargs: SamplingConfig = field(default_factory=SamplingConfig)
     multi_turn: MultiTurnConfig = field(default_factory=MultiTurnConfig)
     checkpoint_engine: CheckpointEngineConfig = field(default_factory=CheckpointEngineConfig)

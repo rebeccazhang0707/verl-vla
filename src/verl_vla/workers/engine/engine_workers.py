@@ -75,6 +75,14 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
     def init_model(self):
         model_config: HFModelConfig = omega_conf_to_dataclass(self.config.model)
         self.tokenizer = getattr(self, "tokenizer", None) or model_config.tokenizer
+        actor_config = None
+        actor_target = OmegaConf.select(self.config.actor, "_target_")
+        if actor_target not in ACTOR_WORKER_REGISTRY:
+            supported = ", ".join(sorted(ACTOR_WORKER_REGISTRY))
+            raise ValueError(f"Unsupported actor config target: {actor_target}. Supported values: {supported}")
+        actor_config_cls, worker_cls = ACTOR_WORKER_REGISTRY[actor_target]
+        actor_config = omega_conf_to_dataclass(self.config.actor, dataclass_type=actor_config_cls)
+        actor_config.model_config = model_config
 
         # 1. build reference model
         if "ref" in self.role:
@@ -83,13 +91,6 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
 
         # 2. build actor model
         if "actor" in self.role:
-            actor_target = OmegaConf.select(self.config.actor, "_target_")
-            if actor_target not in ACTOR_WORKER_REGISTRY:
-                supported = ", ".join(sorted(ACTOR_WORKER_REGISTRY))
-                raise ValueError(f"Unsupported actor config target: {actor_target}. Supported values: {supported}")
-            actor_config_cls, worker_cls = ACTOR_WORKER_REGISTRY[actor_target]
-            actor_config = omega_conf_to_dataclass(self.config.actor, dataclass_type=actor_config_cls)
-            actor_config.model_config = model_config
             actor_training_config = TrainingWorkerConfig(
                 model_type="vla_model",
                 model_config=actor_config.model_config,
@@ -132,6 +133,7 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
                 model_config=model_config,
                 device_mesh=rollout_device_mesh,
                 engine=self.actor.engine if "actor" in self.role else None,
+                actor_config=actor_config,
                 tokenizer=self.tokenizer,
             )
 

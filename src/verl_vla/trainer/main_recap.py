@@ -16,6 +16,7 @@ import hydra
 from omegaconf import OmegaConf
 
 from verl_vla.trainer.recap.collect import collect_recap_env_data
+from verl_vla.trainer.recap.policy import train_recap_policy
 from verl_vla.trainer.recap.returns import CollectedDatasets, DatasetInfo, ensure_recap_fields
 from verl_vla.trainer.recap.value_infer import infer_recap_values
 from verl_vla.trainer.recap.value_model import train_recap_value_model
@@ -76,6 +77,19 @@ def main(config):
         dataset: DatasetInfo = collected_datasets["collected_dataset"]
         metrics = infer_recap_values(config, dataset, value_model_path)
         print(f"ReCap value inference finished with metrics: {metrics}")
+
+    # Step 5: train the final RECAP policy with the SFT trainer.
+    if OmegaConf.select(config, "recap.policy.enable", default=True):
+        if collected_datasets is None:
+            policy_cfg = config.recap.policy
+            collected_datasets = {
+                "collected_dataset": {
+                    "root": str(policy_cfg.root),
+                    "repo_id": str(policy_cfg.repo_id),
+                }
+            }
+        train_recap_policy(config, collected_datasets)
+        print("ReCap policy training finished.")
 
 
 if __name__ == "__main__":

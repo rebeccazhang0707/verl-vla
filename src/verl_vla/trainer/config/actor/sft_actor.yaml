@@ -8,10 +8,11 @@ ema:
   enable: false
   decay: 0.995
 
-data_keys:
-  action: action
-  action_mask: action_is_pad
-  target_value: null
+acp:
+  enable: false
+  indicator_dropout_prob: 0.0
+  positive_tag: "Advantage: positive"
+  negative_tag: "Advantage: negative"
 
 mini_batch_size: 256
 micro_batch_size: 32

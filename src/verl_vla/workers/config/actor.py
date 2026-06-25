@@ -25,7 +25,8 @@ from .optimizer import FSDPOptimizerConfig
 __all__ = [
     "SACConfig",
     "EMAConfig",
-    "SFTDataKeysConfig",
+    "ACPConfig",
+    "ActorDataKeysConfig",
     "BaseVLAActorConfig",
     "ActorConfig",
     "SFTActorConfig",
@@ -81,11 +82,27 @@ class EMAConfig(BaseConfig):
 
 
 @dataclass
-class SFTDataKeysConfig(BaseConfig):
-    """Batch field names used by the SFT worker."""
+class ACPConfig(BaseConfig):
+    """Configuration for advantage-conditioned prompt tagging."""
 
+    enable: bool = False
+    indicator_dropout_prob: float = 0.0
+    positive_tag: str = "Advantage: positive"
+    negative_tag: str = "Advantage: negative"
+
+    def __post_init__(self):
+        if not 0 <= self.indicator_dropout_prob <= 1:
+            raise ValueError(f"ACP indicator_dropout_prob must be in [0, 1], got {self.indicator_dropout_prob}")
+
+
+@dataclass
+class ActorDataKeysConfig(BaseConfig):
+    """Batch field names shared by actor training and rollout."""
+
+    task: str = "task"
     action: str = "action"
     action_mask: str | None = "action_is_pad"
+    indicator: str | None = None
     target_value: str | None = None
 
 
@@ -104,6 +121,7 @@ class BaseVLAActorConfig(BaseConfig):
     optim: FSDPOptimizerConfig = field(default_factory=FSDPOptimizerConfig)
     profiler: ProfilerConfig = field(default_factory=ProfilerConfig)
     fsdp_config: FSDPEngineConfig = field(default_factory=FSDPEngineConfig)
+    data_keys: ActorDataKeysConfig = field(default_factory=ActorDataKeysConfig)
     engine: BaseConfig = field(default_factory=BaseConfig)
     model_config: HFModelConfig | None = None
 
@@ -186,7 +204,7 @@ class SFTActorConfig(BaseVLAActorConfig):
     _target_: str = "verl_vla.workers.config.SFTActorConfig"
 
     ema: EMAConfig = field(default_factory=EMAConfig)
-    data_keys: SFTDataKeysConfig = field(default_factory=SFTDataKeysConfig)
+    acp: ACPConfig = field(default_factory=ACPConfig)
 
     mini_batch_size: int = 256
     micro_batch_size: int | None = None

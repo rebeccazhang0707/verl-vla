@@ -10,6 +10,7 @@ defaults:
   - reward@reward: reward
   - ./env@env: rob_sac_env
   - /rob_sft_trainer@recap.value_model.config
+  - /rob_sft_trainer@recap.policy.config
   - data@recap.value_infer.data: lerobot_dataloader
   - _self_
 
@@ -111,3 +112,11 @@ recap:
     force_intervention_positive: true
     device: cuda
     precision: bfloat16
+  policy:
+    enable: true
+    root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
+    repo_id: local/verl_vla_libero_collected
+    config:
+      trainer:
+        project_name: recap
+        experiment_name: policy

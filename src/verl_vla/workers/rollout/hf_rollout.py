@@ -15,6 +15,7 @@ import logging
 import os
 from typing import Any
 
+import numpy as np
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from verl import DataProto
@@ -40,12 +41,14 @@ class HFRollout(BaseRollout):
         device_mesh: DeviceMesh,
         engine=None,
         module=None,
+        actor_config=None,
         tokenizer: Any = None,
         **kwargs,
     ):
         super().__init__(config=config, model_config=model_config, device_mesh=device_mesh)
         self.engine = engine
         self.module = module if module is not None else (engine.module if engine is not None else None)
+        self.actor_config = actor_config
         self.tokenizer = tokenizer if tokenizer is not None else getattr(model_config, "tokenizer", None)
         self.output_critic_value = bool(config.output_critic_value)
 
@@ -100,7 +103,26 @@ class HFRollout(BaseRollout):
         if self.output_critic_value:
             register_fsdp_forward_method(self.module, "sac_get_critic_value")
 
+    def _apply_acp_prompt_tag(self, prompts: DataProto) -> DataProto:
+        acp_config = self.config.acp
+        data_keys = self.actor_config.data_keys
+        if not acp_config.enable or data_keys.task not in prompts.non_tensor_batch:
+            return prompts
+
+        values = prompts.non_tensor_batch[data_keys.task]
+        tagged_values = values.copy()
+        indicator_key = data_keys.indicator
+        indicators = prompts.batch.get(indicator_key) if indicator_key is not None else None
+        indicators = indicators.reshape(-1).detach().cpu().numpy() if indicators is not None else None
+        for idx, value in enumerate(values):
+            if indicators is not None and int(indicators[idx]) <= 0:
+                continue
+            tagged_values[idx] = f"{value}\n{acp_config.positive_tag}"
+        prompts.non_tensor_batch[data_keys.task] = np.asarray(tagged_values, dtype=object)
+        return prompts
+
     def generate_sequences(self, prompts: DataProto) -> DataProto:
+        prompts = self._apply_acp_prompt_tag(prompts)
         with torch.autocast(device_type=get_device_name(), dtype=torch.bfloat16):
             validate = bool(prompts.meta_info.get("validate", False))
             output = self.module.sac_sample_actions(
