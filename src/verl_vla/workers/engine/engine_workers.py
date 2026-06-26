@@ -148,6 +148,8 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
 
         # 3. build rollout engine
         if "rollout" in self.role:
+            if self.config.rollout is None:
+                raise ValueError(f"Role {self.role} requires rollout config.")
             rollout_config: RolloutConfig = omega_conf_to_dataclass(self.config.rollout, dataclass_type=RolloutConfig)
 
             # TODO: move rollout_device_mesh into ServerAdapter
@@ -183,7 +185,8 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
             self.peft_merge: bool = model_config.lora.get("merge", False)
 
         # 4. build checkpoint engine
-        if "actor" in self.role or "rollout" in self.role:
+        separate_actor_rollout = self.config.has_actor_and_rollout and self._is_actor != self._is_rollout
+        if separate_actor_rollout:
             checkpoint_engine_config = omega_conf_to_dataclass(self.config.rollout.checkpoint_engine)
             backend = checkpoint_engine_config.backend
             bucket_size = checkpoint_engine_config.update_weights_bucket_megabytes << 20
@@ -244,9 +247,10 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
 
         # Actor-only worker: send weights via checkpoint engine
         if self._is_actor and not self._is_rollout:
-            if self.config.rollout.checkpoint_engine.backend != "naive":
-                per_tensor_param, _ = self.actor.engine.get_per_tensor_param()
-                await self.checkpoint_engine.send_weights(per_tensor_param)
+            if not hasattr(self, "checkpoint_engine"):
+                return
+            per_tensor_param, _ = self.actor.engine.get_per_tensor_param()
+            await self.checkpoint_engine.send_weights(per_tensor_param)
             return
 
         # Colocated worker (actor + rollout): use base class implementation

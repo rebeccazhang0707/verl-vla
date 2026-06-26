@@ -17,11 +17,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from verl.base_config import BaseConfig
 from verl.workers.config.model import HFModelConfig
 
 from verl_vla.env_loop.config import EnvLoopConfig
-from verl_vla.workers.config import ActorConfig, RolloutConfig, SFTActorConfig
+from verl_vla.workers.config import RolloutConfig
 from verl_vla.workers.env.config import EnvWorkerConfig
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "ResourceConfig",
     "SFTTrainClusterConfig",
     "SFTTrainResourceConfig",
+    "TrainClusterCheckpointConfig",
 ]
 
 
@@ -125,8 +127,32 @@ class ActorRolloutRefConfig(BaseConfig):
     """Model, actor, and rollout config for actor/rollout workers."""
 
     model: HFModelConfig = field(default_factory=HFModelConfig)
-    actor: ActorConfig | SFTActorConfig | None = None
-    rollout: RolloutConfig = field(default_factory=RolloutConfig)
+    actor: DictConfig | None = None
+    rollout: RolloutConfig | None = None
+
+    @property
+    def has_actor_and_rollout(self) -> bool:
+        return self.actor is not None and self.rollout is not None
+
+
+@dataclass
+class TrainClusterCheckpointConfig(BaseConfig):
+    """Checkpoint path, retention, and resume config owned by TrainCluster."""
+
+    resume_mode: str = "auto"
+    resume_from_path: str | None = None
+    default_hdfs_dir: str | None = None
+    default_local_dir: str = "checkpoints/${trainer.project_name}/${trainer.experiment_name}"
+    del_local_ckpt_after_load: bool = False
+    max_actor_ckpt_to_keep: int | None = None
+
+    def __post_init__(self):
+        if self.resume_mode not in {"auto", "disable", "resume_path"}:
+            raise ValueError(f"Unsupported resume_mode: {self.resume_mode}")
+        if self.max_actor_ckpt_to_keep is not None and self.max_actor_ckpt_to_keep <= 0:
+            raise ValueError(
+                f"max_actor_ckpt_to_keep must be positive when provided, got {self.max_actor_ckpt_to_keep}"
+            )
 
 
 @dataclass
@@ -135,12 +161,15 @@ class SFTTrainClusterConfig(BaseConfig):
 
     resource: SFTTrainResourceConfig = field(default_factory=SFTTrainResourceConfig)
     actor_rollout_ref: ActorRolloutRefConfig = field(default_factory=ActorRolloutRefConfig)
+    checkpoint: TrainClusterCheckpointConfig | None = None
 
     def __post_init__(self):
         if not isinstance(self.resource, SFTTrainResourceConfig):
             object.__setattr__(self, "resource", instantiate(self.resource, _recursive_=False))
         if not isinstance(self.actor_rollout_ref, ActorRolloutRefConfig):
             object.__setattr__(self, "actor_rollout_ref", instantiate(self.actor_rollout_ref, _recursive_=False))
+        if self.checkpoint is not None and not isinstance(self.checkpoint, TrainClusterCheckpointConfig):
+            object.__setattr__(self, "checkpoint", instantiate(self.checkpoint))
 
 
 @dataclass
@@ -150,6 +179,7 @@ class EnvLoopTrainClusterConfig(BaseConfig):
     resource: EnvLoopTrainResourceConfig = field(default_factory=EnvLoopTrainResourceConfig)
     env: EnvTrainConfig = field(default_factory=EnvTrainConfig)
     actor_rollout_ref: ActorRolloutRefConfig = field(default_factory=ActorRolloutRefConfig)
+    checkpoint: TrainClusterCheckpointConfig | None = None
 
     def __post_init__(self):
         if not isinstance(self.resource, EnvLoopTrainResourceConfig):
@@ -162,4 +192,6 @@ class EnvLoopTrainClusterConfig(BaseConfig):
                 "actor_rollout_ref",
                 instantiate(self.actor_rollout_ref, _recursive_=False),
             )
+        if self.checkpoint is not None and not isinstance(self.checkpoint, TrainClusterCheckpointConfig):
+            object.__setattr__(self, "checkpoint", instantiate(self.checkpoint))
         self.env.validate_worker_layout(self.resource.env)

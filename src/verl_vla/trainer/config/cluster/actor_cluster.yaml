@@ -12,26 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Instantiate the VLA SFT trainer config class.
-_target_: verl_vla.trainer.sft.config.SFTTrainerConfig
+# Actor-only TrainCluster config for SFT-style training.
 
-# Tracking project name.
-project_name: vla-sft
+defaults:
 
-# Tracking experiment/run name.
-experiment_name: lerobot-preview
+  # Resource placement used by TrainCluster.
+  - /cluster/resource@resource: actor
 
-# Tracking backends used by the trainer.
-logger: ["console"]
+  # Actor worker config.
+  - /actor_rollout_ref@actor_rollout_ref: actor_only
 
-# Number of full dataloader passes.
-total_epochs: 30
+  # Checkpoint path, retention, and resume config.
+  - /cluster/checkpoint@checkpoint: actor
 
-# Checkpoint save interval in global steps. Negative disables interval saves.
-save_freq: -1
+  # Apply this TrainCluster config last.
+  - _self_
 
-# Whether to save a checkpoint at the final training step.
-save_last: False
 
-# Extra time budget used by ESI preemption-aware checkpointing.
-esi_redundant_time: 0
+# Target class for this cluster configuration.
+_target_: verl_vla.trainer.train_cluster.config.SFTTrainClusterConfig

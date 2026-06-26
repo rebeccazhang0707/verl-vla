@@ -13,5 +13,6 @@
 # limitations under the License.
 
 from .config import LeRobotDataLoaderConfig
+from .lerobot import build_lerobot_sft_dataloader
 
-__all__ = ["LeRobotDataLoaderConfig"]
+__all__ = ["LeRobotDataLoaderConfig", "build_lerobot_sft_dataloader"]

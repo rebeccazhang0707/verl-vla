@@ -1,28 +1,32 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # VLA SFT config structure:
 #
 # rob_sft_trainer
+# |-- cluster: actor-only TrainCluster settings.
 # |-- data: LeRobot dataset and PyTorch dataloader settings.
-# |-- actor_rollout_ref
-# |   |-- model: HuggingFace model path, tokenizer path, and model-load options.
-# |   |-- rollout: checkpoint-engine settings required by the actor worker.
-# |   `-- actor: SFT actor training config.
-# |-- trainer: SFT trainer loop, device/resource, resume, logging, and checkpoint-save settings.
+# |-- trainer: SFT trainer loop, resume, logging, and checkpoint-save settings.
 # `-- ray_kwargs: Ray init kwargs used before the trainer is constructed.
 
-# Compose reusable config groups into the final SFT config tree.
-
 defaults:
+
+  # Attach the actor-only TrainCluster config under `cluster`.
+  - /cluster@cluster: actor_cluster
+
   # Attach the LeRobot dataloader config under `data`.
   - data@data: lerobot_dataloader
-
-  # Attach the HuggingFace model config under `actor_rollout_ref.model`.
-  - model@actor_rollout_ref.model: hf_model
-
-  # Attach the SFT rollout/checkpoint-engine config under `actor_rollout_ref.rollout`.
-  - rollout@actor_rollout_ref.rollout: sft_rollout
-
-  # Attach the SFT actor config under `actor_rollout_ref.actor`.
-  - actor@actor_rollout_ref.actor: sft_actor
 
   # Attach the SFT trainer loop config under `trainer`.
   - trainer@trainer: sft_trainer
@@ -30,10 +34,11 @@ defaults:
   # Keep local overrides in this file taking precedence over composed defaults.
   - _self_
 
-# Ray initialization options passed by `main_sft.py` before launching the trainer task.
-
+# Ray initialization options passed before launching the trainer task.
 ray_kwargs:
+
   # Keyword arguments forwarded to `ray.init`.
   ray_init:
+
     # Let Ray infer CPU resources by default.
     num_cpus: null

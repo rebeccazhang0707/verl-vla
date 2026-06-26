@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import ray
 from verl import DataProto
@@ -24,6 +24,7 @@ from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo.utils import Role
 
 from verl_vla.env_loop.env_loop import EnvLoop
+from verl_vla.trainer.train_cluster.checkpoint import CheckpointHelper
 from verl_vla.trainer.train_cluster.config import EnvLoopTrainClusterConfig, ResourceConfig, SFTTrainClusterConfig
 from verl_vla.trainer.train_cluster.resource_pool import VLAResourcePoolManager
 from verl_vla.utils.recorder import merge_lerobot_datasets
@@ -60,6 +61,7 @@ class TrainCluster:
         self.resource_pool_manager: VLAResourcePoolManager | None = None
         self.worker_groups: dict[str, Any] = {}
         self.env_loop: EnvLoop | None = None
+        self.checkpoint_helper: CheckpointHelper | None = None
         self._lerobot_collected_once = False
 
     def start(self) -> None:
@@ -71,13 +73,13 @@ class TrainCluster:
             resource_labels=self.resource_labels,
         )
         self._init_workers()
+
         if self.cluster_type == "env_loop":
             env_wg = self.worker_groups[ROLE_TO_WORKER_NAME[Role.Env]]
             rollout_wg = (
                 self.worker_groups.get(ROLE_TO_WORKER_NAME[Role.ActorRollout])
                 or self.worker_groups[ROLE_TO_WORKER_NAME[Role.Rollout]]
             )
-
             self.env_loop = EnvLoop(
                 config=self.config.env.env_loop,
                 switch_actor_rollout_mode=(
@@ -86,6 +88,16 @@ class TrainCluster:
                 ),
                 rollout_wg=rollout_wg,
                 env_wg=env_wg,
+            )
+
+        if self.config.checkpoint is not None:
+            actor_config = self.config.actor_rollout_ref.actor
+            assert actor_config is not None
+            assert ROLE_TO_WORKER_NAME[Role.Actor] in self.worker_groups
+            self.checkpoint_helper = CheckpointHelper(
+                config=self.config.checkpoint,
+                actor_config=actor_config,
+                actor_worker_group=self.worker_groups[ROLE_TO_WORKER_NAME[Role.Actor]],
             )
 
     def _init_workers(self) -> None:
@@ -211,6 +223,10 @@ class TrainCluster:
         else:
             raise ValueError(f"Unsupported worker role: {role}")
 
+    @property
+    def train_world_size(self) -> int:
+        return int(self.worker_groups[ROLE_TO_WORKER_NAME[Role.Actor]].world_size)
+
     def rollout(self, prompts: DataProto) -> tuple[DataProto, dict[str, dict[str, Any]]]:
         if self.cluster_type != "env_loop":
             raise RuntimeError("rollout is only wired for env-loop train clusters.")
@@ -269,12 +285,24 @@ class TrainCluster:
         self._lerobot_collected_once = True
         return collected_dataset
 
-    def train(self, *args: Any, **kwargs: Any) -> Any: ...
+    def train(self, data: DataProto, *, async_update: bool = True) -> Any:
+        actor_wg = self.worker_groups[ROLE_TO_WORKER_NAME[Role.Actor]]
+        if async_update:
+            return actor_wg.update_actor_async(data)
+        return actor_wg.update_actor(data)
 
     def eval(self, *args: Any, **kwargs: Any) -> Any: ...
 
     def update_weights(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def load_checkpoint(self, *args: Any, **kwargs: Any) -> Any: ...
+    def load_checkpoint(self) -> tuple[int, str] | None:
+        assert self.checkpoint_helper is not None
+        return self.checkpoint_helper.load()
 
-    def save_checkpoint(self, *args: Any, **kwargs: Any) -> Any: ...
+    def save_checkpoint(
+        self,
+        global_step: int,
+        save_extra_state: Callable[[str], None] | None = None,
+    ) -> None:
+        assert self.checkpoint_helper is not None
+        self.checkpoint_helper.save(global_step, save_extra_state=save_extra_state)

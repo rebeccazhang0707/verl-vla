@@ -17,7 +17,7 @@
 defaults:
 
   # Resource placement used by TrainCluster.
-  - /cluster/resource@resource: env_loop_rollout
+  - /cluster/resource@resource: env_rollout
 
   # Actor/rollout worker config.
   - /actor_rollout_ref@actor_rollout_ref: rollout_only

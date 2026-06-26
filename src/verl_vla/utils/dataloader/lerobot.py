@@ -12,10 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+
+import torch
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, RandomSampler, SequentialSampler
+from torchdata.stateful_dataloader import StatefulDataLoader
 
 from .config import LeRobotDataLoaderConfig
+
+logger = logging.getLogger(__name__)
 
 
 def build_lerobot_dataset(
@@ -41,6 +47,65 @@ def build_lerobot_sft_dataset(data_config: LeRobotDataLoaderConfig):
         probe_dataset = build_lerobot_dataset(data_config)
         delta_timestamps = {"action": [t / probe_dataset.fps for t in range(action_delta_steps)]}
     return build_lerobot_dataset(data_config, delta_timestamps=delta_timestamps)
+
+
+def build_lerobot_sft_dataloader(
+    data_config: LeRobotDataLoaderConfig,
+    *,
+    train_world_size: int = 1,
+) -> StatefulDataLoader:
+    dataset = build_lerobot_sft_dataset(data_config)
+    batch_size = int(data_config.batch_size)
+    drop_last = bool(data_config.drop_last)
+    if train_world_size > 1 and batch_size % train_world_size != 0:
+        raise ValueError(
+            "data.batch_size must be divisible by trainer world size for DataProto dispatch: "
+            f"batch_size={batch_size}, world_size={train_world_size}."
+        )
+    if train_world_size > 1 and not drop_last:
+        logger.warning(
+            "Forcing data.drop_last=True because distributed DataProto dispatch requires every batch "
+            "to be divisible by trainer world size=%s.",
+            train_world_size,
+        )
+        drop_last = True
+
+    dataset_size = len(dataset)
+    if drop_last and dataset_size < batch_size:
+        raise ValueError(
+            "SFT dataset is smaller than one batch with drop_last=True; no batches can be produced. "
+            f"dataset_size={dataset_size}, batch_size={batch_size}, repo_id={data_config.repo_id}, "
+            f"root={data_config.root}. Reduce data.batch_size or set drop_last=False for single-GPU runs."
+        )
+    logger.info(
+        "Created SFT dataloader: dataset_size=%s, batch_size=%s, drop_last=%s, steps_per_epoch=%s, repo_id=%s, root=%s",
+        dataset_size,
+        batch_size,
+        drop_last,
+        dataset_size // batch_size if drop_last else (dataset_size + batch_size - 1) // batch_size,
+        data_config.repo_id,
+        data_config.root,
+    )
+
+    if data_config.shuffle:
+        generator = torch.Generator()
+        if data_config.seed is not None:
+            generator.manual_seed(int(data_config.seed))
+        sampler = RandomSampler(data_source=dataset, generator=generator)
+    else:
+        sampler = SequentialSampler(data_source=dataset)
+
+    num_workers = int(data_config.num_workers)
+    return StatefulDataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        drop_last=drop_last,
+        sampler=sampler,
+        pin_memory=bool(data_config.pin_memory),
+        persistent_workers=bool(data_config.persistent_workers) if num_workers > 0 else False,
+        prefetch_factor=int(data_config.prefetch_factor) if num_workers > 0 else None,
+    )
 
 
 class RLPDTransitionDataset(Dataset):

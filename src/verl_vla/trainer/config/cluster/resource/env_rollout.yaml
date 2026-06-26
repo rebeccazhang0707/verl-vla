@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Resource placement for env-loop rollout clusters.
+# Resource placement for env + rollout clusters.
 
 # Target class for env-loop resource placement.
 _target_: verl_vla.trainer.train_cluster.config.EnvLoopTrainResourceConfig
