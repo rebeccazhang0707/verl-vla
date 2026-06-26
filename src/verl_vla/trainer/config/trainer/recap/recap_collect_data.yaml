@@ -1,0 +1,91 @@
+# @package _global_
+
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# RECAP rollout data collection entrypoint config.
+
+defaults:
+
+  # TrainCluster config used to run policy rollout in environments.
+  - /cluster@cluster: env_rollout_cluster
+
+  # Apply RECAP collect overrides last.
+  - _self_
+
+
+# TrainCluster rollout settings.
+cluster:
+
+  # Resource placement for collection.
+  resource:
+
+    # Environment workers need GPU by default for LIBERO offscreen rendering.
+    env:
+      device: cuda
+      nnodes: 1
+      gpus_per_node: 1
+      workers_per_node: 1
+
+    # Rollout model workers.
+    model:
+      device: cuda
+      nnodes: 1
+      gpus_per_node: 1
+      workers_per_node: 1
+
+  # Actor/rollout model config.
+  actor_rollout_ref:
+
+    # HuggingFace model path used by rollout workers.
+    model:
+      path: /file_system/liujincheng/models/pi05_libero_torch
+      tokenizer_path: ${cluster.actor_rollout_ref.model.path}
+      enable_gradient_checkpointing: False
+      use_remove_padding: False
+      trust_remote_code: False
+      override_config:
+        policy_type: libero
+
+  # Environment loop config.
+  env:
+
+    # Async env-loop scheduler options.
+    env_loop:
+      pipeline_stage_num: 1
+      max_interactions: 4
+
+    # Environment worker options.
+    env_worker:
+      num_envs: 1
+      recorder:
+        enable: true
+
+
+# RECAP collection options.
+recap:
+
+  # Fixed reset targets and rollout count.
+  collect:
+    num_rollouts: 1
+    task_id: 0
+    state_id: 0
+
+
+# Ray initialization options.
+ray_kwargs:
+
+  # Arguments forwarded to ray.init.
+  ray_init:
+    num_cpus: null

@@ -19,10 +19,10 @@ import time
 
 import numpy as np
 import torch
-from omegaconf import DictConfig
 from verl import DataProto
 from verl.single_controller.ray import RayWorkerGroup
 
+from verl_vla.env_loop.config import EnvLoopConfig
 from verl_vla.utils.data import get_dataproto_from_prefix, stack_dataproto_with_padding
 from verl_vla.utils.keys import ACTION_KEY, FEEDBACK_KEY, OBS_KEY
 
@@ -33,34 +33,19 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 class EnvLoop:
     """An env loop manages interactions between models and vectorized environments."""
 
-    def __init__(self, env_wg: RayWorkerGroup, rollout_wg: RayWorkerGroup, config: DictConfig):
+    def __init__(
+        self,
+        env_wg: RayWorkerGroup,
+        rollout_wg: RayWorkerGroup,
+        config: EnvLoopConfig,
+        switch_actor_rollout_mode: bool,
+    ):
         self.env_wg = env_wg
         self.rollout_wg = rollout_wg
-        self.config = config
 
-        self.stage_num = config.env.rollout.pipeline_stage_num
-        self.num_envs_per_worker = config.env.train.num_envs
-        self.action_dim = config.env.actor.model.action_dim
-        self.num_action_chunks = config.env.actor.model.num_action_chunks
-        self.single_env_rollout = bool(config.env.train.get("single_env_rollout", False))
-        if self.single_env_rollout:
-            assert self.stage_num == 1, "single_env_rollout only supports pipeline_stage_num == 1"
-
-        self.total_envs = self.env_wg.world_size * self.num_envs_per_worker
-        if self.total_envs % self.stage_num != 0:
-            raise ValueError(f"Total envs ({self.total_envs}) must be divisible by stage_num ({self.stage_num})")
-        self.envs_per_stage = self.total_envs // self.stage_num
-
-        self.default_max_interactions = config.env.train.max_episode_steps // config.env.actor.model.num_action_chunks
-        configured_max_interactions = config.env.train.get("max_interactions", None)
-        self.configured_max_interactions = (
-            self.default_max_interactions if configured_max_interactions is None else configured_max_interactions
-        )
-        self.max_interactions = self.configured_max_interactions
-        self.warmup_max_interactions = False
-
-        self.env_wg.init_worker()
-        self.env_wg.init_simulator()
+        self.stage_num = config.pipeline_stage_num
+        self.max_interactions = config.max_interactions
+        self.switch_actor_rollout_mode = switch_actor_rollout_mode
 
     def _strip_meta_info(self, data: DataProto) -> DataProto:
         return DataProto(
@@ -75,14 +60,9 @@ class EnvLoop:
         reset_results = reset_future.get()
         reset_wait_s = time.perf_counter() - reset_wait_start_t
 
-        if self.warmup_max_interactions:
-            self.max_interactions = self.default_max_interactions
-        else:
-            self.max_interactions = self.configured_max_interactions
-
         loop = asyncio.get_event_loop()
 
-        if not self.config.trainer.separate_train_inference:
+        if self.switch_actor_rollout_mode:
             self.rollout_wg.switch_to_rollout()
             run_start_t = time.perf_counter()
             output, run_metrics = loop.run_until_complete(self.run(prompts, reset_results))
@@ -111,16 +91,10 @@ class EnvLoop:
         initial_state_ids = np.asarray(prompts.non_tensor_batch["state_ids"])
         staged_task_ids = self._restructure_prompt_task_ids(prompts)
         staged_state_ids = self._restructure_prompt_values(initial_state_ids)
-        if self.single_env_rollout:
-            initial_state_ids = initial_state_ids[:1]
-            staged_state_ids = [staged_state_ids[0][:1]]
 
         staged_obs = self._restructure_obs_data(reset_results)
         for stage_id in range(self.stage_num):
             trajectories[stage_id].append({OBS_KEY: self._strip_meta_info(staged_obs[stage_id])})
-        if self.single_env_rollout:
-            staged_obs = [staged_obs[0].repeat(repeat_times=len(prompts), interleave=True)]
-            staged_task_ids = [staged_task_ids[0]]
 
         rollout_futures = {}
         for stage_id in range(self.stage_num):
@@ -154,8 +128,6 @@ class EnvLoop:
                 stage_timing[stage_id]["rollout_wait_s"] += time.perf_counter() - rollout_wait_start_t
                 stage_timing[stage_id]["rollout_wait_calls"] += 1.0
 
-                action_batch_size = len(action_result)
-                action_result = action_result[:1] if self.single_env_rollout else action_result
                 trajectories[stage_id][-1][ACTION_KEY] = self._strip_meta_info(action_result)
                 action_result.meta_info["stage_id"] = stage_id
                 env_ref = self.env_wg.env_interact_step(action_result)
@@ -179,8 +151,6 @@ class EnvLoop:
 
                 if step_idx < self.max_interactions:
                     vla_input = next_obs
-                    if self.single_env_rollout:
-                        vla_input = vla_input.repeat(repeat_times=action_batch_size, interleave=True)
                     vla_input.meta_info = prompts.meta_info
                     if staged_task_ids[stage_id] is not None:
                         vla_input.non_tensor_batch["task_ids"] = staged_task_ids[stage_id]

@@ -23,8 +23,8 @@ import numpy as np
 import torch
 from typing_extensions import override
 
-from verl_vla.recorder import MultiRecorder, load_recorder_config
-from verl_vla.teleop import TeleopController, load_teleop_config
+from verl_vla.recorder import MultiRecorder
+from verl_vla.teleop import TeleopController
 
 
 class BaseEnv(gym.Env):
@@ -286,13 +286,13 @@ class BaseEnv(gym.Env):
     ### Teleop Control ###
 
     def create_teleops(self):
-        teleop_cfg = load_teleop_config(self.cfg)
+        teleop_cfg = self.cfg.teleop
         if not teleop_cfg.enable:
             return []
 
         return [
             TeleopController.create(
-                self.cfg,
+                teleop_cfg,
                 rank=self.rank,
                 stage_id=self.stage_id,
                 env_id=env_id,
@@ -357,7 +357,7 @@ class BaseEnv(gym.Env):
     ### Recorder Control ###
 
     def create_recorder(self):
-        recorder_cfg = load_recorder_config(self.cfg)
+        recorder_cfg = self.cfg.recorder
         if not recorder_cfg.enable:
             return None
 
@@ -434,7 +434,7 @@ class BaseEnv(gym.Env):
         root = self.recorder.pop_completed()
         if root is None:
             return None
-        recorder_cfg = load_recorder_config(self.cfg)
+        recorder_cfg = self.cfg.recorder
         return {
             "root": root,
             "repo_id": f"{recorder_cfg.lerobot.repo_id}_rank_{self.rank}_stage_{self.stage_id}",

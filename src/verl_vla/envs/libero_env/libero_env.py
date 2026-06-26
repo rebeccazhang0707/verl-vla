@@ -62,7 +62,7 @@ class LiberoResetStateMixin:
         self._init_env()
 
     def init_random(self):
-        self.seed = int(self.cfg.seed)
+        self.seed = int(self.cfg.simulator.seed)
         self.rollout_id = 0
         self._generator = np.random.default_rng(seed=compose_seed(self.seed, self.rank, self.stage_id, 0, 0, 0))
         self._generator_ordered = np.random.default_rng(seed=compose_seed(self.seed, self.rank, self.stage_id, 0, 0, 1))
@@ -474,7 +474,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         self._elapsed_steps[env_ids] += 1
         raw_obs, _reward, terminations, info_lists = self.env.step(actions, id=env_ids)
         infos = list_of_dict_to_dict_of_list(info_lists)
-        truncations = self._elapsed_steps[env_ids] >= self.cfg.max_episode_steps
+        truncations = self._elapsed_steps[env_ids] >= self.cfg.simulator.max_episode_steps
         dones = np.logical_or(terminations, truncations)
 
         step_reward = np.asarray(_reward)

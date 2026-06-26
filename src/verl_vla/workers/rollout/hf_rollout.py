@@ -105,8 +105,14 @@ class HFRollout(BaseRollout):
 
     def _apply_acp_prompt_tag(self, prompts: DataProto) -> DataProto:
         acp_config = self.config.acp
+        if not acp_config.enable:
+            return prompts
+
+        if self.actor_config is None:
+            raise ValueError("ACP rollout requires actor_config for data key lookup.")
+
         data_keys = self.actor_config.data_keys
-        if not acp_config.enable or data_keys.task not in prompts.non_tensor_batch:
+        if data_keys.task not in prompts.non_tensor_batch:
             return prompts
 
         values = prompts.non_tensor_batch[data_keys.task]

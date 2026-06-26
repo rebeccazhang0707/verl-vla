@@ -46,7 +46,7 @@ class LiberoConfig:
 def load_libero_config(cfg: DictConfig | Any) -> LiberoConfig:
     raw = {}
     if hasattr(cfg, "get"):
-        raw = cfg.get("libero", {}) or {}
+        raw = cfg.get("simulator", {}) or {}
     raw = _to_dict(raw)
 
     init_raw = _to_dict(raw.get("init_params", {}))

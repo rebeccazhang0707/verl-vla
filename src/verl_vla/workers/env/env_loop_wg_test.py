@@ -133,7 +133,6 @@ def restructure_data_proto(data_proto: DataProto) -> list[DataProto]:
 async def run():
     # breakpoint()
     env_wg.init_worker()
-    env_wg.init_simulator()
 
     reset_state_ids_tensordict = DataProto.from_dict(
         non_tensors={"state_ids": [0] * NUM_ENVS_PER_ITER * STAGE_NUM, "task_ids": [0] * NUM_ENVS_PER_ITER * STAGE_NUM}

@@ -21,10 +21,12 @@ from omegaconf import OmegaConf
 from torch.distributed.device_mesh import init_device_mesh
 from verl import DataProto
 from verl.checkpoint_engine import CheckpointEngineRegistry
+from verl.single_controller.base import Worker
 from verl.single_controller.base.decorator import Dispatch, make_nd_compute_dataproto_dispatch_fn, register
 from verl.utils.config import omega_conf_to_dataclass
 from verl.utils.device import get_device_id, get_device_name
 from verl.utils.memory_utils import aggressive_empty_cache
+from verl.utils.profiler import DistProfiler, DistProfilerExtension, ProfilerConfig
 from verl.workers.config import HFModelConfig, TrainingWorkerConfig
 from verl.workers.engine_workers import ActorRolloutRefWorker
 from verl.workers.rollout.base import BaseRollout, get_rollout_class
@@ -62,6 +64,43 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
     - execute_checkpoint_engine
     """
 
+    def __init__(self, config, role: str, **kwargs):
+        Worker.__init__(self)
+        self.config = config
+        self.role = role
+        self.actor = None
+        self.ref = None
+        self.rollout = None
+        assert self.role in ["actor", "rollout", "ref", "actor_rollout", "actor_rollout_ref"]
+        self._is_actor = self.role in ["actor", "actor_rollout", "actor_rollout_ref"]
+        self._is_rollout = self.role in ["rollout", "actor_rollout", "actor_rollout_ref"]
+        self._is_ref = self.role in ["ref", "actor_rollout_ref"]
+
+        if self._is_actor:
+            omega_profiler_config = config.actor.get("profiler", {})
+        elif self._is_rollout:
+            omega_profiler_config = config.rollout.get("profiler", {})
+        else:
+            omega_profiler_config = config.ref.get("profiler", {})
+
+        profiler_config = omega_conf_to_dataclass(omega_profiler_config, dataclass_type=ProfilerConfig)
+        if omega_profiler_config.get("tool", None) in ["npu", "nsys", "torch", "torch_memory"]:
+            tool_config = omega_conf_to_dataclass(
+                omega_profiler_config.get("tool_config", {}).get(omega_profiler_config.get("tool"))
+            )
+        else:
+            tool_config = None
+
+        self.enable_routing_replay = (
+            self._is_actor
+            and self.config.actor.strategy == "megatron"
+            and self.config.actor.megatron.router_replay.mode != "disabled"
+        )
+
+        DistProfilerExtension.__init__(
+            self, DistProfiler(rank=self.rank, config=profiler_config, tool_config=tool_config)
+        )
+
     def _require_fsdp_rollout_engine(self) -> FSDPEngineWithActionHEAD:
         if self.config.actor.strategy not in {"fsdp", "fsdp2"}:
             raise RuntimeError(
@@ -76,13 +115,14 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
         model_config: HFModelConfig = omega_conf_to_dataclass(self.config.model)
         self.tokenizer = getattr(self, "tokenizer", None) or model_config.tokenizer
         actor_config = None
-        actor_target = OmegaConf.select(self.config.actor, "_target_")
-        if actor_target not in ACTOR_WORKER_REGISTRY:
-            supported = ", ".join(sorted(ACTOR_WORKER_REGISTRY))
-            raise ValueError(f"Unsupported actor config target: {actor_target}. Supported values: {supported}")
-        actor_config_cls, worker_cls = ACTOR_WORKER_REGISTRY[actor_target]
-        actor_config = omega_conf_to_dataclass(self.config.actor, dataclass_type=actor_config_cls)
-        actor_config.model_config = model_config
+        if "actor" in self.role:
+            actor_target = OmegaConf.select(self.config.actor, "_target_")
+            if actor_target not in ACTOR_WORKER_REGISTRY:
+                supported = ", ".join(sorted(ACTOR_WORKER_REGISTRY))
+                raise ValueError(f"Unsupported actor config target: {actor_target}. Supported values: {supported}")
+            actor_config_cls, worker_cls = ACTOR_WORKER_REGISTRY[actor_target]
+            actor_config = omega_conf_to_dataclass(self.config.actor, dataclass_type=actor_config_cls)
+            actor_config.model_config = model_config
 
         # 1. build reference model
         if "ref" in self.role:

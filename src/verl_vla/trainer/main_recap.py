@@ -15,7 +15,7 @@
 import hydra
 from omegaconf import OmegaConf
 
-from verl_vla.trainer.recap.collect import collect_recap_env_data
+from verl_vla.trainer.recap.collect_data import collect_recap_env_data
 from verl_vla.trainer.recap.policy import train_recap_policy
 from verl_vla.trainer.recap.policy_eval import eval_recap_policy
 from verl_vla.trainer.recap.returns import CollectedDatasets, DatasetInfo, ensure_recap_fields

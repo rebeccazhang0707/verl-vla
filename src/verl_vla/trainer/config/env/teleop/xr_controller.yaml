@@ -12,27 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataset recording utilities for VERL-VLA."""
+# WebXR controller teleop device configuration.
 
-from .async_recorder import AsyncRecorder
-from .base import BaseRecorder
-from .config import (
-    LeRobotRecorderConfig,
-    RecorderConfig,
-    VideoRecorderConfig,
-)
-from .impl.lerobot import LeRobotDatasetRecorder, LeRobotRecorder
-from .impl.video import VideoRecorder
-from .recorder import MultiRecorder
+# Target class for WebXR controller teleop config.
+_target_: verl_vla.teleop.config.XRControllerTeleopConfig
 
-__all__ = [
-    "BaseRecorder",
-    "AsyncRecorder",
-    "LeRobotDatasetRecorder",
-    "LeRobotRecorder",
-    "LeRobotRecorderConfig",
-    "MultiRecorder",
-    "RecorderConfig",
-    "VideoRecorder",
-    "VideoRecorderConfig",
-]
+# Controller hand to track.
+hand: right
+
+# Position sensitivity for SE(3) relative actions.
+pos_sensitivity: 150.0
+
+# Rotation sensitivity for SE(3) relative actions.
+rot_sensitivity: 4.0
+
+# Button used to mark intervention.
+intervention_button: squeeze
+
+# Button used for gripper control.
+gripper_button: trigger
+
+# Button threshold for analog inputs.
+button_threshold: 0.5

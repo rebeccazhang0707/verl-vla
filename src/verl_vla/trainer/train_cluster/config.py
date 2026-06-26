@@ -1,0 +1,165 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from hydra.utils import instantiate
+from verl.base_config import BaseConfig
+from verl.workers.config.model import HFModelConfig
+
+from verl_vla.env_loop.config import EnvLoopConfig
+from verl_vla.workers.config import ActorConfig, RolloutConfig, SFTActorConfig
+from verl_vla.workers.env.config import EnvWorkerConfig
+
+__all__ = [
+    "ActorRolloutRefConfig",
+    "EnvTrainConfig",
+    "EnvWorkerConfig",
+    "EnvLoopTrainClusterConfig",
+    "EnvLoopTrainResourceConfig",
+    "OptionalResourceConfig",
+    "ResourceConfig",
+    "SFTTrainClusterConfig",
+    "SFTTrainResourceConfig",
+]
+
+
+@dataclass
+class ResourceConfig(BaseConfig):
+    """Resource-pool placement config."""
+
+    device: str = "cuda"
+    resource_label: str | None = None
+    nnodes: int = 1
+    gpus_per_node: int = 1
+    workers_per_node: int = 1
+
+    def __post_init__(self):
+        if self.device not in {"cpu", "cuda"}:
+            raise ValueError(f"Unsupported resource device: {self.device}")
+        if self.gpus_per_node < 0:
+            raise ValueError(f"gpus_per_node must be non-negative, got {self.gpus_per_node}")
+        if self.workers_per_node <= 0:
+            raise ValueError(f"workers_per_node must be positive, got {self.workers_per_node}")
+        if self.nnodes <= 0:
+            raise ValueError(f"nnodes must be positive, got {self.nnodes}")
+
+
+@dataclass
+class OptionalResourceConfig(ResourceConfig):
+    """Optional resource-pool placement config."""
+
+    enabled: bool = False
+
+
+@dataclass
+class SFTTrainResourceConfig(BaseConfig):
+    """Resource placement for SFT-style training."""
+
+    controller_label: str | None = None
+    model: ResourceConfig = field(default_factory=ResourceConfig)
+
+    def __post_init__(self):
+        if not isinstance(self.model, ResourceConfig):
+            object.__setattr__(self, "model", instantiate(self.model))
+
+
+@dataclass
+class EnvLoopTrainResourceConfig(BaseConfig):
+    """Resource placement for env-loop training or evaluation."""
+
+    controller_label: str | None = None
+    env: ResourceConfig = field(default_factory=ResourceConfig)
+    model: ResourceConfig = field(default_factory=ResourceConfig)
+    separate_rollout_model: OptionalResourceConfig = field(default_factory=OptionalResourceConfig)
+
+    def __post_init__(self):
+        if not isinstance(self.env, ResourceConfig):
+            object.__setattr__(self, "env", instantiate(self.env))
+        if not isinstance(self.model, ResourceConfig):
+            object.__setattr__(self, "model", instantiate(self.model))
+        if not isinstance(self.separate_rollout_model, OptionalResourceConfig):
+            object.__setattr__(self, "separate_rollout_model", instantiate(self.separate_rollout_model))
+
+
+@dataclass
+class EnvTrainConfig(BaseConfig):
+    """Environment-side config used by TrainCluster."""
+
+    env_loop: EnvLoopConfig = field(default_factory=EnvLoopConfig)
+    env_worker: EnvWorkerConfig = field(default_factory=EnvWorkerConfig)
+
+    def __post_init__(self):
+        if not isinstance(self.env_loop, EnvLoopConfig):
+            object.__setattr__(self, "env_loop", instantiate(self.env_loop))
+        if not isinstance(self.env_worker, EnvWorkerConfig):
+            object.__setattr__(self, "env_worker", instantiate(self.env_worker, _recursive_=False))
+
+    def validate_worker_layout(self, env_resource: ResourceConfig) -> None:
+        stage_num = self.env_loop.pipeline_stage_num
+        num_envs_per_worker = self.env_worker.num_envs
+        processes_per_node = (
+            env_resource.workers_per_node if env_resource.device == "cpu" else env_resource.gpus_per_node
+        )
+        env_worker_world_size = env_resource.nnodes * processes_per_node
+        total_envs = env_worker_world_size * num_envs_per_worker
+        if total_envs % stage_num != 0:
+            raise ValueError(f"Total envs ({total_envs}) must be divisible by stage_num ({stage_num})")
+
+
+@dataclass
+class ActorRolloutRefConfig(BaseConfig):
+    """Model, actor, and rollout config for actor/rollout workers."""
+
+    model: HFModelConfig = field(default_factory=HFModelConfig)
+    actor: ActorConfig | SFTActorConfig | None = None
+    rollout: RolloutConfig = field(default_factory=RolloutConfig)
+
+
+@dataclass
+class SFTTrainClusterConfig(BaseConfig):
+    """Cluster config for SFT-style training."""
+
+    resource: SFTTrainResourceConfig = field(default_factory=SFTTrainResourceConfig)
+    actor_rollout_ref: ActorRolloutRefConfig = field(default_factory=ActorRolloutRefConfig)
+
+    def __post_init__(self):
+        if not isinstance(self.resource, SFTTrainResourceConfig):
+            object.__setattr__(self, "resource", instantiate(self.resource, _recursive_=False))
+        if not isinstance(self.actor_rollout_ref, ActorRolloutRefConfig):
+            object.__setattr__(self, "actor_rollout_ref", instantiate(self.actor_rollout_ref, _recursive_=False))
+
+
+@dataclass
+class EnvLoopTrainClusterConfig(BaseConfig):
+    """Cluster config for env-loop training or evaluation."""
+
+    resource: EnvLoopTrainResourceConfig = field(default_factory=EnvLoopTrainResourceConfig)
+    env: EnvTrainConfig = field(default_factory=EnvTrainConfig)
+    actor_rollout_ref: ActorRolloutRefConfig = field(default_factory=ActorRolloutRefConfig)
+
+    def __post_init__(self):
+        if not isinstance(self.resource, EnvLoopTrainResourceConfig):
+            object.__setattr__(self, "resource", instantiate(self.resource, _recursive_=False))
+        if not isinstance(self.env, EnvTrainConfig):
+            object.__setattr__(self, "env", instantiate(self.env, _recursive_=False))
+        if not isinstance(self.actor_rollout_ref, ActorRolloutRefConfig):
+            object.__setattr__(
+                self,
+                "actor_rollout_ref",
+                instantiate(self.actor_rollout_ref, _recursive_=False),
+            )
+        self.env.validate_worker_layout(self.resource.env)

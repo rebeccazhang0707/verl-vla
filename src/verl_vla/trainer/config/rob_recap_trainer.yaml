@@ -1,5 +1,20 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 defaults:
   - model_engine: dp
+  - cluster@cluster: env_rollout_cluster
   - ./actor@actor_rollout_ref.actor: ${model_engine}_actor
   - data@data: legacy_data
   - ref@actor_rollout_ref.ref: ${model_engine}_ref
@@ -38,6 +53,30 @@ actor_rollout_ref:
     trust_remote_code: False
     override_config:
       policy_type: libero
+
+cluster:
+  resource:
+    env:
+      device: cuda
+      nnodes: ${trainer.nnodes}
+      gpus_per_node: ${trainer.n_env_workers_per_node}
+      workers_per_node: ${trainer.n_env_workers_per_node}
+    model:
+      nnodes: ${trainer.nnodes}
+      gpus_per_node: ${trainer.n_gpus_per_node}
+  actor_rollout_ref:
+    model:
+      path: ${actor_rollout_ref.model.path}
+      tokenizer_path: ${actor_rollout_ref.model.tokenizer_path}
+      enable_gradient_checkpointing: ${actor_rollout_ref.model.enable_gradient_checkpointing}
+      use_remove_padding: ${actor_rollout_ref.model.use_remove_padding}
+      trust_remote_code: ${actor_rollout_ref.model.trust_remote_code}
+      override_config: ${actor_rollout_ref.model.override_config}
+  env:
+    env_worker:
+      num_envs: 16
+      recorder:
+        enable: true
 
 recap:
   collect:

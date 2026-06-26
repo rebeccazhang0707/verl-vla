@@ -1,0 +1,69 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Teleop configuration for TrainCluster rollout smoke tests.
+
+defaults:
+
+  # Keyboard teleop device config.
+  - /env/teleop@keyboard: keyboard
+
+  # WebXR controller teleop device config.
+  - /env/teleop@xr_controller: xr_controller
+
+  # Apply this teleop config last.
+  - _self_
+
+
+# Target class for teleop config.
+_target_: verl_vla.teleop.config.TeleopConfig
+
+# Whether to start one observation web server per vectorized environment.
+enable: False
+
+# Web server settings for observation streaming and browser input.
+server:
+
+  # Target class for teleop server config.
+  _target_: verl_vla.teleop.config.TeleopServerConfig
+
+  # Bind host for browser access.
+  host: "0.0.0.0"
+
+  # Base port for observation web servers.
+  base_port: 18000
+
+  # Port stride between Ray ranks.
+  rank_stride: 10000
+
+  # Port stride between pipeline stages.
+  stage_stride: 1000
+
+  # JPEG quality for streamed observation images.
+  jpeg_quality: 100
+
+  # Uvicorn log level for each observation server.
+  log_level: warning
+
+  # TLS certificate for browser/WebXR access.
+  ssl_certfile: /file_system/liujincheng/Projects/verl-vla/certs/teleop.crt
+
+  # TLS private key for browser/WebXR access.
+  ssl_keyfile: /file_system/liujincheng/Projects/verl-vla/certs/teleop.key
+
+
+# Human intervention input devices enabled in the browser and backend.
+devices:
+  - keyboard
+  - xr_controller

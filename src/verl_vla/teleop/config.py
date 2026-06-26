@@ -13,9 +13,6 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import Any
-
-from omegaconf import DictConfig, OmegaConf
 
 
 @dataclass(frozen=True)
@@ -56,62 +53,9 @@ class TeleopConfig:
     keyboard: KeyboardTeleopConfig = field(default_factory=KeyboardTeleopConfig)
     xr_controller: XRControllerTeleopConfig = field(default_factory=XRControllerTeleopConfig)
 
-
-def load_teleop_config(cfg: DictConfig | Any, device: str | None = None) -> TeleopConfig:
-    raw = {}
-    if hasattr(cfg, "get"):
-        raw = cfg.get("teleop", {}) or {}
-    if isinstance(raw, DictConfig):
-        raw = OmegaConf.to_container(raw, resolve=True)
-    raw = dict(raw)
-    if device is not None:
-        raw["device"] = device
-
-    server_raw = raw.get("server", {})
-    if isinstance(server_raw, DictConfig):
-        server_raw = OmegaConf.to_container(server_raw, resolve=True)
-    server_raw = dict(server_raw or {})
-    for key in TeleopServerConfig.__annotations__:
-        if key in raw and key not in server_raw:
-            server_raw[key] = raw[key]
-    server_cfg = TeleopServerConfig(
-        **{key: server_raw[key] for key in TeleopServerConfig.__annotations__ if key in server_raw}
-    )
-
-    keyboard_raw = raw.get("keyboard", {})
-    if isinstance(keyboard_raw, DictConfig):
-        keyboard_raw = OmegaConf.to_container(keyboard_raw, resolve=True)
-    keyboard_raw = dict(keyboard_raw or {})
-    if "keyboard_pos_sensitivity" in raw and "pos_sensitivity" not in keyboard_raw:
-        keyboard_raw["pos_sensitivity"] = raw["keyboard_pos_sensitivity"]
-    if "keyboard_rot_sensitivity" in raw and "rot_sensitivity" not in keyboard_raw:
-        keyboard_raw["rot_sensitivity"] = raw["keyboard_rot_sensitivity"]
-    keyboard_cfg = KeyboardTeleopConfig(
-        **{key: keyboard_raw[key] for key in KeyboardTeleopConfig.__annotations__ if key in keyboard_raw}
-    )
-    xr_controller_raw = raw.get("xr_controller", {})
-    if isinstance(xr_controller_raw, DictConfig):
-        xr_controller_raw = OmegaConf.to_container(xr_controller_raw, resolve=True)
-    xr_controller_raw = dict(xr_controller_raw or {})
-    xr_controller_cfg = XRControllerTeleopConfig(
-        **{key: xr_controller_raw[key] for key in XRControllerTeleopConfig.__annotations__ if key in xr_controller_raw}
-    )
-    devices = raw.get("devices")
-    if devices is None:
-        devices = [raw.get("device", TeleopConfig.device)]
-    elif isinstance(devices, str):
-        devices = [devices]
-    devices = tuple(
-        str(item).strip().lower()
-        for item in devices
-        if item is not None and str(item).strip().lower() not in {"", "none", "null"}
-    )
-
-    return TeleopConfig(
-        enable=bool(raw.get("enable", TeleopConfig.enable)),
-        device=raw.get("device", TeleopConfig.device),
-        devices=devices,
-        server=server_cfg,
-        keyboard=keyboard_cfg,
-        xr_controller=xr_controller_cfg,
-    )
+    def __post_init__(self):
+        if isinstance(self.devices, str):
+            devices = (self.devices,)
+        else:
+            devices = tuple(self.devices)
+        object.__setattr__(self, "devices", devices)

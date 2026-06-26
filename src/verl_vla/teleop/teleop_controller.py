@@ -15,9 +15,8 @@
 from typing import Any
 
 import numpy as np
-from omegaconf import DictConfig
 
-from verl_vla.teleop.config import load_teleop_config
+from verl_vla.teleop.config import TeleopConfig
 from verl_vla.teleop.devices import (
     DeviceBase,
     KeyboardDevice,
@@ -32,7 +31,7 @@ from verl_vla.teleop.strategies import InterventionStrategyBase, get_strategy
 class TeleopController:
     def __init__(
         self,
-        cfg: DictConfig | Any,
+        teleop_cfg: TeleopConfig,
         *,
         rank: int,
         stage_id: int,
@@ -40,14 +39,13 @@ class TeleopController:
         env_type: str,
         device: str = "keyboard",
     ):
-        self.cfg = cfg
+        self.teleop_cfg = teleop_cfg
         self.rank = rank
         self.stage_id = stage_id
         self.env_id = env_id
         self.env_type = env_type
         self.device = device
         self._teleop_server: TeleopServer | None = None
-        self.teleop_cfg = load_teleop_config(cfg, device=device)
         self.input_devices: dict[str, DeviceBase] = {}
         self.strategies: dict[str, InterventionStrategyBase] = {}
         for device_type in self.teleop_cfg.devices:
@@ -66,7 +64,7 @@ class TeleopController:
     @classmethod
     def create(
         cls,
-        cfg: DictConfig | Any,
+        teleop_cfg: TeleopConfig,
         *,
         rank: int,
         stage_id: int,
@@ -74,16 +72,9 @@ class TeleopController:
         env_type: str,
         device: str = "keyboard",
     ) -> "TeleopController | None":
-        manager_cfg = cfg.get("teleop", {}) if hasattr(cfg, "get") else {}
-        if not manager_cfg or not manager_cfg.get("enable", False):
+        if not teleop_cfg.enable:
             return None
-        configured_device = manager_cfg.get("device", device) if hasattr(manager_cfg, "get") else device
-        configured_devices = manager_cfg.get("devices", None) if hasattr(manager_cfg, "get") else None
-        if configured_devices is None:
-            configured_devices = [configured_device]
-        elif isinstance(configured_devices, str):
-            configured_devices = [configured_devices]
-        return cls(cfg, rank=rank, stage_id=stage_id, env_id=env_id, env_type=env_type, device=device)
+        return cls(teleop_cfg, rank=rank, stage_id=stage_id, env_id=env_id, env_type=env_type, device=device)
 
     def publish_obs(
         self,

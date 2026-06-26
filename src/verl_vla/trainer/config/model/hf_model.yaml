@@ -1,11 +1,35 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Instantiate the shared verl HuggingFace model config class.
+defaults:
+
+  # PI0 model overrides.
+  - override@override_config: pi0
+
+  # Apply this HuggingFace model config last.
+  - _self_
+
+
+# Target class for this configuration.
 _target_: verl.workers.config.HFModelConfig
 
 # Default model path. Override this for a different HF checkpoint.
 path: /file_system/liujincheng/models/pi05_libero_torch
 
 # Tokenizer path defaults to the model path.
-tokenizer_path: ${actor_rollout_ref.model.path}
+tokenizer_path: ${.path}
 
 # Whether to stage model files through shared memory.
 use_shm: False
@@ -24,8 +48,6 @@ use_remove_padding: False
 
 # Model config fields overridden after loading the HF config.
 override_config:
-  # Select the LeRobot policy path in the model implementation.
-  policy_type: lerobot
 
   # Use eager attention for compatibility with the current VLA model path.
   attn_implementation: eager
