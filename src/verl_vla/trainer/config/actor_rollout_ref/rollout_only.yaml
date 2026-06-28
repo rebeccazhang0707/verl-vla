@@ -22,6 +22,9 @@ defaults:
   # HuggingFace model config.
   - /model@model: hf_model
 
+  # Shared batch field names.
+  - data_keys@data_keys
+
   # Apply this actor/rollout config last.
   - _self_
 

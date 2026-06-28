@@ -32,7 +32,7 @@ from verl.workers.engine_workers import ActorRolloutRefWorker
 from verl.workers.rollout.base import BaseRollout, get_rollout_class
 
 from verl_vla.models.register_vla_models import register_vla_models
-from verl_vla.workers.config import ActorConfig, RolloutConfig, SFTActorConfig
+from verl_vla.workers.config import ActorConfig, ActorDataKeysConfig, RolloutConfig, SFTActorConfig
 from verl_vla.workers.engine.sac import SACTrainingWorker
 from verl_vla.workers.engine.sft import SFTTrainingWorker
 from verl_vla.workers.rollout import register_vla_rollouts
@@ -114,6 +114,7 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
     def init_model(self):
         model_config: HFModelConfig = omega_conf_to_dataclass(self.config.model)
         self.tokenizer = getattr(self, "tokenizer", None) or model_config.tokenizer
+        data_keys = omega_conf_to_dataclass(self.config.data_keys, dataclass_type=ActorDataKeysConfig)
         actor_config = None
         if "actor" in self.role:
             actor_target = OmegaConf.select(self.config.actor, "_target_")
@@ -123,6 +124,7 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
             actor_config_cls, worker_cls = ACTOR_WORKER_REGISTRY[actor_target]
             actor_config = omega_conf_to_dataclass(self.config.actor, dataclass_type=actor_config_cls)
             actor_config.model_config = model_config
+            actor_config.data_keys = data_keys
 
         # 1. build reference model
         if "ref" in self.role:
@@ -176,6 +178,7 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
                 device_mesh=rollout_device_mesh,
                 engine=self.actor.engine if "actor" in self.role else None,
                 actor_config=actor_config,
+                data_keys=data_keys,
                 tokenizer=self.tokenizer,
             )
 

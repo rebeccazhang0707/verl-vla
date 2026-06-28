@@ -26,11 +26,19 @@ from verl_vla.utils.ray_utils import ensure_ray_initialized, get_controller_remo
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_TASK_ID = 0
+DEFAULT_STATE_ID = 0
+
+
+def get_collect_config(config):
+    return OmegaConf.select(config, "recap.collect_data", default=config)
+
 
 def collect_recap_env_data(config):
     """Run RECAP env data collection and return existing/new datasets."""
     ensure_ray_initialized(config)
-    remote_options = get_controller_remote_options(config)
+    collect_config = get_collect_config(config)
+    remote_options = get_controller_remote_options(collect_config)
     return ray.get(run_env_loop.options(**remote_options).remote(config))
 
 
@@ -39,28 +47,34 @@ def run_env_loop(config):
     OmegaConf.set_struct(config, False)
     OmegaConf.resolve(config)
 
-    cluster = TrainCluster(instantiate(config.cluster, _recursive_=False))
+    collect_config = get_collect_config(config)
+    cluster = TrainCluster(instantiate(collect_config.cluster, _recursive_=False))
     cluster.start()
-    collected_datasets = {}
-    for rollout_idx in range(int(config.recap.collect.num_rollouts)):
-        prompts = build_rollout_prompts(config, rollout_idx)
-        rollout_output, collected_datasets = cluster.rollout(prompts)
-        logger.info("Finished recap env loop rollout %s: %s", rollout_idx, rollout_output.meta_info.get("metrics", {}))
+    try:
+        collected_datasets = {}
+        for rollout_idx in range(int(collect_config.num_rollouts)):
+            prompts = build_rollout_prompts(collect_config, rollout_idx)
+            rollout_output, collected_datasets = cluster.rollout(prompts)
+            logger.info(
+                "Finished recap env loop rollout %s: %s", rollout_idx, rollout_output.meta_info.get("metrics", {})
+            )
 
-    return collected_datasets
+        return collected_datasets
+    finally:
+        cluster.shutdown()
 
 
-def build_rollout_prompts(config, global_step: int) -> DataProto:
-    env_resource = config.cluster.resource.env
+def build_rollout_prompts(collect_config, global_step: int) -> DataProto:
+    env_resource = collect_config.cluster.resource.env
     env_workers_per_node = (
         int(env_resource.workers_per_node) if env_resource.device == "cpu" else int(env_resource.gpus_per_node)
     )
     env_worker_world_size = int(env_resource.nnodes) * env_workers_per_node
-    num_envs_per_worker = int(config.cluster.env.env_worker.num_envs)
-    pipeline_stage_num = int(config.cluster.env.env_loop.pipeline_stage_num)
+    num_envs_per_worker = int(collect_config.cluster.env.env_worker.num_envs)
+    pipeline_stage_num = int(collect_config.cluster.env.env_loop.pipeline_stage_num)
     total_envs = env_worker_world_size * num_envs_per_worker * pipeline_stage_num
-    task_ids = np.full(total_envs, int(config.recap.collect.task_id), dtype=np.int64)
-    state_ids = np.full(total_envs, int(config.recap.collect.state_id), dtype=np.int64)
+    task_ids = np.full(total_envs, DEFAULT_TASK_ID, dtype=np.int64)
+    state_ids = np.full(total_envs, DEFAULT_STATE_ID, dtype=np.int64)
     return DataProto.from_dict(
         non_tensors={
             "state_ids": state_ids,
@@ -73,7 +87,7 @@ def build_rollout_prompts(config, global_step: int) -> DataProto:
     )
 
 
-@hydra.main(config_path="../config", config_name="trainer/recap/recap_collect_data", version_base=None)
+@hydra.main(config_path="../config", config_name="rob_recap_trainer", version_base=None)
 def main(config):
     collected_datasets = collect_recap_env_data(config)
     logger.info("RECAP collect finished: %s", collected_datasets)

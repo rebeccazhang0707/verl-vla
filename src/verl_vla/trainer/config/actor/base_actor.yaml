@@ -10,23 +10,6 @@
 # Actor execution strategy used by the worker engine.
 strategy: fsdp2
 
-# Batch field names shared by actor training and rollout.
-data_keys:
-  # Task/prompt text field.
-  task: task
-
-  # Action tensor field.
-  action: action
-
-  # Optional action padding mask field.
-  action_mask: action_is_pad
-
-  # Optional ACP indicator tensor field.
-  indicator: null
-
-  # Optional target-value tensor field.
-  target_value: null
-
 # Per-actor profiler config. The current SFT path keeps profiling disabled by default.
 profiler:
   # Instantiate verl profiler config.

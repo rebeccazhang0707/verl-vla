@@ -1,0 +1,66 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# RECAP value-model config overrides.
+
+# Select the LIBERO policy path in the model implementation.
+policy_type: libero
+
+# Select the value-model SFT head.
+sft_type: value_model
+
+# Disable SAC-specific model heads for value-model SFT.
+sac_enable: False
+
+# Vision backbone path.
+siglip_path: google/siglip-so400m-patch14-384
+
+# Language backbone path.
+gemma3_path: google/gemma-3-270m
+
+# Tokenizer path used by the value model.
+tokenizer_path: google/gemma-3-270m
+
+# Value critic variant.
+critic_expert_variant: gemma3_100m
+
+# Input image size.
+image_size: 384
+
+# Freeze the vision encoder during value-model SFT.
+freeze_vision_encoder: True
+
+# Freeze the VLM during value-model SFT.
+freeze_vlm: True
+
+# Stop gradients from the value head into the VLM.
+stop_gradient_to_vlm: True
+
+# Model precision.
+precision: bfloat16
+
+# Hidden dimension for the value head. Zero uses the model default.
+value_head_hidden_dim: 0
+
+# Number of bins for discretized value prediction.
+value_head_num_bins: 201
+
+# Minimum supported value target.
+value_head_v_min: -1.0
+
+# Maximum supported value target.
+value_head_v_max: 0.0
+
+# Value-head dropout probability.
+value_head_dropout: 0.0

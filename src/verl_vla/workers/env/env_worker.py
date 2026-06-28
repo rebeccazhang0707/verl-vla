@@ -57,6 +57,7 @@ def create_env_batch_dataproto(obs, rewards, dones, truncations, infos, meta=Non
     step_result = {
         "observation": obs["observation"],
         "task": obs["task"],
+        "task_id": obs.get("task_id"),
         "next.reward": rewards,
         "next.done": dones,
         "next.truncated": truncations,
@@ -80,6 +81,8 @@ def create_env_batch_dataproto(obs, rewards, dones, truncations, infos, meta=Non
         "next.truncated": step_result["next.truncated"],
     }
     non_tensor_batch = {"obs.task": step_result["task"]}
+    if step_result["task_id"] is not None:
+        non_tensor_batch["obs.task_id"] = np.asarray(step_result["task_id"], dtype=np.int64)
     output = DataProto.from_dict(tensors=tensor_batch, non_tensors=non_tensor_batch)
 
     return output
@@ -132,8 +135,6 @@ class EnvWorker(Worker, DistProfilerExtension):
         OmegaConf.set_struct(eval_cfg, False)
         if "teleop" in eval_cfg:
             eval_cfg.teleop.enable = False
-        if "recorder" in eval_cfg:
-            eval_cfg.recorder.enable = False
         return eval_cfg
 
     def _simulators(self, mode: str):
@@ -266,11 +267,10 @@ class EnvWorker(Worker, DistProfilerExtension):
         return env_batch
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def get_all_state_ids(self):
-        """Get all available state IDs from the environment."""
+    def get_eval_benchmark_size(self):
+        """Get the number of episodes in the eval benchmark."""
         simulator = self.eval_simulator_list[0] if self.eval_simulator_list else self.simulator_list[0]
-        state_ids = simulator.get_all_state_ids()
-        return state_ids
+        return int(simulator.env_benchmark_size())
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="env"), blocking=False)
     @DistProfiler.annotate(color="blue", role="env_reset_envs_to_state_ids")
@@ -280,30 +280,45 @@ class EnvWorker(Worker, DistProfilerExtension):
         Args:
             state_ids: State IDs to reset environments to
         """
-        state_ids_list = list(data.non_tensor_batch["state_ids"])
-        task_ids_list = list(data.non_tensor_batch["task_ids"])
         mode = data.meta_info.get("mode", "train")
         reset_eval = bool(data.meta_info.get("reset_eval", False))
         simulators = self._simulators(mode)
 
         full_batch_size = self.env_worker_cfg.num_envs * self.stage_num
-        assert len(state_ids_list) == full_batch_size, (
-            f"state_ids_list length is {len(state_ids_list)}, but should be {full_batch_size}"
-        )
+        if "state_ids" in data.non_tensor_batch:
+            state_ids_list = list(data.non_tensor_batch["state_ids"])
+        elif mode == "eval":
+            state_ids_list = None
+        else:
+            raise KeyError("reset_envs_to_state_ids requires non_tensor_batch['state_ids'] outside eval mode.")
+
+        if "task_id" in data.non_tensor_batch:
+            task_ids_list = list(data.non_tensor_batch["task_id"])
+        elif "task_ids" in data.non_tensor_batch:
+            task_ids_list = list(data.non_tensor_batch["task_ids"])
+        elif mode == "eval":
+            task_ids_list = None
+        else:
+            raise KeyError("reset_envs_to_state_ids requires non_tensor_batch['task_ids'] outside eval mode.")
+
+        if state_ids_list is not None:
+            assert len(state_ids_list) == full_batch_size, (
+                f"state_ids_list length is {len(state_ids_list)}, but should be {full_batch_size}"
+            )
         result_list = []
         for stage_id in range(self.stage_num):
             start = stage_id * self.env_worker_cfg.num_envs
             end = (stage_id + 1) * self.env_worker_cfg.num_envs
-            stage_state_ids = state_ids_list[start:end]
-            stage_task_ids = task_ids_list[start:end]
+            stage_state_ids = None if state_ids_list is None else state_ids_list[start:end]
+            stage_task_ids = None if task_ids_list is None else task_ids_list[start:end]
 
-            if self.simulator_type == "isaac":
+            if self.simulator_type == "isaac" and stage_state_ids is not None:
                 assert len(set(stage_state_ids)) == 1, "rollout.n should equal to num_envs for isaac"
 
             self.stage_modes[stage_id] = mode
             result = simulators[stage_id].reset(
                 options={
-                    "env_idx": list(range(len(stage_state_ids))),
+                    "env_idx": list(range(self.env_worker_cfg.num_envs)),
                     "reset_state_ids": stage_state_ids,
                     "task_ids": stage_task_ids,
                     "reset_eval": reset_eval,
@@ -318,6 +333,9 @@ class EnvWorker(Worker, DistProfilerExtension):
             for key in observations[0]:
                 output_tensor_dict[key] = torch.as_tensor(np.stack([observation[key] for observation in observations]))
         output_non_tensor_dict["task"] = [task for obs, _info in result_list for task in obs["task"]]
+        task_ids = [task_id for obs, _info in result_list for task_id in obs.get("task_id", [])]
+        if task_ids:
+            output_non_tensor_dict["task_id"] = np.asarray(task_ids, dtype=np.int64)
 
         output = DataProto.from_dict(tensors=output_tensor_dict, non_tensors=output_non_tensor_dict)
         return output

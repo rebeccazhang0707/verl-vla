@@ -18,20 +18,21 @@ import ray
 from omegaconf import OmegaConf
 
 from verl_vla.trainer.main_sft import main_task as run_sft_main_task
-from verl_vla.trainer.recap.returns import RECAP_RETURN_FIELD
+from verl_vla.trainer.recap.compute_return import RECAP_INDICATOR_FIELD
+from verl_vla.utils.ray_utils import ensure_ray_initialized, get_controller_remote_options
 
 
-def _select_value_model_dataset(collected_datasets):
+def _select_policy_dataset(collected_datasets):
     if collected_datasets is None:
-        raise ValueError("RECAP value-model training requires a collected or configured LeRobot dataset.")
+        raise ValueError("RECAP policy training requires a collected or configured LeRobot dataset.")
     dataset = collected_datasets.get("collected_dataset") or collected_datasets.get("existing_dataset")
     if dataset is None:
-        raise ValueError("RECAP value-model training is enabled but no LeRobot dataset was collected or found.")
+        raise ValueError("RECAP policy training is enabled but no LeRobot dataset was collected or found.")
     return dataset
 
 
-def _find_latest_value_model_hf_checkpoint(value_model_config) -> Path:
-    checkpoint_root = Path(str(value_model_config.trainer.default_local_dir))
+def _find_latest_policy_hf_checkpoint(policy_config) -> Path | None:
+    checkpoint_root = Path(str(policy_config.cluster.checkpoint.default_local_dir))
     if not checkpoint_root.is_absolute():
         checkpoint_root = Path.cwd() / checkpoint_root
 
@@ -49,28 +50,31 @@ def _find_latest_value_model_hf_checkpoint(value_model_config) -> Path:
         hf_path = step_dir / "actor" / "huggingface"
         if hf_path.exists():
             return hf_path
-    raise FileNotFoundError(f"No value-model HF checkpoint found under {checkpoint_root}.")
+    return None
 
 
-def _build_value_model_sft_config(config, collected_datasets):
-    sft_config_node = OmegaConf.select(config, "recap.value_model.config")
+def _build_policy_sft_config(config, collected_datasets):
+    sft_config_node = OmegaConf.select(config, "recap.train_policy")
     if sft_config_node is None:
-        raise ValueError("`recap.value_model.config` is required when RECAP value-model training is enabled.")
+        raise ValueError("`recap.train_policy` is required when RECAP policy training is enabled.")
 
-    sft_config = OmegaConf.create(OmegaConf.to_container(sft_config_node, resolve=False))
+    sft_config = OmegaConf.create(OmegaConf.to_container(sft_config_node, resolve=True))
     OmegaConf.set_struct(sft_config, False)
 
-    dataset = _select_value_model_dataset(collected_datasets)
+    dataset = _select_policy_dataset(collected_datasets)
     OmegaConf.update(sft_config, "data.repo_id", str(dataset["repo_id"]))
     OmegaConf.update(sft_config, "data.root", str(dataset["root"]))
-    OmegaConf.update(sft_config, "actor_rollout_ref.actor.data_keys.action_mask", None)
-    OmegaConf.update(sft_config, "actor_rollout_ref.actor.data_keys.target_value", RECAP_RETURN_FIELD)
+    OmegaConf.update(sft_config, "cluster.actor_rollout_ref.actor.acp.enable", True)
+    OmegaConf.update(sft_config, "cluster.actor_rollout_ref.data_keys.indicator", RECAP_INDICATOR_FIELD)
 
     OmegaConf.resolve(sft_config)
     return sft_config
 
 
-def train_recap_value_model(config, collected_datasets) -> str:
-    sft_config = _build_value_model_sft_config(config, collected_datasets)
-    ray.get(run_sft_main_task.remote(sft_config))
-    return str(_find_latest_value_model_hf_checkpoint(sft_config))
+def train_recap_policy(config, collected_datasets) -> str | None:
+    sft_config = _build_policy_sft_config(config, collected_datasets)
+    ensure_ray_initialized(config)
+    remote_options = get_controller_remote_options(sft_config)
+    ray.get(run_sft_main_task.options(**remote_options).remote(sft_config))
+    hf_checkpoint = _find_latest_policy_hf_checkpoint(sft_config)
+    return None if hf_checkpoint is None else str(hf_checkpoint)

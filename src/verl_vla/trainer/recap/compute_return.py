@@ -42,9 +42,29 @@ RECAP_FIELDS = {
 }
 
 
+def _get_field_names(return_cfg) -> dict[str, str]:
+    fields_cfg = return_cfg.fields
+    return {
+        "return": str(fields_cfg["return"]),
+        "value": str(fields_cfg.value),
+        "advantage": str(fields_cfg.advantage),
+        "indicator": str(fields_cfg.indicator),
+    }
+
+
+def _get_recap_fields(field_names: dict[str, str]) -> dict[str, dict[str, object]]:
+    return {
+        field_names["return"]: {"dtype": "float32", "shape": [1], "names": None},
+        field_names["value"]: {"dtype": "float32", "shape": [1], "names": None},
+        field_names["advantage"]: {"dtype": "float32", "shape": [1], "names": None},
+        field_names["indicator"]: {"dtype": "int64", "shape": [1], "names": None},
+    }
+
+
 def _ensure_recap_fields_for_dataset(
     dataset: DatasetInfo,
     *,
+    field_names: dict[str, str],
     c_fail_coef: float = 1.0,
     clip_min: float = -1.0,
     clip_max: float = 0.0,
@@ -53,10 +73,11 @@ def _ensure_recap_fields_for_dataset(
     dataset_root = Path(dataset["root"])
     data_files = list_lerobot_data_files(dataset_root)
 
+    recap_fields = _get_recap_fields(field_names)
     existing_fields = load_lerobot_feature_names(dataset_root)
-    missing_fields = [field for field in RECAP_FIELDS if field not in existing_fields]
+    missing_fields = [field for field in recap_fields if field not in existing_fields]
     existing_columns = collect_lerobot_columns(data_files)
-    missing_columns = [field for field in RECAP_FIELDS if field not in existing_columns]
+    missing_columns = [field for field in recap_fields if field not in existing_columns]
     return_lookup = _compute_return_lookup(
         data_files,
         c_fail_coef=c_fail_coef,
@@ -64,19 +85,27 @@ def _ensure_recap_fields_for_dataset(
         clip_max=clip_max,
     )
     for parquet_path in data_files:
-        _ensure_recap_columns_for_file(parquet_path, missing_columns, return_lookup)
+        _ensure_recap_columns_for_file(
+            parquet_path,
+            missing_columns,
+            return_lookup,
+            field_names=field_names,
+            recap_fields=recap_fields,
+        )
     if missing_fields:
-        update_lerobot_feature_metadata(dataset_root, {field: RECAP_FIELDS[field] for field in missing_fields})
+        update_lerobot_feature_metadata(dataset_root, {field: recap_fields[field] for field in missing_fields})
 
 
 def ensure_recap_fields(config, collected_datasets: CollectedDatasets) -> CollectedDatasets:
-    return_cfg = config.recap.returns
+    return_cfg = config.recap.compute_return
+    field_names = _get_field_names(return_cfg)
     c_fail_coef = float(return_cfg.c_fail_coef)
     clip_min = float(return_cfg.clip_min)
     clip_max = float(return_cfg.clip_max)
     for dataset in collected_datasets.values():
         _ensure_recap_fields_for_dataset(
             dataset,
+            field_names=field_names,
             c_fail_coef=c_fail_coef,
             clip_min=clip_min,
             clip_max=clip_max,
@@ -92,9 +121,9 @@ def _compute_return_lookup(
     clip_max: float,
 ) -> dict[int, np.float32]:
     if c_fail_coef < 0:
-        raise ValueError("recap.returns.c_fail_coef must be non-negative.")
+        raise ValueError("recap.compute_return.c_fail_coef must be non-negative.")
     if clip_min >= clip_max:
-        raise ValueError("recap.returns.clip_min must be smaller than recap.returns.clip_max.")
+        raise ValueError("recap.compute_return.clip_min must be smaller than recap.compute_return.clip_max.")
 
     records: list[dict[str, object]] = []
     for parquet_path in data_files:
@@ -180,19 +209,23 @@ def _ensure_recap_columns_for_file(
     parquet_path: Path,
     missing_columns: list[str],
     return_lookup: dict[int, np.float32],
+    *,
+    field_names: dict[str, str],
+    recap_fields: dict[str, dict[str, object]],
 ) -> None:
     table = pq.read_table(parquet_path)
     indices = table["index"].to_numpy().astype(np.int64, copy=False)
-    fields_to_write = [RECAP_RETURN_FIELD, *[field for field in missing_columns if field != RECAP_RETURN_FIELD]]
+    return_field = field_names["return"]
+    fields_to_write = [return_field, *[field for field in missing_columns if field != return_field]]
     columns = {}
     for field in fields_to_write:
-        if field == RECAP_RETURN_FIELD:
+        if field == return_field:
             columns[field] = np.asarray([return_lookup[int(index)] for index in indices], dtype=np.float32)
-        elif RECAP_FIELDS[field]["dtype"] == "float32":
+        elif recap_fields[field]["dtype"] == "float32":
             columns[field] = np.full(len(indices), np.nan, dtype=np.float32)
-        elif RECAP_FIELDS[field]["dtype"] == "int64":
+        elif recap_fields[field]["dtype"] == "int64":
             columns[field] = np.zeros(len(indices), dtype=np.int64)
         else:
-            raise ValueError(f"Unsupported RECAP field dtype: {field} -> {RECAP_FIELDS[field]['dtype']}")
+            raise ValueError(f"Unsupported RECAP field dtype: {field} -> {recap_fields[field]['dtype']}")
 
     write_parquet_columns(parquet_path=parquet_path, columns=columns)

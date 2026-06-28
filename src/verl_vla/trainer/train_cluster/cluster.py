@@ -17,7 +17,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, cast
 
+import numpy as np
 import ray
+import torch
+from ray.util.placement_group import remove_placement_group
 from verl import DataProto
 from verl.single_controller.ray import RayClassWithInitArgs, RayWorkerGroup
 from verl.single_controller.ray.base import create_colocated_worker_cls
@@ -43,6 +46,21 @@ ROLE_TO_WORKER_NAME = {
     Role.ActorRollout: "actor_rollout",
     Role.Env: "env",
 }
+
+
+def _reduce_time_tensor(value: torch.Tensor, *, reduction: str) -> torch.Tensor:
+    """Reduce chunk/substep dimensions while preserving batch and rollout time."""
+    if value.ndim <= 2:
+        return value
+
+    while value.ndim > 2:
+        if reduction == "any":
+            value = value.any(dim=-1)
+        elif reduction == "sum":
+            value = value.sum(dim=-1)
+        else:
+            raise ValueError(f"Unsupported reduction: {reduction}")
+    return value
 
 
 class TrainCluster:
@@ -99,6 +117,34 @@ class TrainCluster:
                 actor_config=actor_config,
                 actor_worker_group=self.worker_groups[ROLE_TO_WORKER_NAME[Role.Actor]],
             )
+
+    def shutdown(self) -> None:
+        seen_actor_ids: set[str] = set()
+        for worker_group in self.worker_groups.values():
+            for worker in getattr(worker_group, "_workers", []):
+                actor_id = getattr(getattr(worker, "_actor_id", None), "hex", lambda: None)()
+                if actor_id is not None and actor_id in seen_actor_ids:
+                    continue
+                if actor_id is not None:
+                    seen_actor_ids.add(actor_id)
+                try:
+                    ray.kill(worker, no_restart=True)
+                except Exception:
+                    pass
+
+        if self.resource_pool_manager is not None:
+            for resource_pool in self.resource_pool_manager.resource_pool_dict.values():
+                for pg in getattr(resource_pool, "pgs", None) or []:
+                    try:
+                        remove_placement_group(pg)
+                    except Exception:
+                        pass
+                resource_pool.pgs = None
+
+        self.worker_groups = {}
+        self.env_loop = None
+        self.checkpoint_helper = None
+        self.resource_pool_manager = None
 
     def _init_workers(self) -> None:
         if self.resource_pool_manager is None:
@@ -240,7 +286,7 @@ class TrainCluster:
             )
         )
         assert self.env_loop is not None
-        output = self.env_loop.generate_sequences(prompts, reset_future)
+        output = self.env_loop.generate_sequences(reset_future)
         return output, self._collect_lerobot_datasets()
 
     def _collect_lerobot_datasets(self) -> dict[str, dict[str, Any]]:
@@ -291,7 +337,172 @@ class TrainCluster:
             return actor_wg.update_actor_async(data)
         return actor_wg.update_actor(data)
 
-    def eval(self, *args: Any, **kwargs: Any) -> Any: ...
+    def eval(
+        self,
+        *,
+        max_episodes: int | None = None,
+    ) -> dict[str, float]:
+        if self.cluster_type != "env_loop":
+            raise RuntimeError("eval is only wired for env-loop train clusters.")
+
+        env_wg = self.worker_groups[ROLE_TO_WORKER_NAME[Role.Env]]
+        benchmark_size = int(env_wg.get_eval_benchmark_size()[0])
+        target_episodes = benchmark_size if max_episodes is None else int(max_episodes)
+
+        eval_step = 0
+        rollout_metric_lists: dict[str, list[float]] = {}
+        trajectory_records: list[dict[str, float | int | bool]] = []
+        carry_state: dict[str, np.ndarray | None] = {"length": None, "reward": None, "task_id": None}
+        while len(trajectory_records) < target_episodes:
+            reset_eval = eval_step == 0
+            reset_future = env_wg.reset_envs_to_state_ids(
+                DataProto.from_dict(
+                    meta_info={
+                        "mode": "eval",
+                        "reset_eval": reset_eval,
+                    },
+                )
+            )
+            rollout_output = self.env_loop.generate_sequences(reset_future, eval=True)
+            for key, value in rollout_output.meta_info.get("metrics", {}).items():
+                rollout_metric_lists.setdefault(key, []).append(float(value))
+
+            trajectory_records.extend(
+                self._collect_eval_trajectory_records(
+                    rollout_output,
+                    remaining=target_episodes - len(trajectory_records),
+                    carry_state=carry_state,
+                )
+            )
+            eval_step += 1
+
+        metrics = self._eval_metrics_from_trajectory_records(
+            trajectory_records,
+            benchmark_size=benchmark_size,
+        )
+        for key, values in rollout_metric_lists.items():
+            metrics[key] = float(np.mean(values)) if values else 0.0
+        return metrics
+
+    def _collect_eval_trajectory_records(
+        self,
+        output: DataProto,
+        *,
+        remaining: int,
+        carry_state: dict[str, np.ndarray | None],
+    ) -> list[dict[str, float | int | bool]]:
+        if remaining <= 0:
+            return []
+
+        done_steps = _reduce_time_tensor(output.batch["next.done"].bool(), reduction="any")
+        reward_steps = _reduce_time_tensor(output.batch["next.reward"].float(), reduction="sum")
+        if done_steps.ndim == 1:
+            done_steps = done_steps[:, None]
+            reward_steps = reward_steps[:, None]
+        task_id_steps = output.non_tensor_batch.get("obs.task_id")
+        if task_id_steps is not None:
+            task_id_steps = np.asarray(task_id_steps)
+            if task_id_steps.ndim == 1:
+                task_id_steps = task_id_steps[:, None]
+
+        records: list[dict[str, float | int | bool]] = []
+        batch_size = int(done_steps.shape[0])
+
+        carry_lengths = carry_state.get("length")
+        carry_rewards = carry_state.get("reward")
+        carry_task_ids = carry_state.get("task_id")
+        if carry_lengths is None or carry_lengths.shape[0] != batch_size:
+            carry_lengths = np.zeros(batch_size, dtype=np.int64)
+            carry_rewards = np.zeros(batch_size, dtype=np.float32)
+            carry_task_ids = np.full(batch_size, -1, dtype=np.int64)
+            carry_state["length"] = carry_lengths
+            carry_state["reward"] = carry_rewards
+            carry_state["task_id"] = carry_task_ids
+        assert carry_rewards is not None
+        assert carry_task_ids is not None
+
+        for batch_idx in range(done_steps.shape[0]):
+            if len(records) >= remaining:
+                break
+
+            done_row = done_steps[batch_idx].reshape(-1)
+            reward_row = reward_steps[batch_idx].reshape(-1)
+            done_indices = torch.nonzero(done_row, as_tuple=False).flatten().tolist()
+            start_idx = 0
+            segment_prefix_length = int(carry_lengths[batch_idx])
+            segment_prefix_return = float(carry_rewards[batch_idx])
+            segment_task_id = int(carry_task_ids[batch_idx])
+            if segment_prefix_length == 0 and task_id_steps is not None and task_id_steps.shape[1] > 0:
+                segment_task_id = int(task_id_steps[batch_idx, 0])
+
+            for done_idx in done_indices:
+                if len(records) >= remaining:
+                    break
+
+                segment = slice(start_idx, done_idx + 1)
+                trajectory_return = segment_prefix_return + float(reward_row[segment].sum().item())
+                trajectory_length = segment_prefix_length + done_idx - start_idx + 1
+                records.append(
+                    {
+                        "length": int(trajectory_length),
+                        "return": float(trajectory_return),
+                        "success": bool(trajectory_return > 0.0),
+                        "task_id": int(segment_task_id),
+                    }
+                )
+
+                start_idx = done_idx + 1
+                segment_prefix_length = 0
+                segment_prefix_return = 0.0
+                if task_id_steps is not None and start_idx < task_id_steps.shape[1]:
+                    segment_task_id = int(task_id_steps[batch_idx, start_idx])
+
+            if len(records) < remaining:
+                remaining_steps = int(done_row.numel()) - start_idx
+                carry_lengths[batch_idx] = segment_prefix_length + remaining_steps
+                carry_rewards[batch_idx] = segment_prefix_return + float(reward_row[start_idx:].sum().item())
+                carry_task_ids[batch_idx] = segment_task_id
+
+        return records
+
+    def _eval_metrics_from_trajectory_records(
+        self,
+        records: list[dict[str, float | int | bool]],
+        *,
+        benchmark_size: int,
+    ) -> dict[str, float]:
+        trajectory_count = len(records)
+        success_records = [record for record in records if bool(record["success"])]
+        success_count = len(success_records)
+        metrics = {
+            "val/benchmark_size": float(benchmark_size),
+            "val/avg_return": (float(np.mean([float(record["return"]) for record in records])) if records else 0.0),
+            "val/avg_success_trajectory_length": (
+                float(np.mean([int(record["length"]) for record in success_records])) if success_records else 0.0
+            ),
+            "val/trajectory_count": float(trajectory_count),
+            "val/success_trajectory_count": float(success_count),
+            "val/failed_trajectory_count": float(trajectory_count - success_count),
+            "val/trajectory_success_rate": (float(success_count / trajectory_count) if trajectory_count > 0 else 0.0),
+        }
+        task_ids = sorted({int(record["task_id"]) for record in records if int(record["task_id"]) >= 0})
+        for task_id in task_ids:
+            task_records = [record for record in records if int(record["task_id"]) == task_id]
+            task_success_records = [record for record in task_records if bool(record["success"])]
+            trajectory_count = len(task_records)
+            success_count = len(task_success_records)
+            metrics[f"val/per_task_trajectory_count/task_{task_id}"] = float(trajectory_count)
+            metrics[f"val/per_task_success_trajectory_count/task_{task_id}"] = float(success_count)
+            metrics[f"val/per_task_failed_trajectory_count/task_{task_id}"] = float(trajectory_count - success_count)
+            metrics[f"val/per_task_success_rate/task_{task_id}"] = (
+                float(success_count / trajectory_count) if trajectory_count > 0 else 0.0
+            )
+            metrics[f"val/per_task_avg_success_trajectory_length/task_{task_id}"] = (
+                float(np.mean([int(record["length"]) for record in task_success_records]))
+                if task_success_records
+                else 0.0
+            )
+        return metrics
 
     def update_weights(self, *args: Any, **kwargs: Any) -> Any: ...
 

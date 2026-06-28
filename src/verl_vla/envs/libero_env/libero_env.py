@@ -121,10 +121,6 @@ class LiberoResetStateMixin:
         self.reset_state_ids = self._get_ordered_reset_state_ids(self.num_envs)
         self._init_task_and_trial_ids(async_reset=async_reset)
 
-    def get_all_state_ids(self):
-        """Returns all possible state IDs from the entire benchmark."""
-        return self.valid_reset_state_ids.copy()
-
     def load_state(self, state_buffer: bytes):
         self.env.load_state(state_buffer)
 
@@ -219,6 +215,9 @@ class LiberoResetStateMixin:
     def reset_eval_cursor(self):
         self.eval_start_idx = 0
         self.eval_reset_state_ids_all = self._build_rank_reset_queue(self._build_eval_reset_state_ids(), shuffle=False)
+
+    def env_benchmark_size(self) -> int:
+        return int(self._build_eval_reset_state_ids().shape[0])
 
     def _get_eval_reset_state_ids(self, num_reset_states):
         reset_state_ids, self.eval_start_idx = self._take_rank_reset_state_ids(
@@ -455,15 +454,18 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
             for _ in range(reset_warmup_steps):
                 raw_obs, _reward, terminations, info_lists = self.env.step(zero_actions, id=env_ids)
             tasks = [self.task_descriptions[env_id] for env_id in env_ids]
+            task_id = self.task_ids[env_ids].astype(np.int64, copy=False)
         else:
             zero_actions = np.zeros((self.num_envs, LIBERO_ACTION_DIM))
             for _ in range(reset_warmup_steps):
                 raw_obs, _reward, terminations, info_lists = self.env.step(zero_actions)
             tasks = self.task_descriptions
+            task_id = self.task_ids.astype(np.int64, copy=False)
 
         obs = {
             "observation": self._make_observations(raw_obs),
             "task": tasks,
+            "task_id": task_id,
         }
         self._reset_metrics(env_ids)
 
@@ -483,6 +485,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         return {
             "observation": self._make_observations(raw_obs),
             "task": [self.task_descriptions[env_id] for env_id in env_ids],
+            "task_id": self.task_ids[env_ids].astype(np.int64, copy=False),
             "next.reward": to_tensor(step_reward),
             "next.done": to_tensor(np.asarray(dones, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(truncations, dtype=bool)),

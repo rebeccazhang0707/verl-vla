@@ -21,7 +21,7 @@ simulator_type: libero
 seed: 42
 
 # Maximum simulator interaction rounds per rollout.
-max_interactions: ${cluster.env.env_loop.max_interactions}
+max_interactions: 4
 
 # Maximum number of simulator steps per episode.
 max_episode_steps: 512

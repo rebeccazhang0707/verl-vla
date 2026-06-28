@@ -236,6 +236,7 @@ class LeRobotEnv(gym.Env):
                 }
             ),
             "task_descriptions": list(self.task_descriptions),
+            "task_id": self._task_ids.astype(np.int64, copy=False),
         }
 
     def add_new_frames(self, obs, plot_infos):
@@ -254,8 +255,8 @@ class LeRobotEnv(gym.Env):
         wrist_image = put_info_on_image(wrist_image, info_item)
         self.render_images.append(np.concatenate([top_image, wrist_image], axis=1))
 
-    def get_all_state_ids(self):
-        return np.arange(self.total_num_group_envs)
+    def env_benchmark_size(self):
+        return int(self.total_num_group_envs)
 
     def reset_envs_to_state_ids(self, state_ids_list, task_ids_list):
         self._state_ids = np.asarray(state_ids_list, dtype=np.int64)

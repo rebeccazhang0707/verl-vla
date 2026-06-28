@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader, SequentialSampler, Subset
 from tqdm import tqdm
 
 from verl_vla.models.recap_value_critic import ReCapValueCriticForPrediction
-from verl_vla.trainer.recap.returns import (
+from verl_vla.trainer.recap.compute_return import (
     RECAP_ADVANTAGE_FIELD,
     RECAP_INDICATOR_FIELD,
     RECAP_RETURN_FIELD,

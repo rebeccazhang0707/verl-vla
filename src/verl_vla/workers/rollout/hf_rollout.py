@@ -42,6 +42,7 @@ class HFRollout(BaseRollout):
         engine=None,
         module=None,
         actor_config=None,
+        data_keys=None,
         tokenizer: Any = None,
         **kwargs,
     ):
@@ -49,6 +50,7 @@ class HFRollout(BaseRollout):
         self.engine = engine
         self.module = module if module is not None else (engine.module if engine is not None else None)
         self.actor_config = actor_config
+        self.data_keys = data_keys
         self.tokenizer = tokenizer if tokenizer is not None else getattr(model_config, "tokenizer", None)
         self.output_critic_value = bool(config.output_critic_value)
 
@@ -108,17 +110,18 @@ class HFRollout(BaseRollout):
         if not acp_config.enable:
             return prompts
 
-        if self.actor_config is None:
-            raise ValueError("ACP rollout requires actor_config for data key lookup.")
-
-        data_keys = self.actor_config.data_keys
+        data_keys = self.data_keys or getattr(self.actor_config, "data_keys", None)
+        if data_keys is None:
+            raise ValueError("ACP rollout requires actor_rollout_ref.data_keys for data key lookup.")
         if data_keys.task not in prompts.non_tensor_batch:
             return prompts
 
         values = prompts.non_tensor_batch[data_keys.task]
         tagged_values = values.copy()
         indicator_key = data_keys.indicator
-        indicators = prompts.batch.get(indicator_key) if indicator_key is not None else None
+        indicators = (
+            prompts.batch.get(indicator_key) if indicator_key is not None and prompts.batch is not None else None
+        )
         indicators = indicators.reshape(-1).detach().cpu().numpy() if indicators is not None else None
         for idx, value in enumerate(values):
             if indicators is not None and int(indicators[idx]) <= 0:

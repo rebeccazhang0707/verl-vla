@@ -43,14 +43,16 @@ def main_task(config):
 
     cluster = TrainCluster(instantiate(config.cluster, _recursive_=False))
     cluster.start()
-
-    trainer = RobRaySFTTrainer(
-        data_config=config.data,
-        trainer_config=config.trainer,
-        cluster=cluster,
-        tracking_config=cast(dict[str, Any], OmegaConf.to_container(config, resolve=True)),
-    )
-    trainer.fit()
+    try:
+        trainer = RobRaySFTTrainer(
+            data_config=config.data,
+            trainer_config=config.trainer,
+            cluster=cluster,
+            tracking_config=cast(dict[str, Any], OmegaConf.to_container(config, resolve=True)),
+        )
+        trainer.fit()
+    finally:
+        cluster.shutdown()
 
 
 if __name__ == "__main__":

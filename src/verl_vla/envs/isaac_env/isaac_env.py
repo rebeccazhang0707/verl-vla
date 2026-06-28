@@ -254,6 +254,7 @@ class IsaacEnv(gym.Env):
         obs = {
             "images_and_states": to_tensor(images_and_states),
             "task_descriptions": [self.task_descriptions] * self.num_envs,
+            "task_id": np.full(self.num_envs, int(self.task_id), dtype=np.int64),
         }
         return obs
 

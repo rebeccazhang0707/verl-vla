@@ -286,7 +286,8 @@ class IsaacLabArenaEnv(BaseEnv):
     def _make_obs(self, raw_obs, *, env_ids):
         observations = self._make_observations(raw_obs, env_ids=env_ids)
         tasks = [self.task_description] * len(observations)
-        return {"observation": observations, "task": tasks}
+        task_id = np.zeros(len(observations), dtype=np.int64)
+        return {"observation": observations, "task": tasks, "task_id": task_id}
 
     def _make_observations(self, raw_obs, *, env_ids) -> list[dict[str, Any]]:
         env_ids = np.asarray(env_ids, dtype=np.int64)

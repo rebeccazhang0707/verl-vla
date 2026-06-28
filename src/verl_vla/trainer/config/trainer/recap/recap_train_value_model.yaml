@@ -1,0 +1,68 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+defaults:
+
+  # Base actor-only SFT trainer config.
+  - /rob_sft_trainer
+
+  # Value-model-specific model overrides.
+  - override /model/override@cluster.actor_rollout_ref.model.override_config: recap_value_model
+
+  # Apply this stage config last.
+  - _self_
+
+
+# Whether to train the RECAP value model.
+enable: true
+
+# Dataset used when this stage runs without fresh collected datasets.
+dataset:
+  root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
+  repo_id: local/verl_vla_libero_collected
+
+
+# Value-model dataset settings.
+data:
+  action_delta_steps: 0
+
+
+# Value-model TrainCluster settings.
+cluster:
+  checkpoint:
+    default_local_dir: checkpoints/${recap.train_value_model.trainer.project_name}/${recap.train_value_model.trainer.experiment_name}
+
+  actor_rollout_ref:
+    data_keys:
+      action_mask: null
+
+    model:
+      path: /file_system/liujincheng/Projects/verl-vla/examples/recap_value_critic_hf
+      tokenizer_path: google/gemma-3-270m
+      trust_remote_code: true
+
+    actor:
+      checkpoint:
+        save_contents: ["model", "optimizer", "extra", "hf_model"]
+        load_contents: ["model", "optimizer", "extra"]
+
+      fsdp_config:
+        wrap_policy:
+          transformer_layer_cls_to_wrap: ["ReCapValueDualStreamLayer"]
+
+
+# Value-model trainer settings.
+trainer:
+  project_name: recap
+  experiment_name: value_model

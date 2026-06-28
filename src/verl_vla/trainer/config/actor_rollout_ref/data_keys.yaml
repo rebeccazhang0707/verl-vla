@@ -12,22 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Actor-only worker config.
+# Batch field names shared by actor training, rollout, eval, and replay.
 
-defaults:
+# Task/prompt text field.
+task: task
 
-  # SFT actor worker config.
-  - /actor@actor: sft_actor
+# Action tensor field.
+action: action
 
-  # HuggingFace model config.
-  - /model@model: hf_model
+# Optional action padding mask field.
+action_mask: action_is_pad
 
-  # Shared batch field names.
-  - data_keys@data_keys
+# Optional ACP indicator tensor field.
+indicator: null
 
-  # Apply this actor/rollout config last.
-  - _self_
-
-
-# Target class for actor/rollout config.
-_target_: verl_vla.trainer.train_cluster.config.ActorRolloutRefConfig
+# Optional target-value tensor field.
+target_value: null

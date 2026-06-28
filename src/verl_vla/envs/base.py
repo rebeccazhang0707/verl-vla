@@ -200,6 +200,10 @@ class BaseEnv(gym.Env):
     def env_close(self) -> None:
         """Close subclass-owned simulator resources."""
 
+    def env_benchmark_size(self) -> int:
+        """Return the number of episodes in the environment's eval benchmark."""
+        return 1
+
     def _reset_kwargs_from_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
         options = options or {}
         env_ids = options.get("env_idx")
@@ -271,6 +275,8 @@ class BaseEnv(gym.Env):
         for obs_idx, local_id in enumerate(reset_local_ids):
             step_result["observation"][local_id] = reset_obs["observation"][obs_idx]
             step_result["task"][local_id] = reset_obs["task"][obs_idx]
+            if "task_id" in step_result and "task_id" in reset_obs:
+                step_result["task_id"][local_id] = reset_obs["task_id"][obs_idx]
         return step_result
 
     @staticmethod

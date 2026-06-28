@@ -22,7 +22,7 @@ from verl.base_config import BaseConfig
 from verl.workers.config.model import HFModelConfig
 
 from verl_vla.env_loop.config import EnvLoopConfig
-from verl_vla.workers.config import RolloutConfig
+from verl_vla.workers.config import ActorDataKeysConfig, RolloutConfig
 from verl_vla.workers.env.config import EnvWorkerConfig
 
 __all__ = [
@@ -127,6 +127,7 @@ class ActorRolloutRefConfig(BaseConfig):
     """Model, actor, and rollout config for actor/rollout workers."""
 
     model: HFModelConfig = field(default_factory=HFModelConfig)
+    data_keys: ActorDataKeysConfig = field(default_factory=ActorDataKeysConfig)
     actor: DictConfig | None = None
     rollout: RolloutConfig | None = None
 

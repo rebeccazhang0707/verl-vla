@@ -253,18 +253,6 @@ class EnvManager:
 
         return method_proxy
 
-    def get_all_state_ids(self):
-        """Get all available state IDs from the environment."""
-        if self.process is None or not self.process.is_alive():
-            raise RuntimeError("Simulator not running")
-
-        self.command_queue.put({"method": "get_all_state_ids", "args": [], "kwargs": {}})
-        result = self.result_queue.get()
-        result = recursive_to_own(result)
-        if result["status"] == "error":
-            raise Exception(result["error"])
-        return result["data"]
-
     def __setattr__(self, name, value):
         # Handle special attributes that should be set on self
         if name in [
