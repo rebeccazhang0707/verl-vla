@@ -52,3 +52,5 @@ cluster:
 trainer:
   project_name: recap
   experiment_name: policy
+  early_stopping:
+    enable: true

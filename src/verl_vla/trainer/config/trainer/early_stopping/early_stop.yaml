@@ -1,0 +1,34 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Instantiate the trend early stopping config class.
+_target_: verl_vla.utils.early_stopping.TrendEarlyStoppingConfig
+
+# Whether to enable early stopping.
+enable: False
+
+# Metric name to monitor.
+metric: sft/loss
+
+# Number of recent metric points used to fit the loss trend.
+window_size: 100
+
+# Minimum relative improvement required inside the fitted window.
+min_improvement_ratio: 0.001
+
+# Number of consecutive bad windows allowed before stopping.
+patience_windows: 3
+
+# Number of initial trainer steps ignored by early stopping.
+warmup_steps: 200

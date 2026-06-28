@@ -12,6 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+defaults:
+
+  # Attach the early stopping config under `early_stopping`.
+  - /trainer/early_stopping@early_stopping: early_stop
+
+  # Keep local trainer fields in this file taking precedence.
+  - _self_
+
 # Instantiate the VLA SFT trainer config class.
 _target_: verl_vla.trainer.sft.config.SFTTrainerConfig
 

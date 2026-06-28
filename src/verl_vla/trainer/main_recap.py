@@ -48,7 +48,7 @@ def main(config):
     # Step 3: train the RECAP value model with the SFT trainer.
     if OmegaConf.select(config, "recap.train_value_model.enable", default=True):
         if collected_datasets is None:
-            dataset_cfg = config.recap.train_value_model.dataset
+            dataset_cfg = config.recap.train_value_model.data
             collected_datasets = {
                 "collected_dataset": {
                     "root": str(dataset_cfg.root),

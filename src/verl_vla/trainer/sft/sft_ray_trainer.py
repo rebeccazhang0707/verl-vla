@@ -30,6 +30,7 @@ from verl_vla.trainer.train_cluster import TrainCluster
 from verl_vla.utils.data import dataloader_batch_to_dataproto
 from verl_vla.utils.dataloader import LeRobotDataLoaderConfig, build_lerobot_sft_dataloader
 from verl_vla.utils.dataloader.state import load_dataloader_state
+from verl_vla.utils.early_stopping import TrendEarlyStopper
 
 from .config import SFTTrainerConfig
 
@@ -88,6 +89,7 @@ class RobRaySFTTrainer(RayPPOTrainer):
         self.total_training_steps = total_epochs * steps_per_epoch
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
         self.max_steps_duration = 0.0
+        early_stopper = self._build_early_stopper()
 
         current_epoch = self.global_steps // steps_per_epoch
         for epoch in range(current_epoch, total_epochs):
@@ -132,18 +134,65 @@ class RobRaySFTTrainer(RayPPOTrainer):
                 metrics.update(actor_output_metrics)
                 metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
 
+                early_stop = self._update_early_stopper(early_stopper, metrics)
+                if early_stop:
+                    metrics.update(early_stop)
+
                 progress_bar.update(1)
-                progress_bar.set_postfix(
-                    sft_loss=f"{metrics.get('sft/loss', 0.0):.4f}",
-                    grad_pre=f"{metrics.get('sft/grad_norm', 0.0):.4f}",
-                )
+                postfix = {
+                    "sft_loss": f"{metrics.get('sft/loss', 0.0):.4f}",
+                    "grad_pre": f"{metrics.get('sft/grad_norm', 0.0):.4f}",
+                }
+                if early_stopper is not None:
+                    threshold_progress = metrics.get("sft/early_stop/threshold_progress", 0.0)
+                    postfix["early_stop"] = f"{threshold_progress * 100.0:.1f}%"
+                progress_bar.set_postfix(**postfix)
                 tracking_logger.log(data=metrics, step=self.global_steps)
+
+                if early_stop:
+                    progress_bar.set_postfix(
+                        sft_loss=f"{metrics.get('sft/loss', 0.0):.4f}",
+                        early_stop="true",
+                    )
+                    progress_bar.close()
+                    return
 
                 if is_last_step:
                     progress_bar.close()
                     return
 
         progress_bar.close()
+
+    def _build_early_stopper(self) -> TrendEarlyStopper | None:
+        early_stopping = self.trainer_config.early_stopping
+        if not early_stopping.enable:
+            return None
+        return TrendEarlyStopper(early_stopping)
+
+    def _update_early_stopper(
+        self,
+        early_stopper: TrendEarlyStopper | None,
+        metrics: dict[str, float],
+    ) -> dict[str, float] | None:
+        if early_stopper is None:
+            return None
+
+        early_stopping = self.trainer_config.early_stopping
+        metric_name = early_stopping.metric
+        metric_value = metrics.get(metric_name)
+        if metric_value is None:
+            return None
+
+        early_stop_metrics = early_stopper.update(float(metric_value))
+        metrics.update({f"sft/early_stop/{key}": value for key, value in early_stop_metrics.items()})
+
+        if not early_stopper.should_stop:
+            return None
+
+        print(f"Early stopping triggered at step {self.global_steps}.")
+        return {
+            "sft/early_stop/triggered": 1.0,
+        }
 
     def _get_step_control_flags(self, step_in_epoch: int, steps_per_epoch: int) -> tuple[bool, bool, bool]:
         current_step = self.global_steps + 1

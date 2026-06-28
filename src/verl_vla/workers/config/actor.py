@@ -112,6 +112,7 @@ class BaseVLAActorConfig(BaseConfig):
 
     _mutable_fields = BaseConfig._mutable_fields | {
         "engine",
+        "data_keys",
         "model_config",
     }
 

@@ -38,4 +38,4 @@ seed: 42
 video_backend: pyav
 
 # Number of future action timestamps requested from LeRobot.
-action_delta_steps: 50
+action_delta_steps: 0

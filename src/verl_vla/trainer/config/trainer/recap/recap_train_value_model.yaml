@@ -27,15 +27,10 @@ defaults:
 # Whether to train the RECAP value model.
 enable: true
 
-# Dataset used when this stage runs without fresh collected datasets.
-dataset:
+# LeRobot dataset used when this stage runs without fresh collected datasets.
+data:
   root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
   repo_id: local/verl_vla_libero_collected
-
-
-# Value-model dataset settings.
-data:
-  action_delta_steps: 0
 
 
 # Value-model TrainCluster settings.
@@ -44,9 +39,6 @@ cluster:
     default_local_dir: checkpoints/${recap.train_value_model.trainer.project_name}/${recap.train_value_model.trainer.experiment_name}
 
   actor_rollout_ref:
-    data_keys:
-      action_mask: null
-
     model:
       path: /file_system/liujincheng/Projects/verl-vla/examples/recap_value_critic_hf
       tokenizer_path: google/gemma-3-270m
@@ -57,6 +49,9 @@ cluster:
         save_contents: ["model", "optimizer", "extra", "hf_model"]
         load_contents: ["model", "optimizer", "extra"]
 
+      optim:
+        lr: 1e-4
+
       fsdp_config:
         wrap_policy:
           transformer_layer_cls_to_wrap: ["ReCapValueDualStreamLayer"]
@@ -66,3 +61,5 @@ cluster:
 trainer:
   project_name: recap
   experiment_name: value_model
+  early_stopping:
+    enable: true
