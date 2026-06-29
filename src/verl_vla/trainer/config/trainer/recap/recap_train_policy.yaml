@@ -30,6 +30,12 @@ dataset:
   repo_id: local/verl_vla_libero_collected
 
 
+# Policy dataloader settings.
+data:
+  # Number of future low-level actions used to train the policy action chunk.
+  action_delta_steps: 50
+
+
 # Policy TrainCluster settings.
 cluster:
   checkpoint:
@@ -55,5 +61,10 @@ cluster:
 trainer:
   project_name: recap
   experiment_name: policy
+  logger: ["console", "tensorboard"]
   early_stopping:
     enable: true
+    window_size: 300
+    min_improvement_ratio: 0.0005
+    patience_windows: 16
+    warmup_steps: 500

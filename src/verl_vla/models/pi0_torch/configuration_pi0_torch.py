@@ -19,6 +19,7 @@ class PI0TorchConfig(PretrainedConfig):
     model_type = "pi0_torch"
 
     def __init__(self, **kwargs):
+        kwargs["architectures"] = ["PI0ForConditionalGeneration"]
         super().__init__(**kwargs)
 
         self.state_norm_stats = kwargs.get("state_norm_stats", {})

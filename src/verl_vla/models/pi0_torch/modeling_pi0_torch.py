@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import math
+import os
 from typing import Literal, cast
 
 import torch
@@ -60,7 +61,15 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
     def __init__(self, config: PI0TorchConfig):
         super().__init__(config)
         SupportSFTTraining.__init__(self, config)
-        self.model: PI0Model = None
+        self.model = PI0Model(
+            max_state_dim=int(getattr(config, "max_state_dim", 32)),
+            max_action_dim=int(getattr(config, "max_action_dim", 32)),
+            proj_width=int(getattr(config, "proj_width", 1024)),
+            n_action_steps=int(getattr(config, "n_action_steps", 50)),
+            num_steps=int(getattr(config, "num_steps", 10)),
+            use_cache=bool(getattr(config, "use_cache", True)),
+            pi05_enabled=bool(getattr(config, "pi05_enabled", False)),
+        )
         self.state_norm_stats = config.state_norm_stats
         self.action_norm_stats = config.action_norm_stats
         self.pi05_enabled = config.pi05_enabled
@@ -244,9 +253,19 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         policy.model = PI0Model.from_pretrained(pretrained_model_name_or_path)
         return policy
 
+    def save_pretrained(self, save_directory, *args, state_dict=None, **kwargs):
+        os.makedirs(save_directory, exist_ok=True)
+
+        if state_dict is not None:
+            self.load_state_dict(state_dict, strict=False)
+        self.model.save_pretrained(save_directory, *args, **kwargs)
+        self.config.save_pretrained(save_directory)
+
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
-        filtered_state_dict = {key: value for key, value in state_dict.items() if key.startswith("model.")}
-        return super().load_state_dict(filtered_state_dict, strict=False, assign=assign)
+        filtered_state_dict = {
+            key.removeprefix("model."): value for key, value in state_dict.items() if key.startswith("model.")
+        }
+        return self.model.load_state_dict(filtered_state_dict, strict=False, assign=assign)
 
     def freeze_vision_tower(self) -> None:
         """Freeze the vision tower parameters."""
@@ -679,3 +698,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
     @torch.no_grad()
     def sac_update_target_network(self, tau: float):
         self.critic_api.update_target_network(self, tau)
+
+
+class PI0ForConditionalGeneration(PI0ForActionPrediction):
+    pass

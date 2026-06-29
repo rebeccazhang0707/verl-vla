@@ -13,6 +13,6 @@
 # limitations under the License.
 
 from .configuration_pi0_torch import PI0TorchConfig
-from .modeling_pi0_torch import PI0ForActionPrediction
+from .modeling_pi0_torch import PI0ForActionPrediction, PI0ForConditionalGeneration
 
-__all__ = ["PI0TorchConfig", "PI0ForActionPrediction"]
+__all__ = ["PI0TorchConfig", "PI0ForActionPrediction", "PI0ForConditionalGeneration"]

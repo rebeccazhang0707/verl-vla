@@ -21,7 +21,7 @@ from verl.utils.transformers_compat import get_auto_model_for_vision2seq
 from .openvla_oft.configuration_prismatic import OpenVLAConfig
 from .openvla_oft.modeling_prismatic import OpenVLAForActionPrediction
 from .openvla_oft.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
-from .pi0_torch import PI0ForActionPrediction, PI0TorchConfig
+from .pi0_torch import PI0ForConditionalGeneration, PI0TorchConfig
 from .recap_value_critic import (
     ReCapValueCriticConfig,
     ReCapValueCriticForConditionalGeneration,
@@ -54,7 +54,7 @@ def register_pi0_torch_model() -> None:
         return
 
     AutoConfig.register("pi0_torch", PI0TorchConfig)
-    AutoModelForVision2Seq.register(PI0TorchConfig, PI0ForActionPrediction)
+    AutoModelForVision2Seq.register(PI0TorchConfig, PI0ForConditionalGeneration)
 
     _REGISTERED_MODELS["pi0_torch"] = True
 
