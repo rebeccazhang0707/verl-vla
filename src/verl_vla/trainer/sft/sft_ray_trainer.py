@@ -86,80 +86,83 @@ class RobRaySFTTrainer(RayPPOTrainer):
         self._load_checkpoint()
         total_epochs = int(self.trainer_config.total_epochs)
         steps_per_epoch = len(self.sft_dataloader)
+        self.epoch = self.global_steps // steps_per_epoch if steps_per_epoch > 0 else 0
         self.total_training_steps = total_epochs * steps_per_epoch
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
         self.max_steps_duration = 0.0
         early_stopper = self._build_early_stopper()
 
-        current_epoch = self.global_steps // steps_per_epoch
-        for epoch in range(current_epoch, total_epochs):
-            train_iter = iter(self.sft_dataloader)
-            start_step_in_epoch = self.global_steps % steps_per_epoch
-            actor_output_future = None
-            for step_in_epoch in range(start_step_in_epoch, steps_per_epoch):
-                timing_raw = {}
+        train_iter = iter(self.sft_dataloader)
+        actor_output_future = None
+        actor_output_epoch = self.epoch
+        while self.global_steps < self.total_training_steps:
+            timing_raw = {}
 
-                with marked_timer("step", timing_raw):
-                    if actor_output_future is None:
-                        actor_output_future = self._submit_sft_update(train_iter, timing_raw)
-
-                    # Submit the next batch for training.
-                    is_last_step, has_next_batch, should_save = self._get_step_control_flags(
-                        step_in_epoch,
-                        steps_per_epoch,
+            with marked_timer("step", timing_raw):
+                if actor_output_future is None:
+                    actor_output_future, train_iter, actor_output_epoch = self._submit_sft_update(
+                        train_iter,
+                        timing_raw,
                     )
-                    next_actor_output_future = None
-                    if has_next_batch and not should_save:
-                        next_actor_output_future = self._submit_sft_update(train_iter, timing_raw)
 
-                    # Wait for the current batch to finish and get the output.
-                    with marked_timer("update_actor", timing_raw, color="red"):
-                        actor_output = actor_output_future.get()
-
-                    actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
-                    actor_output_future = next_actor_output_future
-                    self.global_steps += 1
-
-                    if should_save:
-                        with marked_timer("save_checkpoint", timing_raw, color="green"):
-                            self._save_checkpoint()
-
-                steps_duration = timing_raw["step"]
-                self.max_steps_duration = max(self.max_steps_duration, steps_duration)
-
-                metrics = {
-                    "training/global_step": self.global_steps,
-                    "training/epoch": epoch,
-                }
-                metrics.update(actor_output_metrics)
-                metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
-
-                early_stop = self._update_early_stopper(early_stopper, metrics)
-                if early_stop:
-                    metrics.update(early_stop)
-
-                progress_bar.update(1)
-                postfix = {
-                    "sft_loss": f"{metrics.get('sft/loss', 0.0):.4f}",
-                    "grad_pre": f"{metrics.get('sft/grad_norm', 0.0):.4f}",
-                }
-                if early_stopper is not None:
-                    threshold_progress = metrics.get("sft/early_stop/threshold_progress", 0.0)
-                    postfix["early_stop"] = f"{threshold_progress * 100.0:.1f}%"
-                progress_bar.set_postfix(**postfix)
-                tracking_logger.log(data=metrics, step=self.global_steps)
-
-                if early_stop:
-                    progress_bar.set_postfix(
-                        sft_loss=f"{metrics.get('sft/loss', 0.0):.4f}",
-                        early_stop="true",
+                is_last_step, should_save = self._get_step_control_flags()
+                next_actor_output_future = None
+                next_actor_output_epoch = self.epoch
+                if not is_last_step and not should_save:
+                    next_actor_output_future, train_iter, next_actor_output_epoch = self._submit_sft_update(
+                        train_iter,
+                        timing_raw,
                     )
-                    progress_bar.close()
-                    return
 
-                if is_last_step:
-                    progress_bar.close()
-                    return
+                with marked_timer("update_actor", timing_raw, color="red"):
+                    actor_output = actor_output_future.get()
+
+                completed_epoch = actor_output_epoch
+                actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                actor_output_future = next_actor_output_future
+                actor_output_epoch = next_actor_output_epoch
+                self.global_steps += 1
+
+                if should_save:
+                    with marked_timer("save_checkpoint", timing_raw, color="green"):
+                        self._save_checkpoint()
+
+            steps_duration = timing_raw["step"]
+            self.max_steps_duration = max(self.max_steps_duration, steps_duration)
+
+            metrics = {
+                "training/global_step": self.global_steps,
+                "training/epoch": completed_epoch,
+            }
+            metrics.update(actor_output_metrics)
+
+            early_stop = self._update_early_stopper(early_stopper, metrics)
+            if early_stop:
+                metrics.update(early_stop)
+                if not should_save:
+                    with marked_timer("save_checkpoint", timing_raw, color="green"):
+                        self._save_checkpoint()
+
+            metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
+
+            progress_bar.update(1)
+            postfix = {
+                "sft_loss": f"{metrics.get('sft/loss', 0.0):.4f}",
+                "grad_pre": f"{metrics.get('sft/grad_norm', 0.0):.4f}",
+            }
+            if early_stopper is not None:
+                threshold_progress = metrics.get("sft/early_stop/threshold_progress", 0.0)
+                postfix["early_stop"] = f"{threshold_progress * 100.0:.1f}%"
+            progress_bar.set_postfix(**postfix)
+            tracking_logger.log(data=metrics, step=self.global_steps)
+
+            if early_stop:
+                progress_bar.set_postfix(
+                    sft_loss=f"{metrics.get('sft/loss', 0.0):.4f}",
+                    early_stop="true",
+                )
+                progress_bar.close()
+                return
 
         progress_bar.close()
 
@@ -194,10 +197,9 @@ class RobRaySFTTrainer(RayPPOTrainer):
             "sft/early_stop/triggered": 1.0,
         }
 
-    def _get_step_control_flags(self, step_in_epoch: int, steps_per_epoch: int) -> tuple[bool, bool, bool]:
+    def _get_step_control_flags(self) -> tuple[bool, bool]:
         current_step = self.global_steps + 1
         is_last_step = current_step >= self.total_training_steps
-        has_next_batch = step_in_epoch + 1 < steps_per_epoch
         esi_close_to_expiration = should_save_ckpt_esi(
             max_steps_duration=self.max_steps_duration,
             redundant_time=self.trainer_config.esi_redundant_time,
@@ -206,12 +208,19 @@ class RobRaySFTTrainer(RayPPOTrainer):
             self.trainer_config.save_freq > 0
             and (is_last_step or current_step % self.trainer_config.save_freq == 0 or esi_close_to_expiration)
         ) or (self.trainer_config.save_last and is_last_step)
-        return is_last_step, has_next_batch, should_save
+        return is_last_step, should_save
 
     def _submit_sft_update(self, train_iter, timing_raw):
         with marked_timer("data_loading", timing_raw):
-            batch = next(train_iter)
+            batch_epoch = self.epoch
+            try:
+                batch = next(train_iter)
+            except StopIteration:
+                self.epoch += 1
+                batch_epoch = self.epoch
+                train_iter = iter(self.sft_dataloader)
+                batch = next(train_iter)
             batch_proto = dataloader_batch_to_dataproto(batch)
 
         with marked_timer("update_actor", timing_raw, color="red"):
-            return self.cluster.train(batch_proto, async_update=True)
+            return self.cluster.train(batch_proto, async_update=True), train_iter, batch_epoch

@@ -47,6 +47,9 @@ cluster:
       acp:
         enable: true
 
+      optim:
+        lr: 1e-4
+
 
 # Policy trainer settings.
 trainer:
