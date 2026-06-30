@@ -276,7 +276,7 @@ def _ensure_recap_columns_for_file(
         if field == return_field:
             columns[field] = np.asarray([return_lookup[int(index)] for index in indices], dtype=np.float32)
         elif recap_fields[field]["dtype"] == "float32":
-            columns[field] = np.full(len(indices), np.nan, dtype=np.float32)
+            columns[field] = np.zeros(len(indices), dtype=np.float32)
         elif recap_fields[field]["dtype"] == "int64":
             columns[field] = np.zeros(len(indices), dtype=np.int64)
         else:

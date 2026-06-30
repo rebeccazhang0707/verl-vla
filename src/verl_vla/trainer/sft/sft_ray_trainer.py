@@ -70,7 +70,8 @@ class RobRaySFTTrainer(RayPPOTrainer):
             return
 
         self.global_steps, checkpoint_dir = checkpoint_state
-        load_dataloader_state(self.train_dataloader, checkpoint_dir)
+        if self.trainer_config.resume_dataloader_state:
+            load_dataloader_state(self.train_dataloader, checkpoint_dir)
 
     def fit(self):
         from verl.utils.tracking import Tracking

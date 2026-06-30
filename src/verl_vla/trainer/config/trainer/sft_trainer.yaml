@@ -43,3 +43,6 @@ save_last: False
 
 # Extra time budget used by ESI preemption-aware checkpointing.
 esi_redundant_time: 0
+
+# Whether to restore dataloader state when resuming from a checkpoint.
+resume_dataloader_state: True

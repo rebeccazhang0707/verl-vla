@@ -62,6 +62,7 @@ trainer:
   project_name: recap
   experiment_name: policy
   logger: ["console", "tensorboard"]
+  resume_dataloader_state: false
   early_stopping:
     enable: true
     window_size: 300

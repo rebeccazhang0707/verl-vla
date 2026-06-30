@@ -34,6 +34,7 @@ class SFTTrainerConfig(BaseConfig):
     save_freq: int = -1
     save_last: bool = False
     esi_redundant_time: int = 0
+    resume_dataloader_state: bool = True
     early_stopping: TrendEarlyStoppingConfig = field(default_factory=TrendEarlyStoppingConfig)
 
     def __post_init__(self):
