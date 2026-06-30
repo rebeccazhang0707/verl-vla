@@ -27,6 +27,22 @@ from verl_vla.trainer.recap.train_value_model import train_recap_value_model
 from verl_vla.trainer.recap.value_infer import infer_recap_values
 
 
+def _configure_iteration_sft_stage(config, stage_name: str, iteration: int) -> None:
+    stage_cfg = OmegaConf.select(config, f"recap.{stage_name}")
+    if stage_cfg is None:
+        return
+
+    iteration_suffix = f"iter_{iteration:04d}"
+    trainer_path = f"recap.{stage_name}.trainer"
+
+    base_experiment_name = str(
+        OmegaConf.select(stage_cfg, "_base_experiment_name", default=stage_cfg.trainer.experiment_name)
+    )
+
+    OmegaConf.update(config, f"recap.{stage_name}._base_experiment_name", base_experiment_name, force_add=True)
+    OmegaConf.update(config, f"{trainer_path}.experiment_name", f"{base_experiment_name}_{iteration_suffix}")
+
+
 @hydra.main(config_path="config", config_name="rob_recap_trainer", version_base=None)
 def main(config):
     num_iterations = int(OmegaConf.select(config, "recap.num_iterations", default=1))
@@ -37,6 +53,8 @@ def main(config):
     for iteration_idx in range(num_iterations):
         iteration = iteration_idx + 1
         print(f"Starting ReCap iteration {iteration}/{num_iterations}")
+        _configure_iteration_sft_stage(config, "train_value_model", iteration)
+        _configure_iteration_sft_stage(config, "train_policy", iteration)
 
         # Step 1: evaluate the configured or previous-iteration RECAP policy on the environment benchmark.
         if OmegaConf.select(config, "recap.policy_eval.enable", default=False):

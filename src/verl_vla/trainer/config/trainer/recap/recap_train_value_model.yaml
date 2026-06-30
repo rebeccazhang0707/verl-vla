@@ -61,9 +61,8 @@ cluster:
 trainer:
   project_name: recap
   experiment_name: value_model
+  resume_dataloader_state: false
   early_stopping:
     enable: true
-    window_size: 300
-    min_improvement_ratio: 0.0005
-    patience_windows: 16
-    warmup_steps: 500
+    window_size: 200
+    warmup_steps: 300

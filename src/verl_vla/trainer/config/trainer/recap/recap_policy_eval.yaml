@@ -34,6 +34,10 @@ max_episodes: null
 # Whether the first RECAP iteration should evaluate without ACP prompt tagging.
 disable_acp_on_first_iteration: true
 
+# Directory used to save per-iteration policy-eval metric JSON files. Set null
+# to disable writing eval results.
+result_dir: outputs/recap/eval_results
+
 
 # Policy evaluation initializes only eval simulators and disables dataset/video recording.
 cluster:

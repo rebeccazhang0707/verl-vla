@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+from pathlib import Path
+
 import ray
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -34,11 +37,41 @@ def _build_policy_eval_config(config, policy_path: str, *, disable_acp: bool = F
     return eval_config
 
 
-def eval_recap_policy(config, policy_path: str, *, disable_acp: bool = False) -> dict[str, float]:
+def _next_policy_eval_result_path(result_dir: Path) -> Path:
+    result_idx = 1
+    while True:
+        result_path = result_dir / f"eval_{result_idx:04d}.json"
+        if not result_path.exists():
+            return result_path
+        result_idx += 1
+
+
+def _save_policy_eval_metrics(eval_config, metrics: dict[str, float]) -> Path | None:
+    result_dir = OmegaConf.select(eval_config, "result_dir", default=None)
+    if result_dir in (None, ""):
+        return None
+
+    result_root = Path(str(result_dir))
+    result_root.mkdir(parents=True, exist_ok=True)
+    result_path = _next_policy_eval_result_path(result_root)
+    with result_path.open("w") as f:
+        json.dump(metrics, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return result_path
+
+
+def eval_recap_policy(
+    config,
+    policy_path: str,
+    *,
+    disable_acp: bool = False,
+) -> dict[str, float]:
     eval_config = _build_policy_eval_config(config, policy_path, disable_acp=disable_acp)
     ensure_ray_initialized(config)
     remote_options = get_controller_remote_options(eval_config)
-    return ray.get(run_policy_eval.options(**remote_options).remote(eval_config))
+    metrics = ray.get(run_policy_eval.options(**remote_options).remote(eval_config))
+    _save_policy_eval_metrics(eval_config, metrics)
+    return metrics
 
 
 @ray.remote
