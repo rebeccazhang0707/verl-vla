@@ -43,7 +43,7 @@ def _configure_iteration_sft_stage(config, stage_name: str, iteration: int) -> N
     OmegaConf.update(config, f"{trainer_path}.experiment_name", f"{base_experiment_name}_{iteration_suffix}")
 
 
-@hydra.main(config_path="config", config_name="rob_recap_trainer", version_base=None)
+@hydra.main(config_path="config", config_name="main_recap", version_base=None)
 def main(config):
     num_iterations = int(OmegaConf.select(config, "recap.num_iterations", default=1))
     if num_iterations < 1:

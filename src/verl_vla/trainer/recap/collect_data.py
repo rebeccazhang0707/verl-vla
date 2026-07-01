@@ -101,7 +101,7 @@ def run_env_loop(config, policy_path: Optional[str] = None):
         cluster.shutdown()
 
 
-@hydra.main(config_path="../config", config_name="rob_recap_trainer", version_base=None)
+@hydra.main(config_path="../config", config_name="main_recap", version_base=None)
 def main(config):
     collected_datasets = collect_recap_env_data(config)
     logger.info("RECAP collect finished: %s", collected_datasets)

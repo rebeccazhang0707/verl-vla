@@ -14,7 +14,7 @@
 
 # VLA SAC cluster config structure:
 #
-# rob_sac_trainer
+# main_sac
 # |-- cluster: env-loop TrainCluster settings with actor-rollout and env workers.
 # `-- ray_kwargs: Ray init kwargs used before the cluster is constructed.
 

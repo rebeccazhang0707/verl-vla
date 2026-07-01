@@ -15,7 +15,7 @@
 defaults:
 
   # Base actor-only SFT trainer config.
-  - /rob_sft_trainer
+  - /main_sft
 
   # Value-model-specific model overrides.
   - override /model/override@cluster.actor_rollout_ref.model.override_config: recap_value_model

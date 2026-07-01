@@ -15,7 +15,7 @@
 defaults:
 
   # Base actor-only SFT trainer config.
-  - /rob_sft_trainer
+  - /main_sft
 
   # Apply this stage config last.
   - _self_

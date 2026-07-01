@@ -28,7 +28,7 @@ from verl_vla.utils.ray_utils import ensure_ray_initialized, get_controller_remo
 logger = logging.getLogger(__name__)
 
 
-@hydra.main(config_path="config", config_name="rob_sft_trainer", version_base=None)
+@hydra.main(config_path="config", config_name="main_sft", version_base=None)
 def main(config):
     ensure_ray_initialized(config)
     remote_options = get_controller_remote_options(config)

@@ -14,7 +14,7 @@
 
 # VLA SFT config structure:
 #
-# rob_sft_trainer
+# main_sft
 # |-- cluster: actor-only TrainCluster settings.
 # |-- data: LeRobot dataset and PyTorch dataloader settings.
 # |-- trainer: SFT trainer loop, resume, logging, and checkpoint-save settings.
