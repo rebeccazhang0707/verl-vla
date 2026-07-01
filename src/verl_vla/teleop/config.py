@@ -45,6 +45,24 @@ class XRControllerTeleopConfig:
 
 
 @dataclass(frozen=True)
+class GamepadTeleopConfig:
+    pos_sensitivity: float = 0.5
+    rot_sensitivity: float = 0.5
+    intervention_button: str = "RT"
+    gripper_button: str = "X"
+    button_threshold: float = 0.5
+    max_events: int = 256
+    left_stick_x_axis: str = "axis_0"
+    left_stick_y_axis: str = "axis_1"
+    right_stick_y_axis: str = "axis_3"
+    right_stick_x_axis: str = "axis_2"
+    dpad_up_button: str = "DUp"
+    dpad_down_button: str = "DDown"
+    dpad_left_button: str = "DLeft"
+    dpad_right_button: str = "DRight"
+
+
+@dataclass(frozen=True)
 class TeleopConfig:
     enable: bool = False
     device: str | None = "keyboard"
@@ -52,6 +70,7 @@ class TeleopConfig:
     server: TeleopServerConfig = field(default_factory=TeleopServerConfig)
     keyboard: KeyboardTeleopConfig = field(default_factory=KeyboardTeleopConfig)
     xr_controller: XRControllerTeleopConfig = field(default_factory=XRControllerTeleopConfig)
+    gamepad: GamepadTeleopConfig = field(default_factory=GamepadTeleopConfig)
 
     def __post_init__(self):
         if isinstance(self.devices, str):
