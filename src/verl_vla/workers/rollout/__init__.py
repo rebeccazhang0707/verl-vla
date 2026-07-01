@@ -14,12 +14,10 @@
 
 from .base import register_vla_rollouts
 from .hf_rollout import HFRollout
-from .naive_rollout_rob import NaiveRolloutRob
 
 register_vla_rollouts()
 
 __all__ = [
     "HFRollout",
-    "NaiveRolloutRob",
     "register_vla_rollouts",
 ]

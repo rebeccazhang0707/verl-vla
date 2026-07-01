@@ -23,7 +23,7 @@ defaults:
   - /actor_rollout_ref@actor_rollout_ref: actor_rollout
 
   # Environment config.
-  - /env@env: train_cluster_rollout_env
+  - /env@env: env
 
   # Checkpoint path, retention, and resume config.
   - /cluster/checkpoint@checkpoint: actor

@@ -23,7 +23,7 @@ defaults:
   - /actor_rollout_ref@actor_rollout_ref: rollout_only
 
   # Environment config.
-  - /env@env: train_cluster_rollout_env
+  - /env@env: env
 
   # Apply this TrainCluster config last.
   - _self_
