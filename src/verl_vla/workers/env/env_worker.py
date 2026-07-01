@@ -25,7 +25,6 @@ from verl.single_controller.base.decorator import (
     Dispatch,
     collect_lazy_compute_data_proto,
     dispatch_lazy_compute_data_proto,
-    make_nd_compute_dataproto_dispatch_fn,
     register,
 )
 from verl.utils.config import omega_conf_to_dataclass
@@ -51,6 +50,13 @@ def dispatch_reset_env(worker_group, *args, **kwargs):
         }
     )
     return dispatch_lazy_compute_data_proto("env", worker_group, reset_args, **kwargs)
+
+
+def dispatch_env_interact_step(worker_group, *args, **kwargs):
+    mode = kwargs.pop("mode", "train")
+    all_args, all_kwargs = dispatch_lazy_compute_data_proto("env", worker_group, *args, **kwargs)
+    all_kwargs["mode"] = [mode] * worker_group.world_size
+    return all_args, all_kwargs
 
 
 def collect_reset_env(worker_group, *args, **kwargs):
@@ -125,7 +131,6 @@ class EnvWorker(Worker, DistProfilerExtension):
         self.eval_simulator_list = []
 
         self.stage_num = self.cfg.env_loop.pipeline_stage_num
-        self.stage_modes = ["train"] * self.stage_num
         device_name = self.env_worker_cfg.device or get_device_name()
         if device_name == "cpu":
             # CPU env workers do not need torch distributed collectives; only Ray dispatch metadata is required.
@@ -244,9 +249,15 @@ class EnvWorker(Worker, DistProfilerExtension):
         for simulator in self.eval_simulator_list:
             simulator.start_simulator()
 
-    @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="env"), blocking=False)
+    @register(
+        dispatch_mode={
+            "dispatch_fn": dispatch_env_interact_step,
+            "collect_fn": collect_reset_env,
+        },
+        blocking=False,
+    )
     @DistProfiler.annotate(color="red", role="env_interact_step")
-    def env_interact_step(self, data: DataProto) -> dict:
+    def env_interact_step(self, data: DataProto, mode: str = "train") -> dict:
         """
         This function is used to interact with the environment.
         """
@@ -271,7 +282,6 @@ class EnvWorker(Worker, DistProfilerExtension):
         #     action_dim=self.cfg.actor.model.action_dim,
         # )
 
-        mode = self.stage_modes[stage_id]
         simulators = self._simulators(mode)
         extracted_obs, chunk_rewards, chunk_dones, _chunk_truncations, infos = simulators[stage_id].step(
             chunk_actions, chunk_values=chunk_values
@@ -306,7 +316,6 @@ class EnvWorker(Worker, DistProfilerExtension):
 
         result_list = []
         for stage_id in range(self.stage_num):
-            self.stage_modes[stage_id] = mode
             options = {
                 "env_idx": list(range(self.env_worker_cfg.num_envs)),
             }

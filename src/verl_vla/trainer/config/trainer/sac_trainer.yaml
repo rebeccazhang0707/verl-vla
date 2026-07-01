@@ -50,6 +50,10 @@ rollout_times: 1
 # Number of initial trainer steps that force fresh rollout collection.
 warm_rollout_steps: 1
 
+# Whether to pipeline rollout by pre-starting the next rollout after each completed rollout.
+# Requires separate actor and rollout workers.
+async_rollout: False
+
 # Per-step reward penalty applied before adding rollout transitions to replay.
 step_penalty: 0.0
 

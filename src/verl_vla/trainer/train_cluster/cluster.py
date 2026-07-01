@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, cast
 
@@ -48,6 +49,28 @@ ROLE_TO_WORKER_NAME = {
 }
 
 
+@dataclass
+class RolloutState:
+    reset_future: Any | None = None
+    carry_state: dict[str, np.ndarray | None] = field(
+        default_factory=lambda: {"length": None, "reward": None, "task_id": None}
+    )
+    lerobot_collected_once: bool = False
+
+
+@ray.remote
+def ray_rollout_once(
+    env_loop: EnvLoop,
+    config: EnvLoopTrainClusterConfig,
+    state: RolloutState,
+):
+    return TrainCluster._rollout_once(
+        env_loop,
+        config=config,
+        state=state,
+    )
+
+
 class TrainCluster:
     def __init__(self, config: SFTTrainClusterConfig | EnvLoopTrainClusterConfig):
         if not isinstance(config, SFTTrainClusterConfig | EnvLoopTrainClusterConfig):
@@ -65,13 +88,8 @@ class TrainCluster:
         self.worker_groups: dict[str, Any] = {}
         self.env_loop: EnvLoop | None = None
         self.checkpoint_helper: CheckpointHelper | None = None
-        self._lerobot_collected_once = False
-        self._rollout_reset_future: Any | None = None
-        self._rollout_carry_state: dict[str, np.ndarray | None] = {
-            "length": None,
-            "reward": None,
-            "task_id": None,
-        }
+        self.rollout_state = RolloutState()
+        self._pending_rollout_ref: ray.ObjectRef | None = None
 
     def start(self) -> None:
         self._build_resource_pool_plan()
@@ -98,7 +116,7 @@ class TrainCluster:
                 rollout_wg=rollout_wg,
                 env_wg=env_wg,
             )
-            self._rollout_reset_future = env_wg.reset_env()
+            self.rollout_state.reset_future = env_wg.reset_env()
 
         if self.config.checkpoint is not None:
             actor_config = self.config.actor_rollout_ref.actor
@@ -110,6 +128,14 @@ class TrainCluster:
             )
 
     def shutdown(self) -> None:
+        if self._pending_rollout_ref is not None:
+            try:
+                ray.cancel(self._pending_rollout_ref, force=True)
+                ray.get(self._pending_rollout_ref, timeout=5)
+            except Exception:
+                pass
+            self._pending_rollout_ref = None
+
         seen_actor_ids: set[str] = set()
         for worker_group in self.worker_groups.values():
             for worker in getattr(worker_group, "_workers", []):
@@ -136,6 +162,8 @@ class TrainCluster:
         self.env_loop = None
         self.checkpoint_helper = None
         self.resource_pool_manager = None
+        self.rollout_state = RolloutState()
+        self._pending_rollout_ref = None
 
     def _init_workers(self) -> None:
         if self.resource_pool_manager is None:
@@ -297,37 +325,86 @@ class TrainCluster:
     def train_world_size(self) -> int:
         return int(self.actor_worker_group.world_size)
 
-    def rollout(self) -> tuple[DataProto, dict[str, dict[str, Any]], dict[str, float]]:
+    def rollout(
+        self,
+        *,
+        async_rollout: bool = False,
+    ) -> tuple[DataProto, dict[str, dict[str, Any]], dict[str, float]]:
         if self.cluster_type != "env_loop":
             raise RuntimeError("rollout is only wired for env-loop train clusters.")
-
         assert self.env_loop is not None
-        env_wg = self.worker_groups[ROLE_TO_WORKER_NAME[Role.Env]]
-        reset_future = self._rollout_reset_future
+
+        if not async_rollout:
+            output, collected_datasets, metrics, self.rollout_state = self._rollout_once(
+                self.env_loop,
+                config=self.config,
+                state=self.rollout_state,
+            )
+            return output, collected_datasets, metrics
+
+        else:
+            if not self.config.resource.separate_rollout_model.enabled:
+                raise ValueError("async_rollout requires separate actor and rollout workers.")
+
+            if self._pending_rollout_ref is None:
+                self._pending_rollout_ref = ray_rollout_once.remote(
+                    self.env_loop,
+                    self.config,
+                    self.rollout_state,
+                )
+
+            assert self._pending_rollout_ref is not None
+            output, collected_datasets, metrics, self.rollout_state = ray.get(self._pending_rollout_ref)
+            self._pending_rollout_ref = ray_rollout_once.remote(
+                self.env_loop,
+                self.config,
+                self.rollout_state,
+            )
+            return output, collected_datasets, metrics
+
+    @staticmethod
+    def _rollout_once(
+        env_loop: EnvLoop,
+        *,
+        config: EnvLoopTrainClusterConfig,
+        state: RolloutState,
+    ) -> tuple[
+        DataProto,
+        dict[str, dict[str, Any]],
+        dict[str, float],
+        RolloutState,
+    ]:
+        reset_future = state.reset_future
         if reset_future is None:
-            reset_future = env_wg.reset_env()
-
-        output = self.env_loop.generate_sequences(reset_future)
-        self._rollout_reset_future = env_wg.reset_env()
-
+            reset_future = env_loop.env_wg.reset_env()
+        output = env_loop.generate_sequences(reset_future)
+        state.reset_future = env_loop.env_wg.reset_env()
         metrics = dict(output.meta_info.pop("metrics", {}))
-        trajectory_records = self._collect_trajectory_records(
+        trajectory_records = TrainCluster._collect_trajectory_records(
             output,
-            carry_state=self._rollout_carry_state,
+            async_reset=config.env.env_worker.async_reset,
+            carry_state=state.carry_state,
         )
-        metrics.update(self._trajectory_metrics_from_records(trajectory_records, metric_prefix="data"))
-        collected_datasets = self.collect_lerobot_datasets()
-        return output, collected_datasets, metrics
+        metrics.update(TrainCluster._trajectory_metrics_from_records(trajectory_records, metric_prefix="data"))
+        collected_datasets, lerobot_collected_once = TrainCluster._collect_lerobot_datasets(
+            env_loop.env_wg,
+            config=config,
+            lerobot_collected_once=state.lerobot_collected_once,
+        )
+        state.lerobot_collected_once = lerobot_collected_once
+        return output, collected_datasets, metrics, state
 
-    def collect_lerobot_datasets(self) -> dict[str, dict[str, Any]]:
-        if not isinstance(self.config, EnvLoopTrainClusterConfig):
-            return {}
-
-        recorder_cfg = self.config.env.env_worker.recorder
+    @staticmethod
+    def _collect_lerobot_datasets(
+        env_wg,
+        *,
+        config: EnvLoopTrainClusterConfig,
+        lerobot_collected_once: bool,
+    ) -> tuple[dict[str, dict[str, Any]], bool]:
+        recorder_cfg = config.env.env_worker.recorder
         if not recorder_cfg.enable or not recorder_cfg.lerobot.enable:
-            return {}
+            return {}, lerobot_collected_once
 
-        env_wg = self.worker_groups[ROLE_TO_WORKER_NAME[Role.Env]]
         rank_datasets = [dataset for dataset in env_wg.pop_lerobot_dataset() if dataset is not None]
         root = Path(recorder_cfg.lerobot.root)
         repo_id = recorder_cfg.lerobot.repo_id
@@ -336,30 +413,19 @@ class TrainCluster:
         if all((existing_root / path).exists() for path in REQUIRED_LEROBOT_META_FILES):
             collected_datasets["existing_dataset"] = {"root": existing_root, "repo_id": repo_id}
 
-        collected_dataset = self._merge_rank_lerobot_datasets(rank_datasets)
-        if collected_dataset:
-            collected_datasets["collected_dataset"] = collected_dataset
-        return collected_datasets
-
-    def _merge_rank_lerobot_datasets(self, rank_datasets: list[dict[str, Any]]) -> dict[str, Any] | None:
-        if not rank_datasets:
-            return None
-        if not isinstance(self.config, EnvLoopTrainClusterConfig):
-            return None
-
-        recorder_cfg = self.config.env.env_worker.recorder
-        repo_id = f"{recorder_cfg.lerobot.repo_id}_collected"
-        collected_dataset = merge_lerobot_datasets(
-            roots=[dataset["root"] for dataset in rank_datasets],
-            output_root=Path(recorder_cfg.lerobot.root) / repo_id,
-            repo_id=repo_id,
-            repo_ids=[dataset["repo_id"] for dataset in rank_datasets],
-            overwrite=not self._lerobot_collected_once,
-            append=self._lerobot_collected_once,
-            video_files_size_in_mb=recorder_cfg.lerobot.video_files_size_in_mb,
-        )
-        self._lerobot_collected_once = True
-        return collected_dataset
+        if rank_datasets:
+            collected_repo_id = f"{recorder_cfg.lerobot.repo_id}_collected"
+            collected_datasets["collected_dataset"] = merge_lerobot_datasets(
+                roots=[dataset["root"] for dataset in rank_datasets],
+                output_root=Path(recorder_cfg.lerobot.root) / collected_repo_id,
+                repo_id=collected_repo_id,
+                repo_ids=[dataset["repo_id"] for dataset in rank_datasets],
+                overwrite=not lerobot_collected_once,
+                append=lerobot_collected_once,
+                video_files_size_in_mb=recorder_cfg.lerobot.video_files_size_in_mb,
+            )
+            lerobot_collected_once = True
+        return collected_datasets, lerobot_collected_once
 
     def train(self, data: DataProto, *, async_update: bool = True) -> Any:
         actor_wg = self.actor_worker_group
@@ -392,6 +458,7 @@ class TrainCluster:
             trajectory_records.extend(
                 self._collect_trajectory_records(
                     rollout_output,
+                    async_reset=self.config.env.env_worker.async_reset,
                     remaining=target_episodes - len(trajectory_records),
                     carry_state=carry_state,
                 )
@@ -407,10 +474,11 @@ class TrainCluster:
             metrics[key] = float(np.mean(values)) if values else 0.0
         return metrics
 
+    @staticmethod
     def _collect_trajectory_records(
-        self,
         output: DataProto,
         *,
+        async_reset: bool,
         remaining: int | None = None,
         carry_state: dict[str, np.ndarray | None],
     ) -> list[dict[str, float | int | bool]]:
@@ -428,8 +496,8 @@ class TrainCluster:
         task_id_steps = np.asarray(output.non_tensor_batch["obs.task_id"])
         task_id_steps = np.repeat(task_id_steps, chunk_steps, axis=1)
 
-        if not self.config.env.env_worker.async_reset:
-            return self._collect_non_auto_reset_trajectory_records(
+        if not async_reset:
+            return TrainCluster._collect_non_auto_reset_trajectory_records(
                 done_steps,
                 reward_steps,
                 task_id_steps=task_id_steps,
@@ -450,6 +518,17 @@ class TrainCluster:
             carry_state["length"] = carry_lengths
             carry_state["reward"] = carry_rewards
             carry_state["task_id"] = carry_task_ids
+        else:
+            if not carry_lengths.flags.writeable:
+                carry_lengths = carry_lengths.copy()
+                carry_state["length"] = carry_lengths
+            if carry_rewards is not None and not carry_rewards.flags.writeable:
+                carry_rewards = carry_rewards.copy()
+                carry_state["reward"] = carry_rewards
+            if carry_task_ids is not None and not carry_task_ids.flags.writeable:
+                carry_task_ids = carry_task_ids.copy()
+                carry_state["task_id"] = carry_task_ids
+        assert carry_lengths is not None
         assert carry_rewards is not None
         assert carry_task_ids is not None
 
@@ -499,8 +578,8 @@ class TrainCluster:
 
         return records
 
+    @staticmethod
     def _collect_non_auto_reset_trajectory_records(
-        self,
         done_steps: torch.Tensor,
         reward_steps: torch.Tensor,
         *,
@@ -532,8 +611,8 @@ class TrainCluster:
             )
         return records
 
+    @staticmethod
     def _trajectory_metrics_from_records(
-        self,
         records: list[dict[str, float | int | bool]],
         *,
         metric_prefix: str,

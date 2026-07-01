@@ -65,18 +65,19 @@ class EnvLoop:
         reset_results = reset_future.get()
         reset_wait_s = time.perf_counter() - reset_wait_start_t
         rollout_meta_info = {"eval": True} if eval else {}
+        env_mode = "eval" if eval else "train"
 
         loop = asyncio.get_event_loop()
 
         if self.switch_actor_rollout_mode:
             self.rollout_wg.switch_to_rollout()
             run_start_t = time.perf_counter()
-            output, run_metrics = loop.run_until_complete(self.run(reset_results, rollout_meta_info))
+            output, run_metrics = loop.run_until_complete(self.run(reset_results, rollout_meta_info, env_mode=env_mode))
             run_s = time.perf_counter() - run_start_t
             self.rollout_wg.switch_to_train()
         else:
             run_start_t = time.perf_counter()
-            output, run_metrics = loop.run_until_complete(self.run(reset_results, rollout_meta_info))
+            output, run_metrics = loop.run_until_complete(self.run(reset_results, rollout_meta_info, env_mode=env_mode))
             run_s = time.perf_counter() - run_start_t
 
         total_s = time.perf_counter() - total_start_t
@@ -92,7 +93,13 @@ class EnvLoop:
         output.meta_info["metrics"] = metrics
         return output
 
-    async def run(self, reset_results: DataProto, rollout_meta_info: dict) -> tuple[DataProto, dict[str, float]]:
+    async def run(
+        self,
+        reset_results: DataProto,
+        rollout_meta_info: dict,
+        *,
+        env_mode: str,
+    ) -> tuple[DataProto, dict[str, float]]:
         trajectories = {i: [] for i in range(self.stage_num)}
 
         staged_obs = self._restructure_obs_data(reset_results)
@@ -130,7 +137,7 @@ class EnvLoop:
 
                 trajectories[stage_id][-1][ACTION_KEY] = self._strip_meta_info(action_result)
                 action_result.meta_info["stage_id"] = stage_id
-                env_ref = self.env_wg.env_interact_step(action_result)
+                env_ref = self.env_wg.env_interact_step(action_result, mode=env_mode)
 
                 env_wait_start_t = time.perf_counter()
                 env_result: DataProto = await asyncio.to_thread(env_ref.get)

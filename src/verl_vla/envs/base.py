@@ -104,6 +104,7 @@ class BaseEnv(gym.Env):
             obs = {
                 "observation": step_result["observation"],
                 "task": step_result["task"],
+                "task_id": step_result["task_id"],
             }
             infos = step_result.get("info", {})
 

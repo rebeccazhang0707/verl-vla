@@ -35,6 +35,7 @@ class SACTrainerConfig(BaseConfig):
     rollout_interval: int = 20
     rollout_times: int = 1
     warm_rollout_steps: int = 22
+    async_rollout: bool = False
     step_penalty: float = 0.0
     save_freq: int = -1
     test_freq: int = -1

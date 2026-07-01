@@ -176,7 +176,9 @@ class RobRaySACTrainer:
                     if need_rollout:
                         with marked_timer("rollout", timing_raw):
                             with marked_timer("generate", timing_raw, color="red"):
-                                rollout_output, _collected_datasets, rollout_metrics = self.cluster.rollout()
+                                rollout_output, _collected_datasets, rollout_metrics = self.cluster.rollout(
+                                    async_rollout=self.trainer_config.async_rollout,
+                                )
 
                             # compute rewards and other metrics, and prepare for actor update
                             metrics.update(rollout_metrics)
