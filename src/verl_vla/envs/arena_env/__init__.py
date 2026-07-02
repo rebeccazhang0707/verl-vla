@@ -12,9 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from verl_vla.envs.arena_env.config import ArenaConfig, load_arena_config
+from verl_vla.envs.arena_env.config import ArenaSimulatorConfig
 
 __all__ = [
-    "ArenaConfig",
-    "load_arena_config",
+    "ArenaSimulatorConfig",
 ]

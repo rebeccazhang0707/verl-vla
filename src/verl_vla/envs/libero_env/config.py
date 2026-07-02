@@ -14,78 +14,31 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 
-from omegaconf import DictConfig, OmegaConf
+from verl.base_config import BaseConfig
 
 
-@dataclass(frozen=True)
-class LiberoInitParamsConfig:
+@dataclass
+class LiberoSimulatorConfig(BaseConfig):
+    simulator_type: str = "libero"
+    max_episode_steps: int = 512
+    seed: int = 42
+    task_suite_name: str = "libero_spatial"
+    task_ids: list[int] | None = None
+    num_trials_per_task: int | None = None
+    specific_reset_id: int | None = None
+    reset_warmup_steps: int = 10
     camera_depths: bool = False
     camera_heights: int = 256
     camera_widths: int = 256
-    camera_names: tuple[str, ...] = ("agentview", "robot0_eye_in_hand")
+    camera_names: list[str] = field(default_factory=lambda: ["agentview", "robot0_eye_in_hand"])
 
-    def to_env_kwargs(self) -> dict[str, Any]:
-        raw = asdict(self)
-        raw["camera_names"] = list(self.camera_names)
-        return raw
-
-
-@dataclass(frozen=True)
-class LiberoConfig:
-    task_suite_name: str = "libero_spatial"
-    reset_warmup_steps: int = 10
-    task_ids: tuple[int, ...] | None = None
-    num_trials_per_task: int | None = None
-    specific_reset_id: int | None = None
-    init_params: LiberoInitParamsConfig = field(default_factory=LiberoInitParamsConfig)
-
-
-def load_libero_config(cfg: DictConfig | Any) -> LiberoConfig:
-    raw = {}
-    if hasattr(cfg, "get"):
-        raw = cfg.get("simulator", {}) or {}
-    raw = _to_dict(raw)
-
-    init_raw = _to_dict(raw.get("init_params", {}))
-    camera_names = init_raw.get("camera_names")
-    if isinstance(camera_names, str):
-        init_raw["camera_names"] = (camera_names,)
-    elif camera_names is not None:
-        init_raw["camera_names"] = tuple(camera_names)
-
-    init_cfg = LiberoInitParamsConfig(
-        **{key: init_raw[key] for key in LiberoInitParamsConfig.__annotations__ if key in init_raw}
-    )
-    return LiberoConfig(
-        task_suite_name=str(raw.get("task_suite_name", LiberoConfig.task_suite_name)),
-        reset_warmup_steps=int(raw.get("reset_warmup_steps", LiberoConfig.reset_warmup_steps)),
-        task_ids=_to_optional_int_tuple(raw.get("task_ids")),
-        num_trials_per_task=_to_optional_int(raw.get("num_trials_per_task")),
-        specific_reset_id=_to_optional_int(raw.get("specific_reset_id")),
-        init_params=init_cfg,
-    )
-
-
-def _to_dict(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, DictConfig):
-        raw = OmegaConf.to_container(raw, resolve=True)
-    return dict(raw or {})
-
-
-def _to_optional_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    return int(value)
-
-
-def _to_optional_int_tuple(value: Any) -> tuple[int, ...] | None:
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return (value,)
-    if isinstance(value, str):
-        value = [item.strip() for item in value.split(",") if item.strip()]
-    return tuple(int(item) for item in value)
+    def env_kwargs(self) -> dict[str, Any]:
+        return {
+            "camera_depths": self.camera_depths,
+            "camera_heights": self.camera_heights,
+            "camera_widths": self.camera_widths,
+            "camera_names": list(self.camera_names),
+        }

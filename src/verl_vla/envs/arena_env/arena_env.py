@@ -22,9 +22,9 @@ from typing import Any
 
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 from typing_extensions import override
 
-from verl_vla.envs.arena_env.config import load_arena_config
 from verl_vla.envs.arena_env.utils import (
     apply_rl_reward_and_disable_autoreset,
     build_env_cfg_without_recorder,
@@ -43,21 +43,30 @@ class IsaacLabArenaEnv(BaseEnv):
     USE_POLICY_ACTION = False
     _DEFAULT_BASE_HEIGHT_COMMAND = 0.75
 
-    def __init__(self, cfg, rank: int, world_size: int, stage_id: int = 0):
+    def __init__(
+        self,
+        cfg,
+        rank: int,
+        world_size: int,
+        stage_id: int = 0,
+        stage_num: int = 1,
+        only_eval: bool = False,
+    ):
+        del stage_num, only_eval
         disable_lightwheel_ssl_verify()
 
-        self.arena_cfg = load_arena_config(cfg)
-        self.seed = int(cfg.seed) + int(rank)
-        self.device = cfg.get("device", "cuda:0")
+        self.arena_cfg = OmegaConf.to_object(cfg.simulator.arena)
+        self.seed = int(self.arena_cfg.seed) + int(rank)
+        self.device = getattr(cfg, "device", None) or "cuda:0"
         self.enable_cameras = self.arena_cfg.enable_cameras
         self.camera_names = list(self.arena_cfg.camera_names)
         self.task_description = self.arena_cfg.task_description
         self.subtask_reward = self.arena_cfg.subtask_reward
         self._elapsed_steps = np.zeros(int(cfg.num_envs), dtype=np.int32)
-        self.max_episode_steps = int(cfg.max_episode_steps)
+        self.max_episode_steps = int(self.arena_cfg.max_episode_steps)
 
-        self.action_dim = int(cfg.get("action_dim", 50))
-        self.state_dim = int(cfg.get("state_dim", self.action_dim))
+        self.action_dim = int(self.arena_cfg.action_dim)
+        self.state_dim = int(self.arena_cfg.state_dim or self.action_dim)
         self.env = None
         self.app = None
         self._stable_actions = np.zeros((int(cfg.num_envs), self.action_dim), dtype=np.float32)
@@ -194,6 +203,7 @@ class IsaacLabArenaEnv(BaseEnv):
         return {
             "observation": obs["observation"],
             "task": obs["task"],
+            "task_id": obs["task_id"],
             "next.reward": to_tensor(step_reward),
             "next.done": to_tensor(np.asarray(dones, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(timeouts, dtype=bool)),
@@ -245,9 +255,7 @@ class IsaacLabArenaEnv(BaseEnv):
             "image_shape": self._image_shape(),
             "state_dim": self.state_dim,
             "action_dim": self.action_dim,
-            "fps": int(self.cfg.get("recorder", {}).get("video", {}).get("fps", 50))
-            if hasattr(self.cfg, "get")
-            else 50,
+            "fps": int(self.cfg.recorder.video.fps),
             "robot_type": self.arena_cfg.embodiment,
         }
 

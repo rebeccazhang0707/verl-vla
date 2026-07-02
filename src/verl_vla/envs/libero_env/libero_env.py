@@ -21,9 +21,9 @@ import torch
 from libero.libero import get_libero_path
 from libero.libero.benchmark import Benchmark, get_benchmark
 from libero.libero.envs import OffScreenRenderEnv
+from omegaconf import OmegaConf
 
 from verl_vla.envs.base import BaseEnv
-from verl_vla.envs.libero_env.config import load_libero_config
 from verl_vla.envs.libero_env.utils import get_libero_image, get_libero_wrist_image, quat2axisangle
 from verl_vla.envs.libero_env.venv import ReconfigureSubprocEnv
 from verl_vla.utils.envs.action import to_tensor
@@ -150,7 +150,7 @@ class LiberoResetStateMixin:
         self._init_env()
 
     def init_random(self):
-        self.seed = int(self.cfg.simulator.seed)
+        self.seed = int(self.libero_cfg.seed)
         self.rollout_id = 0
         self._generator = np.random.default_rng(seed=compose_seed(self.seed, self.rank, self.stage_id, 0, 0, 0))
 
@@ -174,7 +174,7 @@ class LiberoResetStateMixin:
 
     def get_env_fn_params(self, env_idx=None):
         env_fn_params = []
-        base_env_args = self.libero_cfg.init_params.to_env_kwargs()
+        base_env_args = self.libero_cfg.env_kwargs()
 
         task_descriptions = []
         if env_idx is None:
@@ -252,7 +252,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         only_eval: bool = False,
     ):
         self.only_eval = only_eval
-        self.libero_cfg = load_libero_config(cfg)
+        self.libero_cfg = OmegaConf.to_object(cfg.simulator.libero)
         self.stage_num = int(stage_num)
         self.global_process_id = int(rank) * self.stage_num + int(stage_id)
         self.global_process_count = int(world_size) * self.stage_num
@@ -296,8 +296,8 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
     def get_recorder_strategy_kwargs(self):
         return {
             "image_shape": (
-                int(self.libero_cfg.init_params.camera_heights),
-                int(self.libero_cfg.init_params.camera_widths),
+                int(self.libero_cfg.camera_heights),
+                int(self.libero_cfg.camera_widths),
                 3,
             )
         }
@@ -359,7 +359,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         self._elapsed_steps[env_ids] += 1
         raw_obs, _reward, terminations, info_lists = self.env.step(actions, id=env_ids)
         del info_lists
-        truncations = self._elapsed_steps[env_ids] >= self.cfg.simulator.max_episode_steps
+        truncations = self._elapsed_steps[env_ids] >= self.libero_cfg.max_episode_steps
         dones = np.logical_or(terminations, truncations)
 
         step_reward = np.asarray(_reward)

@@ -14,10 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from verl_vla.envs.libero_env.config import LiberoConfig, LiberoInitParamsConfig, load_libero_config
+from verl_vla.envs.libero_env.config import LiberoSimulatorConfig
 
 __all__ = [
-    "LiberoConfig",
-    "LiberoInitParamsConfig",
-    "load_libero_config",
+    "LiberoSimulatorConfig",
 ]

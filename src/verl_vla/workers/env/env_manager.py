@@ -16,6 +16,7 @@
 import gc
 import logging
 import os
+import queue
 import subprocess
 from typing import Optional
 
@@ -156,6 +157,7 @@ class EnvManager:
         stage_id: int = 0,
         stage_num: int = 1,
         only_eval: bool = False,
+        start_timeout_s: int = 180,
     ):
         self.cfg = cfg
         self.rank = rank
@@ -163,6 +165,7 @@ class EnvManager:
         self.stage_id = stage_id
         self.stage_num = stage_num
         self.only_eval = only_eval
+        self.start_timeout_s = int(start_timeout_s)
         self.process: Optional[mp.Process] = None
         self.command_queue: Optional[mp.Queue] = None
         self.result_queue: Optional[mp.Queue] = None
@@ -201,7 +204,17 @@ class EnvManager:
         self.process.start()
 
         # Wait for initialization
-        result = self.result_queue.get(timeout=180)
+        try:
+            result = self.result_queue.get(timeout=self.start_timeout_s)
+        except queue.Empty as exc:
+            exitcode = self.process.exitcode if self.process is not None else None
+            alive = self.process.is_alive() if self.process is not None else False
+            raise RuntimeError(
+                "Simulator initialization timed out "
+                f"after {self.start_timeout_s}s "
+                f"(rank={self.rank}, stage_id={self.stage_id}, env_cls={self.env_cls.__name__}, "
+                f"process_alive={alive}, exitcode={exitcode})."
+            ) from exc
         if result["status"] != "ready":
             raise RuntimeError(f"Simulator initialization failed: {result}")
 
@@ -246,6 +259,7 @@ class EnvManager:
             "state_buffer",
             "env_cls",
             "context",
+            "start_timeout_s",
         ]:
             return super().__getattr__(name)
 
@@ -280,6 +294,7 @@ class EnvManager:
             "state_buffer",
             "env_cls",
             "context",
+            "start_timeout_s",
         ]:
             super().__setattr__(name, value)
             return

@@ -20,8 +20,9 @@ import gymnasium as gym
 import numpy as np
 import omni
 import torch
+from omegaconf import OmegaConf
 
-from verl_vla.envs.libero_env.config import load_libero_config
+from verl_vla.envs.libero_env.config import LiberoSimulatorConfig
 from verl_vla.utils.envs.action import (
     put_info_on_image,
     save_rollout_video,
@@ -41,7 +42,9 @@ class IsaacEnv(gym.Env):
         self.num_envs = self.cfg.num_envs
         self.action_dim = self.cfg.get("action_dim", 7)
         self.device = self.cfg.get("device", "cuda:0")
-        self.libero_cfg = load_libero_config(cfg)
+        self.libero_cfg = (
+            cfg.simulator if isinstance(cfg.simulator, LiberoSimulatorConfig) else OmegaConf.to_object(cfg.simulator)
+        )
 
         self._generator = np.random.default_rng(seed=self.seed)
 
@@ -58,7 +61,7 @@ class IsaacEnv(gym.Env):
 
         self.render_images = []
         self.video_cnt = 0
-        self.camera_name = self.libero_cfg.init_params.camera_names
+        self.camera_name = self.libero_cfg.camera_names
 
         # sys env must be set before import isaaclab
         from isaaclab.app import AppLauncher

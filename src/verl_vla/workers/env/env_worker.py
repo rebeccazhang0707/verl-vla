@@ -179,6 +179,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                             env_cls=LiberoEnv,
                             stage_id=stage_id,
                             stage_num=self.stage_num,
+                            start_timeout_s=self.env_worker_cfg.simulator_start_timeout_s,
                         )
                     )
                 if eval_cfg is not None:
@@ -191,6 +192,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                             stage_id=stage_id,
                             stage_num=self.stage_num,
                             only_eval=True,
+                            start_timeout_s=self.env_worker_cfg.simulator_start_timeout_s,
                         )
                     )
 
@@ -206,6 +208,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                         env_cls=IsaacEnv,
                         stage_id=stage_id,
                         stage_num=self.stage_num,
+                        start_timeout_s=self.env_worker_cfg.simulator_start_timeout_s,
                     )
                 )
         elif self.simulator_type == "lerobot":
@@ -220,6 +223,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                         env_cls=LeRobotEnv,
                         stage_id=stage_id,
                         stage_num=self.stage_num,
+                        start_timeout_s=self.env_worker_cfg.simulator_start_timeout_s,
                     )
                 )
         elif self.simulator_type == "arena":
@@ -234,6 +238,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                         env_cls=IsaacLabArenaEnv,
                         stage_id=stage_id,
                         stage_num=self.stage_num,
+                        start_timeout_s=self.env_worker_cfg.simulator_start_timeout_s,
                     )
                 )
         else:
