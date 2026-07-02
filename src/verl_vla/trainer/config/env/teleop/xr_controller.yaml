@@ -21,10 +21,10 @@ _target_: verl_vla.teleop.config.XRControllerTeleopConfig
 hand: right
 
 # Position sensitivity for SE(3) relative actions.
-pos_sensitivity: 150.0
+pos_sensitivity: 1.0
 
 # Rotation sensitivity for SE(3) relative actions.
-rot_sensitivity: 4.0
+rot_sensitivity: 0.5
 
 # Button used to mark intervention.
 intervention_button: squeeze
