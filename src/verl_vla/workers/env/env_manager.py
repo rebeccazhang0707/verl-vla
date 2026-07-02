@@ -147,11 +147,21 @@ def recursive_to_own(obj):
 
 
 class EnvManager:
-    def __init__(self, cfg, rank, world_size, env_cls, stage_id: int = 0, only_eval: bool = False):
+    def __init__(
+        self,
+        cfg,
+        rank,
+        world_size,
+        env_cls,
+        stage_id: int = 0,
+        stage_num: int = 1,
+        only_eval: bool = False,
+    ):
         self.cfg = cfg
         self.rank = rank
         self.world_size = world_size
         self.stage_id = stage_id
+        self.stage_num = stage_num
         self.only_eval = only_eval
         self.process: Optional[mp.Process] = None
         self.command_queue: Optional[mp.Queue] = None
@@ -179,6 +189,7 @@ class EnvManager:
                 self.rank,
                 self.world_size,
                 self.stage_id,
+                self.stage_num,
                 self.env_cls,
                 self.only_eval,
                 self.command_queue,
@@ -227,6 +238,7 @@ class EnvManager:
             "rank",
             "world_size",
             "stage_id",
+            "stage_num",
             "only_eval",
             "process",
             "command_queue",
@@ -260,6 +272,7 @@ class EnvManager:
             "rank",
             "world_size",
             "stage_id",
+            "stage_num",
             "only_eval",
             "process",
             "command_queue",
@@ -294,6 +307,7 @@ def _simulator_worker(
     rank,
     world_size,
     stage_id,
+    stage_num,
     env_cls,
     only_eval,
     command_queue,
@@ -313,7 +327,7 @@ def _simulator_worker(
         set_process_numa_affinity(rank)
     try:
         try:
-            env = env_cls(cfg, rank, world_size, stage_id=stage_id, only_eval=only_eval)
+            env = env_cls(cfg, rank, world_size, stage_id=stage_id, stage_num=stage_num, only_eval=only_eval)
         except TypeError:
             env = env_cls(cfg, rank, world_size)
 

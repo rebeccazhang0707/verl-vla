@@ -72,23 +72,13 @@ def put_tensor_cpu(data_dict):
     return data_dict
 
 
-def create_env_batch(obs, rews, dones, infos, meta=None):
-    ret_dict = {"obs": obs, "rews": rews, "dones": dones, "infos": infos}
-    if meta is not None:
-        ret_dict.update(meta=meta)
-
-    ret_dict = put_tensor_cpu(ret_dict)
-    return ret_dict
-
-
-def create_env_batch_dataproto(obs, rewards, dones, infos, meta=None):
+def create_env_batch_dataproto(obs, rewards, dones, meta=None):
     step_result = {
         "observation": obs["observation"],
         "task": obs["task"],
         "task_id": obs.get("task_id"),
         "next.reward": rewards,
         "next.done": dones,
-        "info": infos,
     }
     if meta is not None:
         step_result["meta"] = meta
@@ -188,6 +178,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                             world_size=self._world_size,
                             env_cls=LiberoEnv,
                             stage_id=stage_id,
+                            stage_num=self.stage_num,
                         )
                     )
                 if eval_cfg is not None:
@@ -198,6 +189,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                             world_size=self._world_size,
                             env_cls=LiberoEnv,
                             stage_id=stage_id,
+                            stage_num=self.stage_num,
                             only_eval=True,
                         )
                     )
@@ -213,6 +205,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                         world_size=self._world_size,
                         env_cls=IsaacEnv,
                         stage_id=stage_id,
+                        stage_num=self.stage_num,
                     )
                 )
         elif self.simulator_type == "lerobot":
@@ -226,6 +219,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                         world_size=self._world_size,
                         env_cls=LeRobotEnv,
                         stage_id=stage_id,
+                        stage_num=self.stage_num,
                     )
                 )
         elif self.simulator_type == "arena":
@@ -239,6 +233,7 @@ class EnvWorker(Worker, DistProfilerExtension):
                         world_size=self._world_size,
                         env_cls=IsaacLabArenaEnv,
                         stage_id=stage_id,
+                        stage_num=self.stage_num,
                     )
                 )
         else:
@@ -283,7 +278,7 @@ class EnvWorker(Worker, DistProfilerExtension):
         # )
 
         simulators = self._simulators(mode)
-        extracted_obs, chunk_rewards, chunk_dones, _chunk_truncations, infos = simulators[stage_id].step(
+        extracted_obs, chunk_rewards, chunk_dones, _chunk_truncations = simulators[stage_id].step(
             chunk_actions, chunk_values=chunk_values
         )
 
@@ -291,7 +286,6 @@ class EnvWorker(Worker, DistProfilerExtension):
             obs=extracted_obs,
             rewards=chunk_rewards,
             dones=chunk_dones,
-            infos=infos,
         )
         return env_batch
 

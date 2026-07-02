@@ -119,7 +119,6 @@ class TrainCluster:
                 rollout_wg=rollout_wg,
                 env_wg=env_wg,
             )
-            self.rollout_state.reset_future = env_wg.reset_env()
             self._init_checkpoint_engine_manager()
 
         if self.config.checkpoint is not None:

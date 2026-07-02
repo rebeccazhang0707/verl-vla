@@ -67,11 +67,9 @@ class IsaacLabArenaEnv(BaseEnv):
 
         self.app = AppLauncher(headless=True, enable_cameras=self.enable_cameras).app
         super().__init__(cfg, rank, world_size, stage_id=stage_id)
-        self._init_metrics()
 
     @override
-    def env_init(self, *, async_reset: bool) -> None:
-        del async_reset
+    def env_init(self) -> None:
         self._init_env()
 
     def _build_args(self) -> argparse.Namespace:
@@ -147,43 +145,17 @@ class IsaacLabArenaEnv(BaseEnv):
     def _raw_env(self):
         return getattr(self.env, "unwrapped", self.env)
 
-    ### Metrics ###
-
     @property
     def _success_reward_thresh(self) -> float:
         return 1.0 - 1e-6 if self.subtask_reward else 0.0
 
-    def _init_metrics(self) -> None:
-        self.success_once = np.zeros(int(self.cfg.num_envs), dtype=bool)
-        self.returns = np.zeros(int(self.cfg.num_envs), dtype=np.float32)
-
-    def _reset_metrics(self, env_ids=None) -> None:
+    def _reset_episode_state(self, env_ids=None) -> None:
         if env_ids is None:
             env_ids = np.arange(self.num_envs)
         env_ids = np.asarray(env_ids, dtype=np.int64)
-        self.success_once[env_ids] = False
-        self.returns[env_ids] = 0.0
         self._elapsed_steps[env_ids] = 0
         self._stable_actions[env_ids] = 0.0
         self._stable_actions[env_ids, 46] = self._DEFAULT_BASE_HEIGHT_COMMAND
-
-    def _record_metrics(self, step_reward, infos, env_ids):
-        env_ids = np.asarray(env_ids, dtype=np.int64)
-        self.returns[env_ids] += step_reward
-        self.success_once[env_ids] |= step_reward > self._success_reward_thresh
-        episode_info = {
-            "success_once": self.success_once.copy(),
-            "return": self.returns.copy(),
-            "episode_len": self._elapsed_steps.copy(),
-            "reward": np.divide(
-                self.returns,
-                self._elapsed_steps,
-                out=np.zeros_like(self.returns),
-                where=self._elapsed_steps != 0,
-            ),
-        }
-        infos["episode"] = to_tensor(episode_info)
-        return infos
 
     ### BaseEnv hooks ###
 
@@ -198,12 +170,13 @@ class IsaacLabArenaEnv(BaseEnv):
         del async_reset, reset_eval
         env_ids = np.asarray(env_ids, dtype=np.int64).reshape(-1)
         reset_env_ids = torch.as_tensor(env_ids, dtype=torch.int64, device=self.device)
-        raw_obs, infos = self._raw_env.reset(env_ids=reset_env_ids)
-        self._reset_metrics(env_ids)
+        raw_obs, _info = self._raw_env.reset(env_ids=reset_env_ids)
+        del _info
+        self._reset_episode_state(env_ids)
         obs = self._make_obs(raw_obs, env_ids=env_ids)
         if not self.USE_POLICY_ACTION:
             self._update_stable_actions_from_obs(obs["observation"], env_ids)
-        return obs, infos
+        return obs
 
     @override
     def env_step(self, action, *, env_ids):
@@ -211,11 +184,11 @@ class IsaacLabArenaEnv(BaseEnv):
         action = torch.as_tensor(action, dtype=torch.float32, device=self.device)
         self._elapsed_steps[env_ids] += 1
 
-        raw_obs, reward, _terminations, _truncations, infos = self._raw_env.step(action)
+        raw_obs, reward, _terminations, _truncations, _info = self._raw_env.step(action)
+        del _info
         step_reward = self._to_numpy(reward).astype(np.float32)
         timeouts = self._elapsed_steps[env_ids] >= self.max_episode_steps
         dones = np.logical_or(step_reward > self._success_reward_thresh, timeouts)
-        infos = self._record_metrics(step_reward, infos, env_ids)
 
         obs = self._make_obs(raw_obs, env_ids=env_ids)
         return {
@@ -224,7 +197,6 @@ class IsaacLabArenaEnv(BaseEnv):
             "next.reward": to_tensor(step_reward),
             "next.done": to_tensor(np.asarray(dones, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(timeouts, dtype=bool)),
-            "info": infos,
         }
 
     # Stable-action adapter: temporarily replace policy actions with a held pose.

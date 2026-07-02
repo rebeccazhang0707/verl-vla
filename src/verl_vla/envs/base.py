@@ -46,11 +46,9 @@ class BaseEnv(gym.Env):
 
     Hooks implemented by subclasses:
         env_type: Class attribute used for teleop and recorder strategy lookup.
-        env_init(async_reset): Initialize simulator-specific resources. Async
-            reset mode is passed here so subclasses can choose their initial
-            task/state allocation policy.
+        env_init(): Initialize simulator-specific resources.
         env_reset(env_ids, async_reset=False, reset_eval=False):
-            Reset simulator-specific state and return ``(obs, infos)``.
+            Reset simulator-specific state and return observations.
         env_step(action, env_ids): Step simulator-specific state once with
             action shape ``[B, D]`` and return the standard step-result dict
             documented on ``env_step``.
@@ -70,7 +68,7 @@ class BaseEnv(gym.Env):
         self.async_reset_enabled = bool(cfg.get("async_reset", False))
         self._latest_obs = None
 
-        self.env_init(async_reset=self.async_reset_enabled)
+        self.env_init()
         self.teleops = self.create_teleops()
         self.recorder = self.create_recorder()
         self._recorder_episode_done = np.zeros(self.num_envs, dtype=bool)
@@ -95,7 +93,6 @@ class BaseEnv(gym.Env):
         done_chunks = []
         truncated_chunks = []
         obs = None
-        infos = None
         for step_idx in range(num_chunk_steps):
             step_actions = action[:, step_idx]
             step_values = chunk_values if chunk_values.ndim <= 1 else chunk_values[:, step_idx]
@@ -106,7 +103,6 @@ class BaseEnv(gym.Env):
                 "task": step_result["task"],
                 "task_id": step_result["task_id"],
             }
-            infos = step_result.get("info", {})
 
             reward_chunks.append(step_result["next.reward"])
             done_chunks.append(step_result["next.done"])
@@ -118,7 +114,6 @@ class BaseEnv(gym.Env):
             torch.stack([torch.as_tensor(chunk) for chunk in reward_chunks], dim=1),
             torch.stack([torch.as_tensor(chunk) for chunk in done_chunks], dim=1),
             torch.stack([torch.as_tensor(chunk) for chunk in truncated_chunks], dim=1),
-            infos,
         )
 
     @override
@@ -129,12 +124,12 @@ class BaseEnv(gym.Env):
         if self.async_reset_enabled and self._latest_obs is not None and not reset_eval:
             return self._latest_obs, {}
 
-        obs, infos = self.env_reset(async_reset=self.async_reset_enabled, reset_eval=reset_eval, **reset_kwargs)
+        obs = self.env_reset(async_reset=self.async_reset_enabled, reset_eval=reset_eval, **reset_kwargs)
         env_ids = reset_kwargs["env_ids"]
         self._latest_obs = obs
         self.reset_teleops()
         self.reset_recorder_envs(env_ids)
-        return obs, infos
+        return obs, {}
 
     @override
     def close(self) -> None:
@@ -144,7 +139,7 @@ class BaseEnv(gym.Env):
 
     ### Step Control ###
 
-    def env_init(self, *, async_reset: bool) -> None:
+    def env_init(self) -> None:
         """Initialize subclass-owned simulator resources."""
 
     def env_reset(
@@ -154,7 +149,7 @@ class BaseEnv(gym.Env):
         async_reset: bool = False,
         reset_eval: bool = False,
     ):
-        """Reset the underlying simulator and return ``(obs, infos)``.
+        """Reset the underlying simulator and return observations.
 
         Args:
             env_ids: Environment ids to reset.
@@ -259,7 +254,7 @@ class BaseEnv(gym.Env):
         if len(reset_local_ids) == 0:
             return step_result
 
-        reset_obs, _infos = self.env_reset(
+        reset_obs = self.env_reset(
             env_ids=env_ids[reset_local_ids],
             async_reset=True,
         )
