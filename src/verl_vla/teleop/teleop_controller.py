@@ -23,6 +23,8 @@ from verl_vla.teleop.devices import (
     GamepadDeviceCfg,
     KeyboardDevice,
     KeyboardDeviceCfg,
+    LerobotDevice,
+    LerobotDeviceCfg,
     XRControllerDevice,
     XRControllerDeviceCfg,
 )
@@ -156,6 +158,17 @@ class TeleopController:
             return XRControllerDevice(XRControllerDeviceCfg(max_events=self.teleop_cfg.xr_controller.max_events))
         if device_type == "gamepad":
             return GamepadDevice(GamepadDeviceCfg(max_events=self.teleop_cfg.gamepad.max_events))
+        if device_type == "lerobot":
+            return LerobotDevice(
+                LerobotDeviceCfg(
+                    teleop_type=self.teleop_cfg.lerobot.teleop_type,
+                    port_name=self.teleop_cfg.lerobot.port_name,
+                    baud_rate=self.teleop_cfg.lerobot.baud_rate,
+                    min_packet_timeout_ms=self.teleop_cfg.lerobot.min_packet_timeout_ms,
+                    urdf_path=self.teleop_cfg.lerobot.urdf_path,
+                    target_frame_name=self.teleop_cfg.lerobot.target_frame_name,
+                )
+            )
         raise NotImplementedError(f"Teleop device {device_type} is not implemented")
 
     def _create_strategy(self, device_type: str) -> InterventionStrategyBase:
@@ -165,4 +178,6 @@ class TeleopController:
             return get_strategy(self.env_type, device_type, self.teleop_cfg.xr_controller)
         if device_type == "gamepad":
             return get_strategy(self.env_type, device_type, self.teleop_cfg.gamepad)
+        if device_type == "lerobot":
+            return get_strategy(self.env_type, device_type, self.teleop_cfg.lerobot)
         raise NotImplementedError(f"Teleop strategy for device {device_type} is not implemented")

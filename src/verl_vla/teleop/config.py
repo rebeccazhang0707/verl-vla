@@ -63,6 +63,28 @@ class GamepadTeleopConfig:
 
 
 @dataclass(frozen=True)
+class LerobotTeleopConfig:
+    teleop_type: str = "so101_leader"
+    port_name: str = "tty.usbmodem5AB01836791"
+    baud_rate: int = 1_000_000
+    min_packet_timeout_ms: float = 1000.0
+    urdf_path: str | None = None
+    target_frame_name: str = "gripper_frame_link"
+    pos_sensitivity: float = 120.0
+    rot_sensitivity: float = 3.5
+    max_pos_delta: float = 1.5
+    max_rot_delta: float = 2.0
+    position_axes: tuple[int, int, int] = (0, 1, 2)
+    position_signs: tuple[float, float, float] = (1.0, -1.0, 1.0)
+    position_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    enable_position: bool = True
+    rotation_axes: tuple[int, int, int] = (0, 1, 2)
+    rotation_signs: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    enable_rotation: bool = False
+    gripper_close_threshold: float = 20.0
+
+
+@dataclass(frozen=True)
 class TeleopConfig:
     enable: bool = False
     device: str | None = "keyboard"
@@ -71,10 +93,13 @@ class TeleopConfig:
     keyboard: KeyboardTeleopConfig = field(default_factory=KeyboardTeleopConfig)
     xr_controller: XRControllerTeleopConfig = field(default_factory=XRControllerTeleopConfig)
     gamepad: GamepadTeleopConfig = field(default_factory=GamepadTeleopConfig)
+    lerobot: LerobotTeleopConfig = field(default_factory=LerobotTeleopConfig)
 
     def __post_init__(self):
         if isinstance(self.devices, str):
             devices = (self.devices,)
         else:
             devices = tuple(self.devices)
+        if "keyboard" in devices and "lerobot" in devices:
+            raise ValueError("keyboard and lerobot teleop devices cannot be enabled together.")
         object.__setattr__(self, "devices", devices)

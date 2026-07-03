@@ -1,0 +1,71 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Browser Lerobot leader-arm config.
+
+_target_: verl_vla.teleop.config.LerobotTeleopConfig
+
+# LeRobot teleoperator type. Currently this maps to the SO101 leader arm implementation.
+teleop_type: so101_leader
+
+# Browser-side serial port label for display and auto-selection hints.
+port_name: tty.usbmodem5AB01836791
+
+# Baud rate used when the browser opens the WebSerial port.
+baud_rate: 1000000
+
+# Minimum serial packet timeout used by the backend WebSerial bridge.
+min_packet_timeout_ms: 1000.0
+
+# Optional SO101 URDF path for forward kinematics.
+urdf_path: null
+
+# URDF frame used as the leader end-effector pose.
+target_frame_name: gripper_frame_link
+
+# Relative position sensitivity from leader motion to LIBERO xyz action.
+pos_sensitivity: 120.0
+
+# Relative rotation sensitivity from leader motion to LIBERO rx/ry/rz action.
+rot_sensitivity: 3.5
+
+# Per-step clip for xyz action after sensitivity scaling.
+max_pos_delta: 1.5
+
+# Per-step clip for rx/ry/rz action after sensitivity scaling.
+max_rot_delta: 2.0
+
+# Axis mapping from leader position to LIBERO position action.
+position_axes: [0, 1, 2]
+
+# Sign flip for each mapped position axis.
+position_signs: [1.0, -1.0, 1.0]
+
+# Extra scale for each mapped position axis before sensitivity.
+position_scale: [1.0, 1.0, 1.0]
+
+# Whether leader position motion controls LIBERO position action.
+enable_position: true
+
+# Axis mapping from leader rotation to LIBERO rotation action.
+rotation_axes: [0, 1, 2]
+
+# Sign flip for each mapped rotation axis.
+rotation_signs: [1.0, 1.0, 1.0]
+
+# Whether leader orientation motion controls LIBERO rotation action.
+enable_rotation: true
+
+# Gripper motor position below this threshold maps to close; otherwise open.
+gripper_close_threshold: 20.0

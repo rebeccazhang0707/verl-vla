@@ -48,6 +48,10 @@ limitations under the License.
         <div class="label">Devices</div>
         <div id="devices-info" class="scroll-box"></div>
       </div>
+      <div class="card">
+        <div class="label">Console</div>
+        <textarea id="console-terminal" class="console-terminal" autocomplete="off" spellcheck="false"></textarea>
+      </div>
     </section>
     <div class="resize-handle left" data-panel="left" title="Resize left panel"></div>
     <section class="obs-panel">
@@ -64,12 +68,15 @@ limitations under the License.
   </main>
   <script src="/static/keyboard_device.js"></script>
   <script src="/static/gamepad_device.js"></script>
+  <script src="/static/lerobot_device.js"></script>
   <script src="/static/xr_renderer.js"></script>
   <script>
     const TELEOP_DEVICE_TYPES = __TELEOP_DEVICE_TYPES__;
+    const TELEOP_DEVICE_CONFIGS = __TELEOP_DEVICE_CONFIGS__;
     let frames = 0;
     let lastFpsAt = performance.now();
     let inputSocket = null;
+    let inputPollTimer = null;
     let xrSession = null;
     let xrReferenceSpace = null;
     let selectedImageName = null;
@@ -81,7 +88,13 @@ limitations under the License.
     };
     const keyboardDevice = new TeleopKeyboardDevice(() => inputSocket);
     const gamepadDevice = new TeleopGamepadDevice(() => inputSocket);
+    const lerobotDevice = new TeleopLerobotDevice(
+      () => inputSocket,
+      () => TELEOP_DEVICE_CONFIGS.lerobot || {}
+    );
     const xrRenderer = new TeleopXRRenderer();
+    let consoleInputStart = 0;
+    let lastConsoleEventId = 0;
 
     function clearElement(element) {
       while (element.firstChild) {
@@ -357,21 +370,48 @@ limitations under the License.
 
       inputSocket.onopen = () => {
         status.textContent = "connected";
-        fetch("/api/input/latest", {cache: "no-store"})
-          .then((response) => response.json())
-          .then(renderInput)
-          .catch(() => {});
+        pollInputState();
+        if (TELEOP_DEVICE_TYPES.includes("lerobot")) {
+          lerobotDevice.attach();
+        }
+        if (inputPollTimer) {
+          clearInterval(inputPollTimer);
+        }
+        inputPollTimer = setInterval(pollInputState, 750);
       };
       inputSocket.onmessage = (event) => {
-        renderInput(JSON.parse(event.data));
+        const payload = JSON.parse(event.data);
+        if (payload.console && !payload.devices && !payload.active_device) {
+          renderConsole(payload.console);
+          return;
+        }
+        if (payload.lerobot_tx) {
+          lerobotDevice.handleTxPackets(payload.lerobot_tx);
+        }
+        if (payload.lerobot_tx && !payload.devices && !payload.active_device) {
+          return;
+        }
+        renderInput(payload);
       };
       inputSocket.onerror = () => {
         status.textContent = "error";
       };
       inputSocket.onclose = () => {
         status.textContent = "reconnecting";
+        lerobotDevice.detach();
+        if (inputPollTimer) {
+          clearInterval(inputPollTimer);
+          inputPollTimer = null;
+        }
         setTimeout(connectInputStream, 1000);
       };
+    }
+
+    function pollInputState() {
+      fetch("/api/input/latest", {cache: "no-store"})
+        .then((response) => response.json())
+        .then(renderInput)
+        .catch(() => {});
     }
 
     function setInterventionStatus(isActive) {
@@ -411,7 +451,11 @@ limitations under the License.
     }
 
     function renderInput(input) {
+      if (input.console) {
+        renderConsole(input.console);
+      }
       const devices = input.devices || [];
+      const {console: _console, ...summaryInput} = input;
       let activeDevice = input.active_device || {};
       for (const device of devices) {
         if (!activeDevice.device && isDeviceIntervening(device)) {
@@ -422,10 +466,65 @@ limitations under the License.
       const isActive = asBool(input.is_intervening) || asBool(input.active) || isDeviceIntervening(activeDevice);
       setInterventionStatus(isActive);
       renderDataInto(document.getElementById("teleop-summary"), {
-        ...input,
+        ...summaryInput,
         devices: `${devices.length} device${devices.length === 1 ? "" : "s"}`
       });
       renderDevices(devices);
+    }
+
+    function renderConsole(consoleState) {
+      const terminal = document.getElementById("console-terminal");
+      const events = consoleState.events || [];
+      for (const item of events) {
+        if (Number(item.id || 0) <= lastConsoleEventId) {
+          continue;
+        }
+        lastConsoleEventId = Number(item.id || lastConsoleEventId);
+        if (item.type === "frontend") {
+          continue;
+        }
+        appendConsoleText(`${item.text || ""}\n`);
+      }
+    }
+
+    function sendConsoleText(text) {
+      const trimmed = text.trimEnd();
+      if (!inputSocket || inputSocket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      inputSocket.send(JSON.stringify({
+        type: "console_text",
+        payload: {text: trimmed}
+      }));
+    }
+
+    function appendConsoleText(text) {
+      const terminal = document.getElementById("console-terminal");
+      const oldInputStart = consoleInputStart;
+      const selectionStart = terminal.selectionStart;
+      const selectionEnd = terminal.selectionEnd;
+      const wasActive = document.activeElement === terminal;
+      const currentInput = terminal.value.slice(consoleInputStart);
+      terminal.value = terminal.value.slice(0, consoleInputStart) + text + currentInput;
+      consoleInputStart += text.length;
+      terminal.scrollTop = terminal.scrollHeight;
+      if (wasActive) {
+        if (selectionStart < oldInputStart) {
+          terminal.selectionStart = selectionStart;
+          terminal.selectionEnd = Math.min(selectionEnd, oldInputStart);
+        } else {
+          terminal.selectionStart = selectionStart + text.length;
+          terminal.selectionEnd = selectionEnd + text.length;
+        }
+      }
+    }
+
+    function clampConsoleCursor() {
+      const terminal = document.getElementById("console-terminal");
+      if (terminal.selectionStart < consoleInputStart) {
+        terminal.selectionStart = terminal.value.length;
+        terminal.selectionEnd = terminal.value.length;
+      }
     }
 
     function poseToJson(pose) {
@@ -565,6 +664,40 @@ limitations under the License.
     document.getElementById("obs-reset-layout").addEventListener("click", () => {
       selectedImageName = null;
       updateImageSelection();
+    });
+    document.getElementById("console-terminal").addEventListener("keydown", (event) => {
+      const terminal = event.currentTarget;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const text = terminal.value.slice(consoleInputStart);
+        terminal.value += "\n";
+        consoleInputStart = terminal.value.length;
+        sendConsoleText(text);
+        terminal.scrollTop = terminal.scrollHeight;
+        return;
+      }
+      if (
+        terminal.selectionStart < consoleInputStart &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)
+      ) {
+        event.preventDefault();
+        terminal.selectionStart = terminal.value.length;
+        terminal.selectionEnd = terminal.value.length;
+      }
+    });
+    document.getElementById("console-terminal").addEventListener("pointerdown", () => {
+      if (TELEOP_DEVICE_TYPES.includes("lerobot")) {
+        lerobotDevice.requestConnect();
+      }
+    });
+    document.getElementById("console-terminal").addEventListener("paste", (event) => {
+      event.preventDefault();
+      clampConsoleCursor();
+      const text = event.clipboardData.getData("text");
+      document.execCommand("insertText", false, text);
     });
     if (TELEOP_DEVICE_TYPES.includes("xr_controller")) {
       document.getElementById("xr-panel").style.display = "block";

@@ -112,4 +112,5 @@ verl_vla = [
     "trainer/config/*.yaml",
     "trainer/config/*/*.yaml",
     "trainer/config/*/*/*.yaml",
+    "teleop/obs_server/html/*",
 ]

@@ -25,6 +25,9 @@ defaults:
   # Browser gamepad teleop device config.
   - /env/teleop@gamepad: gamepad
 
+  # Browser Lerobot leader-arm config.
+  - /env/teleop@lerobot: lerobot
+
   # Apply this teleop config last.
   - _self_
 
