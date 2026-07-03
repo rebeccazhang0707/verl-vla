@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -146,9 +147,11 @@ class EnvWorker(Worker, DistProfilerExtension):
         )
 
     def _make_eval_env_cfg(self):
-        eval_cfg = OmegaConf.create(OmegaConf.to_container(self.simulator_cfg, resolve=False))
+        eval_cfg = copy.deepcopy(self.simulator_cfg)
+        OmegaConf.set_readonly(eval_cfg, False)
         OmegaConf.set_struct(eval_cfg, False)
         if "teleop" in eval_cfg:
+            OmegaConf.set_readonly(eval_cfg.teleop, False)
             eval_cfg.teleop.enable = False
         return eval_cfg
 
