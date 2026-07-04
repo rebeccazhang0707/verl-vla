@@ -23,7 +23,7 @@ simulator_type: libero
 seed: 42
 
 # Maximum number of simulator steps per episode.
-# When env_worker.async_reset is False, this should be no larger than
+# When env_worker.auto_reset is False, this should be no larger than
 # env_loop.max_interactions * action_chunk_steps so unfinished rollouts reach
 # a simulator timeout and emit next.terminated/next.truncated naturally before the rollout ends.
 max_episode_steps: 512

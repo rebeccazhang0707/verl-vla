@@ -65,7 +65,7 @@ class BaseEnv(gym.Env):
         self.world_size = world_size
         self.stage_id = stage_id
         self.num_envs = int(cfg.num_envs)
-        self.async_reset_enabled = bool(cfg.get("async_reset", False))
+        self.auto_reset_enabled = bool(cfg.get("auto_reset", False))
         self._latest_obs = None
 
         self.env_init()
@@ -134,7 +134,7 @@ class BaseEnv(gym.Env):
         del seed
         reset_kwargs = self._reset_kwargs_from_options(options)
         reset_eval = bool(reset_kwargs.pop("reset_eval", False))
-        if self.async_reset_enabled and self._latest_obs is not None and not reset_eval:
+        if self.auto_reset_enabled and self._latest_obs is not None and not reset_eval:
             return self._latest_obs, {}
 
         obs = self.env_reset(reset_eval=reset_eval, **reset_kwargs)
@@ -166,7 +166,7 @@ class BaseEnv(gym.Env):
         Args:
             env_ids: Environment ids to reset.
             reset_eval: If True, start a fresh evaluation queue and force a
-                real reset even when async reset has a cached latest obs.
+                real reset even when auto reset has a cached latest obs.
         """
         raise NotImplementedError
 
@@ -257,7 +257,7 @@ class BaseEnv(gym.Env):
         return self.mask_step(action, execute_mask, is_intervention=is_intervened, critic_value=critic_value)
 
     def _reset_done_envs(self, step_result, env_ids, done_mask):
-        if not self.async_reset_enabled:
+        if not self.auto_reset_enabled:
             return step_result
 
         reset_local_ids = np.flatnonzero(done_mask)
@@ -440,7 +440,7 @@ class BaseEnv(gym.Env):
                 self._recorder_episode_done[env_id] = True
 
     def finish_rollout(self) -> None:
-        if self.async_reset_enabled:
+        if self.auto_reset_enabled:
             return
         if self.recorder is None:
             return

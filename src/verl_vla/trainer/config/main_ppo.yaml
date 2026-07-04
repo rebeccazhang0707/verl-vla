@@ -19,7 +19,7 @@ env:
     simulator_type: libero
     max_episode_steps: 512
     max_interactions: null
-    async_reset: False
+    auto_reset: False
     reward_coef: 1.0
     only_eval: False
     video_cfg:

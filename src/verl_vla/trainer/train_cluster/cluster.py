@@ -404,7 +404,7 @@ class TrainCluster:
         metrics = dict(output.meta_info.pop("metrics", {}))
         trajectory_records = TrainCluster._collect_trajectory_records(
             output,
-            async_reset=config.env.env_worker.async_reset,
+            auto_reset=config.env.env_worker.auto_reset,
             carry_state=state.carry_state,
         )
         metrics.update(TrainCluster._trajectory_metrics_from_records(trajectory_records, metric_prefix="data"))
@@ -487,7 +487,7 @@ class TrainCluster:
             trajectory_records.extend(
                 self._collect_trajectory_records(
                     rollout_output,
-                    async_reset=self.config.env.env_worker.async_reset,
+                    auto_reset=self.config.env.env_worker.auto_reset,
                     remaining=target_episodes - len(trajectory_records),
                     carry_state=carry_state,
                 )
@@ -507,7 +507,7 @@ class TrainCluster:
     def _collect_trajectory_records(
         output: DataProto,
         *,
-        async_reset: bool,
+        auto_reset: bool,
         remaining: int | None = None,
         carry_state: dict[str, np.ndarray | None],
     ) -> list[dict[str, float | int | bool]]:
@@ -528,7 +528,7 @@ class TrainCluster:
         task_id_steps = np.asarray(output.non_tensor_batch["obs.task_id"])
         task_id_steps = np.repeat(task_id_steps, chunk_steps, axis=1)
 
-        if not async_reset:
+        if not auto_reset:
             return TrainCluster._collect_non_auto_reset_trajectory_records(
                 done_steps,
                 reward_steps,

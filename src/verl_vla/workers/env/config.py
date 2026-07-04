@@ -49,7 +49,7 @@ class SimulatorConfig(BaseConfig):
 class EnvWorkerConfig(BaseConfig):
     """Configuration for environment workers."""
 
-    async_reset: bool = False
+    auto_reset: bool = False
     modes: list[str] = field(default_factory=lambda: ["train"])
     num_envs: int = 1
     simulator: SimulatorConfig = field(default_factory=SimulatorConfig)
