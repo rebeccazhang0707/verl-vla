@@ -47,7 +47,7 @@ class BaseEnv(gym.Env):
     Hooks implemented by subclasses:
         env_type: Class attribute used for teleop and recorder strategy lookup.
         env_init(): Initialize simulator-specific resources.
-        env_reset(env_ids, async_reset=False, reset_eval=False):
+        env_reset(env_ids, reset_eval=False):
             Reset simulator-specific state and return observations.
         env_step(action, env_ids): Step simulator-specific state once with
             action shape ``[B, D]`` and return the standard step-result dict
@@ -88,35 +88,45 @@ class BaseEnv(gym.Env):
         if chunk_values is None:
             chunk_values = np.zeros(action.shape[0], dtype=np.float32)
         num_chunk_steps = action.shape[1]
+        if num_chunk_steps <= 0:
+            raise ValueError(f"action chunk must contain at least one step, got shape {action.shape}")
 
         reward_chunks = []
         terminated_chunks = []
         truncated_chunks = []
         success_chunks = []
-        obs = None
+        step_result = None
         for step_idx in range(num_chunk_steps):
             step_actions = action[:, step_idx]
             step_values = chunk_values if chunk_values.ndim <= 1 else chunk_values[:, step_idx]
 
             step_result = self.step_with_teleop_and_recording(step_actions, critic_value=step_values)
-            obs = {
-                "observation": step_result["observation"],
-                "task": step_result["task"],
-                "task_id": step_result["task_id"],
-            }
 
             reward_chunks.append(step_result["next.reward"])
             terminated_chunks.append(step_result["next.terminated"])
             truncated_chunks.append(step_result["next.truncated"])
             success_chunks.append(step_result["next.success"])
 
+        reward_steps = torch.stack([torch.as_tensor(chunk) for chunk in reward_chunks], dim=1)
+        terminated_steps = torch.stack([torch.as_tensor(chunk) for chunk in terminated_chunks], dim=1)
+        truncated_steps = torch.stack([torch.as_tensor(chunk) for chunk in truncated_chunks], dim=1)
+        success_steps = torch.stack([torch.as_tensor(chunk) for chunk in success_chunks], dim=1)
+
+        done_mask = (terminated_steps.bool() | truncated_steps.bool()).any(dim=1).numpy()
+        step_result = self._reset_done_envs(step_result, np.arange(self.num_envs), done_mask=done_mask)
+        obs = {
+            "observation": step_result["observation"],
+            "task": step_result["task"],
+            "task_id": step_result["task_id"],
+        }
+
         self._latest_obs = obs
         return (
             obs,
-            torch.stack([torch.as_tensor(chunk) for chunk in reward_chunks], dim=1),
-            torch.stack([torch.as_tensor(chunk) for chunk in terminated_chunks], dim=1),
-            torch.stack([torch.as_tensor(chunk) for chunk in truncated_chunks], dim=1),
-            torch.stack([torch.as_tensor(chunk) for chunk in success_chunks], dim=1),
+            reward_steps,
+            terminated_steps,
+            truncated_steps,
+            success_steps,
         )
 
     @override
@@ -127,7 +137,7 @@ class BaseEnv(gym.Env):
         if self.async_reset_enabled and self._latest_obs is not None and not reset_eval:
             return self._latest_obs, {}
 
-        obs = self.env_reset(async_reset=self.async_reset_enabled, reset_eval=reset_eval, **reset_kwargs)
+        obs = self.env_reset(reset_eval=reset_eval, **reset_kwargs)
         env_ids = reset_kwargs["env_ids"]
         self._latest_obs = obs
         self.reset_teleops()
@@ -149,15 +159,12 @@ class BaseEnv(gym.Env):
         self,
         *,
         env_ids,
-        async_reset: bool = False,
         reset_eval: bool = False,
     ):
         """Reset the underlying simulator and return observations.
 
         Args:
             env_ids: Environment ids to reset.
-            async_reset: If True, preserve the subclass's current task
-                assignment and sample a new simulator state as needed.
             reset_eval: If True, start a fresh evaluation queue and force a
                 real reset even when async reset has a cached latest obs.
         """
@@ -210,12 +217,11 @@ class BaseEnv(gym.Env):
             "reset_eval": reset_eval,
         }
 
-    def mask_step(self, action, execute_mask, is_intervention, critic_value=None):
+    def mask_step(self, action, execute_mask, is_intervention, critic_value):
         is_intervention = np.asarray(is_intervention, dtype=bool)
         env_ids = np.flatnonzero(execute_mask)
         action = action[env_ids]
         result = self.env_step(action, env_ids=env_ids)
-        result = self._reset_done_envs(result, env_ids)
         critic_value = critic_value[env_ids]
         self.publish_to_teleop(result, env_ids=env_ids, critic_value=critic_value)
         self.record_step_result(
@@ -225,10 +231,10 @@ class BaseEnv(gym.Env):
             is_intervention=is_intervention,
             critic_value=critic_value,
         )
+        self._update_latest_obs(env_ids, result)
         return result
 
     def step_with_teleop_and_recording(self, action, critic_value=None):
-        critic_value = self._to_numpy(critic_value)
         if critic_value is None:
             critic_value = np.zeros(self.num_envs, dtype=np.float32)
         is_intervened = np.zeros(self.num_envs, dtype=bool)
@@ -250,26 +256,38 @@ class BaseEnv(gym.Env):
         execute_mask = np.ones(self.num_envs, dtype=bool)
         return self.mask_step(action, execute_mask, is_intervention=is_intervened, critic_value=critic_value)
 
-    def _reset_done_envs(self, step_result, env_ids):
+    def _reset_done_envs(self, step_result, env_ids, done_mask):
         if not self.async_reset_enabled:
             return step_result
 
-        terminations = self._to_numpy(step_result["next.terminated"]).astype(bool)
-        truncations = self._to_numpy(step_result["next.truncated"]).astype(bool)
-        reset_local_ids = np.flatnonzero(np.logical_or(terminations, truncations))
+        reset_local_ids = np.flatnonzero(done_mask)
         if len(reset_local_ids) == 0:
             return step_result
 
         reset_obs = self.env_reset(
             env_ids=env_ids[reset_local_ids],
-            async_reset=True,
         )
-        for obs_idx, local_id in enumerate(reset_local_ids):
-            step_result["observation"][local_id] = reset_obs["observation"][obs_idx]
-            step_result["task"][local_id] = reset_obs["task"][obs_idx]
-            if "task_id" in step_result and "task_id" in reset_obs:
-                step_result["task_id"][local_id] = reset_obs["task_id"][obs_idx]
+        for key in ("observation", "task", "task_id"):
+            for reset_idx, local_id in enumerate(reset_local_ids):
+                step_result[key][local_id] = reset_obs[key][reset_idx]
+        self.reset_recorder_envs(env_ids[reset_local_ids])
         return step_result
+
+    def _slice_latest_obs(self, env_ids):
+        env_ids = np.asarray(env_ids, dtype=np.int64).reshape(-1)
+        current_obs = {
+            "observation": [self._latest_obs["observation"][env_id] for env_id in env_ids],
+            "task": [self._latest_obs["task"][env_id] for env_id in env_ids],
+            "task_id": [self._latest_obs["task_id"][env_id] for env_id in env_ids],
+        }
+        return current_obs
+
+    def _update_latest_obs(self, env_ids, step_result) -> None:
+        env_ids = np.asarray(env_ids, dtype=np.int64).reshape(-1)
+        for local_id, env_id in enumerate(env_ids):
+            self._latest_obs["observation"][env_id] = step_result["observation"][local_id]
+            self._latest_obs["task"][env_id] = step_result["task"][local_id]
+            self._latest_obs["task_id"][env_id] = step_result["task_id"][local_id]
 
     @staticmethod
     def _to_numpy(value, *, copy: bool = False):
@@ -321,7 +339,7 @@ class BaseEnv(gym.Env):
             teleop.close()
         self.teleops = []
 
-    def publish_to_teleop(self, step_result, env_ids, critic_value=None) -> None:
+    def publish_to_teleop(self, step_result, env_ids, critic_value) -> None:
         if not self.teleops:
             return
 
@@ -380,12 +398,20 @@ class BaseEnv(gym.Env):
             self._recorder_episode_done[int(env_id)] = False
             self.recorder.clear_episode(int(env_id))
 
-    def record_step_result(self, step_result, actions, env_ids, is_intervention, critic_value=None) -> None:
+    def record_step_result(
+        self,
+        step_result,
+        actions,
+        env_ids,
+        is_intervention,
+        critic_value,
+    ) -> None:
         if self.recorder is None:
             return
 
-        observations = step_result["observation"]
-        tasks = step_result["task"]
+        source_obs = self._slice_latest_obs(env_ids)
+        observations = source_obs["observation"]
+        tasks = source_obs["task"]
         rewards = step_result["next.reward"]
         terminations = step_result["next.terminated"]
         truncations = step_result["next.truncated"]
@@ -411,7 +437,7 @@ class BaseEnv(gym.Env):
             )
             if episode_done:
                 self.recorder.save_episode(env_id)
-                self._recorder_episode_done[env_id] = not self.async_reset_enabled
+                self._recorder_episode_done[env_id] = True
 
     def finish_rollout(self) -> None:
         if self.async_reset_enabled:

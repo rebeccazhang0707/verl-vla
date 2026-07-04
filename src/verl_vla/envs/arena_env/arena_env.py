@@ -182,10 +182,9 @@ class IsaacLabArenaEnv(BaseEnv):
         self,
         *,
         env_ids,
-        async_reset: bool = False,
         reset_eval: bool = False,
     ):
-        del async_reset, reset_eval
+        del reset_eval
         env_ids = np.asarray(env_ids, dtype=np.int64).reshape(-1)
         reset_env_ids = torch.as_tensor(env_ids, dtype=torch.int64, device=self.device)
         raw_obs, _info = self._raw_env.reset(env_ids=reset_env_ids)

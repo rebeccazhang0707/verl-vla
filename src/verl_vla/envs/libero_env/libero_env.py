@@ -306,14 +306,13 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         self,
         *,
         env_ids,
-        async_reset: bool = False,
         reset_eval: bool = False,
     ):
         """Reset LIBERO envs.
 
         LIBERO chooses task and trial ids internally from its configured reset
-        queues. Async and non-async training resets use the same reset id
-        sampling policy; eval uses the ordered eval queue.
+        queues. Partial resets are applied to the requested env ids; eval uses
+        the ordered eval queue.
         """
 
         # Configure envs with internally selected reset state ids, then reset them and set their init states.
@@ -332,8 +331,9 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         # Perform extra warmup steps after reset to let the observations settle.
         raw_obs = None
         reset_warmup_steps = int(self.libero_cfg.reset_warmup_steps)
-        step_env_ids = env_ids if async_reset else None
-        action_count = len(env_ids) if async_reset else self.num_envs
+        partial_reset = len(env_ids) != self.num_envs
+        step_env_ids = env_ids if partial_reset else None
+        action_count = len(env_ids) if partial_reset else self.num_envs
         zero_actions = np.zeros((action_count, LIBERO_ACTION_DIM))
         for _ in range(reset_warmup_steps):
             if step_env_ids is None:
@@ -341,7 +341,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
             else:
                 raw_obs, _reward, _terminations, _info_lists = self.env.step(zero_actions, id=step_env_ids)
 
-        obs_env_ids = env_ids if async_reset else np.arange(self.num_envs)
+        obs_env_ids = env_ids if partial_reset else np.arange(self.num_envs)
         tasks = [self.task_descriptions[env_id] for env_id in obs_env_ids]
         task_id = self.task_ids[obs_env_ids].astype(np.int64, copy=False)
 
