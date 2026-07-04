@@ -158,7 +158,7 @@ class LerobotRuntime:
         return {
             "obs": next_obs,
             "reward": float(reward),
-            "done": bool(done),
+            "terminated": bool(done),
             "truncated": bool(truncated),
             "extra_info": {
                 "is_intervention": intervention_info.get(TeleopEvents.IS_INTERVENTION, False),

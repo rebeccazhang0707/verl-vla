@@ -189,7 +189,7 @@ def _compute_return_lookup(
                 "frame_index",
                 "task_index",
                 "next.reward",
-                "next.done",
+                "next.terminated",
                 "next.truncated",
             ],
         )
@@ -198,7 +198,7 @@ def _compute_return_lookup(
         frame_indices = table["frame_index"].to_numpy().astype(np.int64, copy=False)
         task_keys = table["task_index"].to_numpy().astype(np.int64, copy=False).tolist()
         rewards = table["next.reward"].to_numpy().astype(np.float32, copy=False)
-        dones = table["next.done"].to_numpy().astype(bool, copy=False)
+        terminateds = table["next.terminated"].to_numpy().astype(bool, copy=False)
         truncateds = table["next.truncated"].to_numpy().astype(bool, copy=False)
 
         records.extend(
@@ -207,16 +207,16 @@ def _compute_return_lookup(
                 "episode_index": int(ep),
                 "frame_index": int(frame),
                 "reward": float(reward),
-                "done": bool(done),
+                "terminated": bool(terminated),
                 "truncated": bool(truncated),
                 "task_key": task_key,
             }
-            for index, ep, frame, reward, done, truncated, task_key in zip(
+            for index, ep, frame, reward, terminated, truncated, task_key in zip(
                 indices,
                 episode_indices,
                 frame_indices,
                 rewards,
-                dones,
+                terminateds,
                 truncateds,
                 task_keys,
                 strict=True,
@@ -244,9 +244,7 @@ def _compute_return_lookup(
             raise ValueError(f"Invalid return normalization denominator for task={task_key}: {denom}.")
 
         final_record = episode_records[-1]
-        success = (bool(final_record["done"]) and not bool(final_record["truncated"])) or float(
-            final_record["reward"]
-        ) > 0.0
+        success = bool(final_record["terminated"]) or float(final_record["reward"]) > 0.0
         episode_length = len(episode_records)
         for offset, record in enumerate(episode_records):
             remaining_steps = episode_length - offset - 1

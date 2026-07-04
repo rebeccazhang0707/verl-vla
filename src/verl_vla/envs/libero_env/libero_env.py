@@ -360,7 +360,6 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         raw_obs, _reward, terminations, info_lists = self.env.step(actions, id=env_ids)
         del info_lists
         truncations = self._elapsed_steps[env_ids] >= self.libero_cfg.max_episode_steps
-        dones = np.logical_or(terminations, truncations)
 
         step_reward = np.asarray(_reward)
 
@@ -369,7 +368,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
             "task": [self.task_descriptions[env_id] for env_id in env_ids],
             "task_id": self.task_ids[env_ids].astype(np.int64, copy=False),
             "next.reward": to_tensor(step_reward),
-            "next.done": to_tensor(np.asarray(dones, dtype=bool)),
+            "next.terminated": to_tensor(np.asarray(terminations, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(truncations, dtype=bool)),
         }
 

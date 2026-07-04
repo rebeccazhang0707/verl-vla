@@ -90,7 +90,7 @@ class BaseEnv(gym.Env):
         num_chunk_steps = action.shape[1]
 
         reward_chunks = []
-        done_chunks = []
+        terminated_chunks = []
         truncated_chunks = []
         obs = None
         for step_idx in range(num_chunk_steps):
@@ -105,14 +105,14 @@ class BaseEnv(gym.Env):
             }
 
             reward_chunks.append(step_result["next.reward"])
-            done_chunks.append(step_result["next.done"])
+            terminated_chunks.append(step_result["next.terminated"])
             truncated_chunks.append(step_result["next.truncated"])
 
         self._latest_obs = obs
         return (
             obs,
             torch.stack([torch.as_tensor(chunk) for chunk in reward_chunks], dim=1),
-            torch.stack([torch.as_tensor(chunk) for chunk in done_chunks], dim=1),
+            torch.stack([torch.as_tensor(chunk) for chunk in terminated_chunks], dim=1),
             torch.stack([torch.as_tensor(chunk) for chunk in truncated_chunks], dim=1),
         )
 
@@ -180,8 +180,8 @@ class BaseEnv(gym.Env):
                     or ids for each stepped env.
                 next.reward: Array or tensor with shape ``[B]`` containing the
                     reward after stepping.
-                next.done: Boolean array or tensor with shape ``[B]`` indicating
-                    whether each stepped env is done.
+                next.terminated: Boolean array or tensor with shape ``[B]``
+                    indicating whether each stepped env terminated naturally.
                 next.truncated: Boolean array or tensor with shape ``[B]``
                     indicating whether each stepped env is truncated.
         """
@@ -249,8 +249,9 @@ class BaseEnv(gym.Env):
         if not self.async_reset_enabled:
             return step_result
 
-        dones = self._to_numpy(step_result["next.done"]).astype(bool)
-        reset_local_ids = np.flatnonzero(dones)
+        terminations = self._to_numpy(step_result["next.terminated"]).astype(bool)
+        truncations = self._to_numpy(step_result["next.truncated"]).astype(bool)
+        reset_local_ids = np.flatnonzero(np.logical_or(terminations, truncations))
         if len(reset_local_ids) == 0:
             return step_result
 
@@ -322,7 +323,7 @@ class BaseEnv(gym.Env):
         observations = step_result["observation"]
         tasks = step_result["task"]
         rewards = step_result["next.reward"]
-        dones = step_result["next.done"]
+        terminations = step_result["next.terminated"]
         truncations = step_result["next.truncated"]
 
         for local_id, env_id in enumerate(env_ids):
@@ -335,7 +336,7 @@ class BaseEnv(gym.Env):
                 "rank": self.rank,
                 "stage_id": self.stage_id,
                 "reward": rewards[local_id],
-                "done": dones[local_id],
+                "terminated": terminations[local_id],
                 "truncated": truncations[local_id],
                 "critic_value": critic_value[local_id],
             }
@@ -379,25 +380,27 @@ class BaseEnv(gym.Env):
         observations = step_result["observation"]
         tasks = step_result["task"]
         rewards = step_result["next.reward"]
-        dones = step_result["next.done"]
+        terminations = step_result["next.terminated"]
         truncations = step_result["next.truncated"]
 
         for local_id, env_id in enumerate(env_ids):
             if self._recorder_episode_done[env_id]:
                 continue
-            done = bool(dones[local_id])
+            terminated = bool(terminations[local_id])
+            truncated = bool(truncations[local_id])
+            episode_done = terminated or truncated
             self.recorder.record_once(
                 env_id=env_id,
                 observation=observations[local_id],
                 action=actions[local_id],
                 task=tasks[local_id],
                 next_reward=rewards[local_id],
-                next_done=done,
-                next_truncated=truncations[local_id],
+                next_terminated=terminated,
+                next_truncated=truncated,
                 is_intervention=is_intervention[env_id],
                 critic_value=critic_value[local_id],
             )
-            if done:
+            if episode_done:
                 self.recorder.save_episode(env_id)
                 self._recorder_episode_done[env_id] = not self.async_reset_enabled
 

@@ -61,7 +61,7 @@ class VideoRecorder(BaseRecorder):
         action: Any,
         task: str,
         next_reward: Any = 0.0,
-        next_done: Any = False,
+        next_terminated: Any = False,
         next_truncated: Any = False,
         is_intervention: Any = False,
         critic_value: Any = None,
@@ -71,7 +71,7 @@ class VideoRecorder(BaseRecorder):
             action=action,
             task=task,
             next_reward=next_reward,
-            next_done=next_done,
+            next_terminated=next_terminated,
             next_truncated=next_truncated,
             is_intervention=is_intervention,
         )

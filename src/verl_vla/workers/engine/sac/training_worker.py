@@ -259,7 +259,7 @@ class SACTrainingWorker(TrainingWorker):
         q_policy: Optional[torch.Tensor],
         q_target: torch.Tensor,
         rewards: torch.Tensor,
-        dones: torch.Tensor,
+        terminateds: torch.Tensor,
         next_log_prob: Optional[torch.Tensor],
         valids: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
@@ -267,9 +267,9 @@ class SACTrainingWorker(TrainingWorker):
         alpha = self._get_alpha()
         with torch.no_grad():
             y = (
-                rewards + gamma * (1.0 - dones) * q_target
+                rewards + gamma * (1.0 - terminateds) * q_target
                 if next_log_prob is None
-                else rewards + gamma * (1.0 - dones) * (q_target - alpha * next_log_prob)
+                else rewards + gamma * (1.0 - terminateds) * (q_target - alpha * next_log_prob)
             )
 
         y = y.unsqueeze(1).expand_as(q_predict)
@@ -365,7 +365,7 @@ class SACTrainingWorker(TrainingWorker):
                 q_policy=q_policy_0,
                 q_target=q_values_1,
                 rewards=micro_batch.batch["info.rewards"],
-                dones=micro_batch.batch["info.dones"],
+                terminateds=micro_batch.batch["info.terminateds"],
                 next_log_prob=log_probs_1,
                 valids=micro_batch.batch["info.valids"],
             )

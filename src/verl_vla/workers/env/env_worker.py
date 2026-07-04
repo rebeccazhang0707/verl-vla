@@ -73,13 +73,14 @@ def put_tensor_cpu(data_dict):
     return data_dict
 
 
-def create_env_batch_dataproto(obs, rewards, dones, meta=None):
+def create_env_batch_dataproto(obs, rewards, terminations, truncations, meta=None):
     step_result = {
         "observation": obs["observation"],
         "task": obs["task"],
         "task_id": obs.get("task_id"),
         "next.reward": rewards,
-        "next.done": dones,
+        "next.terminated": terminations,
+        "next.truncated": truncations,
     }
     if meta is not None:
         step_result["meta"] = meta
@@ -95,7 +96,8 @@ def create_env_batch_dataproto(obs, rewards, dones, meta=None):
     tensor_batch = {
         **obs_tensor_batch,
         "next.reward": step_result["next.reward"],
-        "next.done": step_result["next.done"],
+        "next.terminated": step_result["next.terminated"],
+        "next.truncated": step_result["next.truncated"],
     }
     non_tensor_batch = {"obs.task": step_result["task"]}
     if step_result["task_id"] is not None:
@@ -286,14 +288,15 @@ class EnvWorker(Worker, DistProfilerExtension):
         # )
 
         simulators = self._simulators(mode)
-        extracted_obs, chunk_rewards, chunk_dones, _chunk_truncations = simulators[stage_id].step(
+        extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations = simulators[stage_id].step(
             chunk_actions, chunk_values=chunk_values
         )
 
         env_batch = create_env_batch_dataproto(
             obs=extracted_obs,
             rewards=chunk_rewards,
-            dones=chunk_dones,
+            terminations=chunk_terminations,
+            truncations=chunk_truncations,
         )
         return env_batch
 

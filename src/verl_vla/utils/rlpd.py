@@ -168,7 +168,7 @@ def rlpd_transition_samples_to_actor_input(
     action_chunk_steps = int(rlpd_config.action_chunk_steps)
     start_indices = torch.as_tensor([sample["start"] for sample in samples], dtype=torch.long)
     next_indices = torch.as_tensor([sample["next"] for sample in samples], dtype=torch.long)
-    terminal_mask = torch.as_tensor([sample["terminal"] for sample in samples], dtype=torch.bool)
+    terminated_mask = torch.as_tensor([sample["terminal"] for sample in samples], dtype=torch.bool)
 
     t0_items = [sample["t0_item"] for sample in samples]
     t1_items = [sample["t1_item"] for sample in samples]
@@ -177,7 +177,7 @@ def rlpd_transition_samples_to_actor_input(
 
     t0_action_chunks = read_lerobot_action_chunks(dataset, start_indices, action_chunk_steps)
     t1_action_chunks = read_lerobot_action_chunks(dataset, next_indices, action_chunk_steps)
-    rewards = terminal_mask.to(torch.float32) * float(rlpd_config.terminal_reward)
+    rewards = terminated_mask.to(torch.float32) * float(rlpd_config.terminal_reward)
     task_ids = torch.as_tensor(
         [item["task_index"].item() if torch.is_tensor(item["task_index"]) else item["task_index"] for item in t0_items],
         dtype=torch.long,
@@ -190,7 +190,7 @@ def rlpd_transition_samples_to_actor_input(
             "t0.action.action": t0_action_chunks,
             "t1.action.action": t1_action_chunks,
             "info.rewards": rewards,
-            "info.dones": terminal_mask.to(torch.float32),
+            "info.terminateds": terminated_mask.to(torch.float32),
             "info.valids": torch.ones(len(samples), dtype=torch.float32),
             "info.success_mask": torch.ones(len(samples), dtype=torch.float32),
             "info.task_ids": task_ids,

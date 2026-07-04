@@ -45,7 +45,7 @@ class BaseLeRobotStrategy(ABC):
         action: Any,
         task: str,
         next_reward: Any = 0.0,
-        next_done: Any = False,
+        next_terminated: Any = False,
         next_truncated: Any = False,
         is_intervention: Any = False,
     ) -> dict[str, Any]:

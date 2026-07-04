@@ -293,7 +293,7 @@ class LeRobotEnv(gym.Env):
         self._episode_steps += 1
         self._episode_returns += reward.numpy()
 
-        terminations = to_tensor(np.asarray([reply["done"]], dtype=bool))
+        terminations = to_tensor(np.asarray([reply["terminated"]], dtype=bool))
         raw_truncations = np.asarray([reply["truncated"]], dtype=bool)
         raw_truncations = np.logical_or(raw_truncations, self._episode_steps >= self.max_episode_steps)
         truncations = to_tensor(raw_truncations)

@@ -75,7 +75,7 @@ class LiberoLeRobotStrategy(BaseLeRobotStrategy):
                 "names": ["action"],
             },
             "next.reward": {"dtype": "float32", "shape": (1,), "names": None},
-            "next.done": {"dtype": "bool", "shape": (1,), "names": None},
+            "next.terminated": {"dtype": "bool", "shape": (1,), "names": None},
             "next.truncated": {"dtype": "bool", "shape": (1,), "names": None},
             "is_intervention": {"dtype": "bool", "shape": (1,), "names": None},
         }
@@ -89,7 +89,7 @@ class LiberoLeRobotStrategy(BaseLeRobotStrategy):
         action: Any,
         task: str,
         next_reward: Any = 0.0,
-        next_done: Any = False,
+        next_terminated: Any = False,
         next_truncated: Any = False,
         is_intervention: Any = False,
     ) -> dict[str, Any]:
@@ -99,7 +99,7 @@ class LiberoLeRobotStrategy(BaseLeRobotStrategy):
             "observation.state": np.asarray(observation["observation.state"], dtype=np.float32),
             "action": np.asarray(action, dtype=np.float32),
             "next.reward": np.asarray(next_reward, dtype=np.float32).reshape(1),
-            "next.done": np.asarray(next_done, dtype=bool).reshape(1),
+            "next.terminated": np.asarray(next_terminated, dtype=bool).reshape(1),
             "next.truncated": np.asarray(next_truncated, dtype=bool).reshape(1),
             "is_intervention": np.asarray(is_intervention, dtype=bool).reshape(1),
             "task": str(task),

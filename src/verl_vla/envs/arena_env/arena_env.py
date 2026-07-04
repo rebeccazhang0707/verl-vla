@@ -197,7 +197,7 @@ class IsaacLabArenaEnv(BaseEnv):
         del _info
         step_reward = self._to_numpy(reward).astype(np.float32)
         timeouts = self._elapsed_steps[env_ids] >= self.max_episode_steps
-        dones = np.logical_or(step_reward > self._success_reward_thresh, timeouts)
+        terminations = step_reward > self._success_reward_thresh
 
         obs = self._make_obs(raw_obs, env_ids=env_ids)
         return {
@@ -205,7 +205,7 @@ class IsaacLabArenaEnv(BaseEnv):
             "task": obs["task"],
             "task_id": obs["task_id"],
             "next.reward": to_tensor(step_reward),
-            "next.done": to_tensor(np.asarray(dones, dtype=bool)),
+            "next.terminated": to_tensor(np.asarray(terminations, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(timeouts, dtype=bool)),
         }
 

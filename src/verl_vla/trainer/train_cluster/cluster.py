@@ -514,7 +514,7 @@ class TrainCluster:
         if remaining is not None and remaining <= 0:
             return []
 
-        raw_done_steps = output.batch["next.done"].bool()
+        raw_done_steps = output.batch["next.terminated"].bool() | output.batch["next.truncated"].bool()
         raw_reward_steps = output.batch["next.reward"].float()
         chunk_steps = int(raw_done_steps.shape[-1]) if raw_done_steps.ndim > 2 else 1
         done_steps = raw_done_steps.reshape(raw_done_steps.shape[0], -1)
