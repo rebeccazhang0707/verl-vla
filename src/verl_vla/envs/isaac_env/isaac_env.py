@@ -203,6 +203,7 @@ class IsaacEnv(gym.Env):
             to_tensor(step_reward),
             to_tensor(terminations),
             to_tensor(truncations),
+            to_tensor(terminations),
             infos,
         )
 
@@ -214,6 +215,7 @@ class IsaacEnv(gym.Env):
 
         raw_chunk_terminations = []
         raw_chunk_truncations = []
+        raw_chunk_successes = []
         for i in range(chunk_size):
             actions = chunk_actions[:, i]
             step_values = None
@@ -223,23 +225,29 @@ class IsaacEnv(gym.Env):
                 elif len(chunk_values.shape) == 2:
                     step_values = chunk_values[:, i]
 
-            extracted_obs, step_reward, terminations, truncations, infos = self.step(actions, critic_values=step_values)
+            extracted_obs, step_reward, terminations, truncations, successes, infos = self.step(
+                actions, critic_values=step_values
+            )
 
             chunk_rewards.append(step_reward)
             raw_chunk_terminations.append(terminations)
             raw_chunk_truncations.append(truncations)
+            raw_chunk_successes.append(successes)
 
         chunk_rewards = torch.stack(chunk_rewards, dim=1)  # [num_envs, chunk_steps]
         raw_chunk_terminations = torch.stack(raw_chunk_terminations, dim=1)  # [num_envs, chunk_steps]
         raw_chunk_truncations = torch.stack(raw_chunk_truncations, dim=1)  # [num_envs, chunk_steps]
+        raw_chunk_successes = torch.stack(raw_chunk_successes, dim=1)  # [num_envs, chunk_steps]
 
         chunk_terminations = raw_chunk_terminations.clone()
         chunk_truncations = raw_chunk_truncations.clone()
+        chunk_successes = raw_chunk_successes.clone()
         return (
             extracted_obs,
             chunk_rewards,
             chunk_terminations,
             chunk_truncations,
+            chunk_successes,
             infos,
         )
 

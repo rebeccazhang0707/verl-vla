@@ -191,6 +191,7 @@ def _compute_return_lookup(
                 "next.reward",
                 "next.terminated",
                 "next.truncated",
+                "next.success",
             ],
         )
         indices = table["index"].to_numpy().astype(np.int64, copy=False)
@@ -200,6 +201,7 @@ def _compute_return_lookup(
         rewards = table["next.reward"].to_numpy().astype(np.float32, copy=False)
         terminateds = table["next.terminated"].to_numpy().astype(bool, copy=False)
         truncateds = table["next.truncated"].to_numpy().astype(bool, copy=False)
+        successes = table["next.success"].to_numpy().astype(bool, copy=False)
 
         records.extend(
             {
@@ -209,15 +211,17 @@ def _compute_return_lookup(
                 "reward": float(reward),
                 "terminated": bool(terminated),
                 "truncated": bool(truncated),
+                "success": bool(success),
                 "task_key": task_key,
             }
-            for index, ep, frame, reward, terminated, truncated, task_key in zip(
+            for index, ep, frame, reward, terminated, truncated, success, task_key in zip(
                 indices,
                 episode_indices,
                 frame_indices,
                 rewards,
                 terminateds,
                 truncateds,
+                successes,
                 task_keys,
                 strict=True,
             )
@@ -243,8 +247,7 @@ def _compute_return_lookup(
         if denom <= 0:
             raise ValueError(f"Invalid return normalization denominator for task={task_key}: {denom}.")
 
-        final_record = episode_records[-1]
-        success = bool(final_record["terminated"]) or float(final_record["reward"]) > 0.0
+        success = any(bool(record["success"]) for record in episode_records)
         episode_length = len(episode_records)
         for offset, record in enumerate(episode_records):
             remaining_steps = episode_length - offset - 1

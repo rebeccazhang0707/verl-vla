@@ -73,7 +73,7 @@ def put_tensor_cpu(data_dict):
     return data_dict
 
 
-def create_env_batch_dataproto(obs, rewards, terminations, truncations, meta=None):
+def create_env_batch_dataproto(obs, rewards, terminations, truncations, successes, meta=None):
     step_result = {
         "observation": obs["observation"],
         "task": obs["task"],
@@ -81,6 +81,7 @@ def create_env_batch_dataproto(obs, rewards, terminations, truncations, meta=Non
         "next.reward": rewards,
         "next.terminated": terminations,
         "next.truncated": truncations,
+        "next.success": successes,
     }
     if meta is not None:
         step_result["meta"] = meta
@@ -98,6 +99,7 @@ def create_env_batch_dataproto(obs, rewards, terminations, truncations, meta=Non
         "next.reward": step_result["next.reward"],
         "next.terminated": step_result["next.terminated"],
         "next.truncated": step_result["next.truncated"],
+        "next.success": step_result["next.success"],
     }
     non_tensor_batch = {"obs.task": step_result["task"]}
     if step_result["task_id"] is not None:
@@ -288,15 +290,21 @@ class EnvWorker(Worker, DistProfilerExtension):
         # )
 
         simulators = self._simulators(mode)
-        extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations = simulators[stage_id].step(
-            chunk_actions, chunk_values=chunk_values
-        )
+        step_output = simulators[stage_id].step(chunk_actions, chunk_values=chunk_values)
+        if len(step_output) == 4:
+            extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations = step_output
+            chunk_successes = chunk_terminations
+        elif len(step_output) == 5:
+            extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, chunk_successes = step_output
+        else:
+            extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, chunk_successes, _infos = step_output
 
         env_batch = create_env_batch_dataproto(
             obs=extracted_obs,
             rewards=chunk_rewards,
             terminations=chunk_terminations,
             truncations=chunk_truncations,
+            successes=chunk_successes,
         )
         return env_batch
 

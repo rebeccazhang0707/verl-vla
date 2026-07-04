@@ -77,6 +77,7 @@ class LiberoLeRobotStrategy(BaseLeRobotStrategy):
             "next.reward": {"dtype": "float32", "shape": (1,), "names": None},
             "next.terminated": {"dtype": "bool", "shape": (1,), "names": None},
             "next.truncated": {"dtype": "bool", "shape": (1,), "names": None},
+            "next.success": {"dtype": "bool", "shape": (1,), "names": None},
             "is_intervention": {"dtype": "bool", "shape": (1,), "names": None},
         }
         return features
@@ -91,6 +92,7 @@ class LiberoLeRobotStrategy(BaseLeRobotStrategy):
         next_reward: Any = 0.0,
         next_terminated: Any = False,
         next_truncated: Any = False,
+        next_success: Any = False,
         is_intervention: Any = False,
     ) -> dict[str, Any]:
         return {
@@ -101,6 +103,7 @@ class LiberoLeRobotStrategy(BaseLeRobotStrategy):
             "next.reward": np.asarray(next_reward, dtype=np.float32).reshape(1),
             "next.terminated": np.asarray(next_terminated, dtype=bool).reshape(1),
             "next.truncated": np.asarray(next_truncated, dtype=bool).reshape(1),
+            "next.success": np.asarray(next_success, dtype=bool).reshape(1),
             "is_intervention": np.asarray(is_intervention, dtype=bool).reshape(1),
             "task": str(task),
         }

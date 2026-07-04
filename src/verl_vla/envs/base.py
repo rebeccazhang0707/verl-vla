@@ -92,6 +92,7 @@ class BaseEnv(gym.Env):
         reward_chunks = []
         terminated_chunks = []
         truncated_chunks = []
+        success_chunks = []
         obs = None
         for step_idx in range(num_chunk_steps):
             step_actions = action[:, step_idx]
@@ -107,6 +108,7 @@ class BaseEnv(gym.Env):
             reward_chunks.append(step_result["next.reward"])
             terminated_chunks.append(step_result["next.terminated"])
             truncated_chunks.append(step_result["next.truncated"])
+            success_chunks.append(step_result["next.success"])
 
         self._latest_obs = obs
         return (
@@ -114,6 +116,7 @@ class BaseEnv(gym.Env):
             torch.stack([torch.as_tensor(chunk) for chunk in reward_chunks], dim=1),
             torch.stack([torch.as_tensor(chunk) for chunk in terminated_chunks], dim=1),
             torch.stack([torch.as_tensor(chunk) for chunk in truncated_chunks], dim=1),
+            torch.stack([torch.as_tensor(chunk) for chunk in success_chunks], dim=1),
         )
 
     @override
@@ -184,6 +187,8 @@ class BaseEnv(gym.Env):
                     indicating whether each stepped env terminated naturally.
                 next.truncated: Boolean array or tensor with shape ``[B]``
                     indicating whether each stepped env is truncated.
+                next.success: Boolean array or tensor with shape ``[B]``
+                    indicating whether each stepped env achieved task success.
         """
         raise NotImplementedError
 
@@ -325,6 +330,7 @@ class BaseEnv(gym.Env):
         rewards = step_result["next.reward"]
         terminations = step_result["next.terminated"]
         truncations = step_result["next.truncated"]
+        successes = step_result["next.success"]
 
         for local_id, env_id in enumerate(env_ids):
             teleop = self.teleops[env_id]
@@ -338,6 +344,7 @@ class BaseEnv(gym.Env):
                 "reward": rewards[local_id],
                 "terminated": terminations[local_id],
                 "truncated": truncations[local_id],
+                "success": successes[local_id],
                 "critic_value": critic_value[local_id],
             }
             teleop.publish_obs(
@@ -382,6 +389,7 @@ class BaseEnv(gym.Env):
         rewards = step_result["next.reward"]
         terminations = step_result["next.terminated"]
         truncations = step_result["next.truncated"]
+        successes = step_result["next.success"]
 
         for local_id, env_id in enumerate(env_ids):
             if self._recorder_episode_done[env_id]:
@@ -397,6 +405,7 @@ class BaseEnv(gym.Env):
                 next_reward=rewards[local_id],
                 next_terminated=terminated,
                 next_truncated=truncated,
+                next_success=successes[local_id],
                 is_intervention=is_intervention[env_id],
                 critic_value=critic_value[local_id],
             )

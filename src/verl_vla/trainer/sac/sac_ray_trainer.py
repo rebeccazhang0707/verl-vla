@@ -50,12 +50,14 @@ def prepare_sac_actor_input(
     terminated_steps = reduce_substep_dims(rollout_output.batch["next.terminated"].bool(), reduction="any")
     truncated_steps = reduce_substep_dims(rollout_output.batch["next.truncated"].bool(), reduction="any")
     done_steps = terminated_steps | truncated_steps
+    success_steps = reduce_substep_dims(rollout_output.batch["next.success"].bool(), reduction="any")
     reward_steps = reduce_substep_dims(rollout_output.batch["next.reward"].float(), reduction="sum")
     del rollout_output.batch["next.terminated"]
     del rollout_output.batch["next.truncated"]
+    del rollout_output.batch["next.success"]
     del rollout_output.batch["next.reward"]
 
-    valid_mask, success_mask = _build_sac_transition_masks(done_steps, reward_steps)
+    valid_mask, success_mask = _build_sac_transition_masks(done_steps, success_steps)
     step_penalty = float(trainer_config.step_penalty)
 
     rollout_output.batch["info.terminateds"] = terminated_steps.float()

@@ -63,6 +63,7 @@ class VideoRecorder(BaseRecorder):
         next_reward: Any = 0.0,
         next_terminated: Any = False,
         next_truncated: Any = False,
+        next_success: Any = False,
         is_intervention: Any = False,
         critic_value: Any = None,
     ) -> None:
@@ -73,6 +74,7 @@ class VideoRecorder(BaseRecorder):
             next_reward=next_reward,
             next_terminated=next_terminated,
             next_truncated=next_truncated,
+            next_success=next_success,
             is_intervention=is_intervention,
         )
         if critic_value is not None:

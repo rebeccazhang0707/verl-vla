@@ -63,6 +63,7 @@ class AsyncRecorder(BaseRecorder):
         next_reward: Any = 0.0,
         next_terminated: Any = False,
         next_truncated: Any = False,
+        next_success: Any = False,
         is_intervention: Any = False,
         critic_value: Any = None,
     ) -> None:
@@ -75,6 +76,7 @@ class AsyncRecorder(BaseRecorder):
             next_reward=_copy_value(next_reward),
             next_terminated=_copy_value(next_terminated),
             next_truncated=_copy_value(next_truncated),
+            next_success=_copy_value(next_success),
             is_intervention=_copy_value(is_intervention),
             critic_value=_copy_value(critic_value),
         )

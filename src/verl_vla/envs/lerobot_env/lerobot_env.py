@@ -297,6 +297,7 @@ class LeRobotEnv(gym.Env):
         raw_truncations = np.asarray([reply["truncated"]], dtype=bool)
         raw_truncations = np.logical_or(raw_truncations, self._episode_steps >= self.max_episode_steps)
         truncations = to_tensor(raw_truncations)
+        successes = to_tensor(np.asarray([reply["success"]], dtype=bool))
 
         if self.video_cfg.save_video:
             plot_infos = {
@@ -325,20 +326,21 @@ class LeRobotEnv(gym.Env):
             self._episode_steps[done_mask.numpy()] = 0
             self._episode_returns[done_mask.numpy()] = 0.0
 
-        return obs, reward, terminations, truncations, infos
+        return obs, reward, terminations, truncations, successes, infos
 
     def chunk_step(self, chunk_actions, chunk_values=None):
         chunk_size = chunk_actions.shape[1]
         chunk_rewards = []
         raw_chunk_terminations = []
         raw_chunk_truncations = []
+        raw_chunk_successes = []
         intervention_info = {"obs": [], "action": [], "is_intervention": []}
         last_step_is_intervention = False
         last_executed_action = None
 
         step_idx = 0
         while step_idx < chunk_size or last_step_is_intervention:
-            extracted_obs, step_reward, terminations, truncations, infos = self.step(
+            extracted_obs, step_reward, terminations, truncations, successes, infos = self.step(
                 chunk_actions[:, step_idx, :] if step_idx < chunk_size else last_executed_action,
                 critic_values=None if last_step_is_intervention else chunk_values,
             )
@@ -346,6 +348,7 @@ class LeRobotEnv(gym.Env):
             chunk_rewards.append(step_reward)
             raw_chunk_terminations.append(terminations)
             raw_chunk_truncations.append(truncations)
+            raw_chunk_successes.append(successes)
             executed_action = to_tensor(infos["executed_action"]).unsqueeze(0)
             intervention_info["action"].append(executed_action)
             intervention_info["is_intervention"].append(to_tensor(infos["is_intervention"]).unsqueeze(0))
@@ -359,6 +362,7 @@ class LeRobotEnv(gym.Env):
         chunk_rewards = torch.stack(chunk_rewards, dim=1)
         chunk_terminations = torch.stack(raw_chunk_terminations, dim=1)
         chunk_truncations = torch.stack(raw_chunk_truncations, dim=1)
+        chunk_successes = torch.stack(raw_chunk_successes, dim=1)
 
         infos = {}
         intervention_obs = {
@@ -379,7 +383,7 @@ class LeRobotEnv(gym.Env):
                 "action": torch.stack(intervention_info["action"], dim=1),
                 "is_intervention": is_intervention_tensor,
             }
-        return extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, infos
+        return extracted_obs, chunk_rewards, chunk_terminations, chunk_truncations, chunk_successes, infos
 
     def flush_video(self, video_sub_dir: Optional[str] = None):
         output_dir = os.path.join(self.video_cfg.video_base_dir, f"rank_{self.rank}")

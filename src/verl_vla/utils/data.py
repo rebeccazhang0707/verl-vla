@@ -35,11 +35,11 @@ def reduce_substep_dims(value: torch.Tensor, *, reduction: str) -> torch.Tensor:
 
 
 def _build_sac_transition_masks(
-    done_steps: torch.Tensor, reward_steps: torch.Tensor
+    done_steps: torch.Tensor, success_steps: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Build transition masks for rows that may contain zero, one, or many completed episodes."""
     valid_mask = torch.zeros_like(done_steps, dtype=torch.bool)
-    positive_mask = torch.zeros_like(done_steps, dtype=torch.bool)
+    success_mask = torch.zeros_like(done_steps, dtype=torch.bool)
 
     for batch_idx in range(done_steps.shape[0]):
         start_idx = 0
@@ -49,15 +49,56 @@ def _build_sac_transition_masks(
                 continue
 
             segment = slice(start_idx, done_idx + 1)
-            segment_return = reward_steps[batch_idx, segment].sum()
             valid_mask[batch_idx, segment] = True
 
-            if segment_return > 0:
-                positive_mask[batch_idx, segment] = True
+            if success_steps[batch_idx, segment].any():
+                success_mask[batch_idx, segment] = True
 
             start_idx = done_idx + 1
 
-    return valid_mask, positive_mask
+    return valid_mask, success_mask
+
+
+def update_progress_trajectory_counts(
+    env_result: DataProto,
+    *,
+    stage_id: int,
+    progress_counts: dict[str, int],
+    progress_lane_state: dict[int, dict[str, torch.Tensor]],
+) -> None:
+    batch = env_result.batch
+    episode_done = batch["next.terminated"].bool() | batch["next.truncated"].bool()
+    success = batch["next.success"].bool()
+    episode_done = episode_done.reshape(episode_done.shape[0], -1)
+    success = success.reshape(success.shape[0], -1)
+
+    state = progress_lane_state.get(stage_id)
+    if state is None or state["completed"].shape[0] != episode_done.shape[0]:
+        state = {
+            "completed": torch.zeros(episode_done.shape[0], dtype=torch.bool),
+            "success": torch.zeros(episode_done.shape[0], dtype=torch.bool),
+        }
+        progress_lane_state[stage_id] = state
+
+    completed = state["completed"]
+    carried_success = state["success"]
+    for step_idx in range(episode_done.shape[1]):
+        step_done = episode_done[:, step_idx].cpu()
+        step_success = success[:, step_idx].cpu()
+
+        active = ~completed
+        carried_success[active] |= step_success[active]
+
+        newly_done = active & step_done
+        progress_counts["trajectories"] += int(newly_done.sum().item())
+        progress_counts["success"] += int((newly_done & carried_success).sum().item())
+
+        completed[newly_done] = True
+        carried_success[newly_done] = False
+
+        restarted = completed & ~step_done
+        completed[restarted] = False
+        carried_success[restarted] = step_success[restarted]
 
 
 def dataloader_batch_to_dataproto(batch: dict) -> DataProto:

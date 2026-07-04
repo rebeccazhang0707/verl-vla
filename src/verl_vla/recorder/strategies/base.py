@@ -47,6 +47,7 @@ class BaseLeRobotStrategy(ABC):
         next_reward: Any = 0.0,
         next_terminated: Any = False,
         next_truncated: Any = False,
+        next_success: Any = False,
         is_intervention: Any = False,
     ) -> dict[str, Any]:
         """Convert one environment step into one LeRobot frame."""

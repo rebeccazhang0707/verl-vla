@@ -370,6 +370,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
             "next.reward": to_tensor(step_reward),
             "next.terminated": to_tensor(np.asarray(terminations, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(truncations, dtype=bool)),
+            "next.success": to_tensor(np.asarray(terminations, dtype=bool)),
         }
 
     def env_close(self):

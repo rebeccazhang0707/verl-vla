@@ -23,7 +23,11 @@ from verl import DataProto
 from verl.single_controller.ray import RayWorkerGroup
 
 from verl_vla.env_loop.config import EnvLoopConfig
-from verl_vla.utils.data import get_dataproto_from_prefix, stack_dataproto_with_padding
+from verl_vla.utils.data import (
+    get_dataproto_from_prefix,
+    stack_dataproto_with_padding,
+    update_progress_trajectory_counts,
+)
 from verl_vla.utils.keys import ACTION_KEY, FEEDBACK_KEY, OBS_KEY
 
 logger = logging.getLogger(__file__)
@@ -125,6 +129,8 @@ class EnvLoop:
         }
 
         progress_bar = tqdm(total=self.max_interactions, desc="Rollout Progress", leave=False)
+        progress_counts = {"trajectories": 0, "success": 0}
+        progress_lane_state: dict[int, dict[str, torch.Tensor]] = {}
 
         async def _stage_loop(stage_id: int):
             stage_start_t = time.perf_counter()
@@ -143,6 +149,13 @@ class EnvLoop:
                 env_result: DataProto = await asyncio.to_thread(env_ref.get)
                 stage_timing[stage_id]["env_wait_s"] += time.perf_counter() - env_wait_start_t
                 stage_timing[stage_id]["env_wait_calls"] += 1.0
+                update_progress_trajectory_counts(
+                    env_result,
+                    stage_id=stage_id,
+                    progress_counts=progress_counts,
+                    progress_lane_state=progress_lane_state,
+                )
+                progress_bar.set_postfix(progress_counts, refresh=False)
 
                 next_step = self._strip_meta_info(get_dataproto_from_prefix(env_result, FEEDBACK_KEY, "."))
                 next_obs = self._strip_meta_info(get_dataproto_from_prefix(env_result, OBS_KEY, "."))

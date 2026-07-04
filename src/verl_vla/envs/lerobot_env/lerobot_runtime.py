@@ -160,6 +160,7 @@ class LerobotRuntime:
             "reward": float(reward),
             "terminated": bool(done),
             "truncated": bool(truncated),
+            "success": bool(done),
             "extra_info": {
                 "is_intervention": intervention_info.get(TeleopEvents.IS_INTERVENTION, False),
                 "executed_action": executed_action,

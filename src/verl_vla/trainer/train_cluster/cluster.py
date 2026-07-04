@@ -516,12 +516,15 @@ class TrainCluster:
 
         raw_done_steps = output.batch["next.terminated"].bool() | output.batch["next.truncated"].bool()
         raw_reward_steps = output.batch["next.reward"].float()
+        raw_success_steps = output.batch["next.success"].bool()
         chunk_steps = int(raw_done_steps.shape[-1]) if raw_done_steps.ndim > 2 else 1
         done_steps = raw_done_steps.reshape(raw_done_steps.shape[0], -1)
         reward_steps = raw_reward_steps.reshape(raw_reward_steps.shape[0], -1)
+        success_steps = raw_success_steps.reshape(raw_success_steps.shape[0], -1)
         if done_steps.ndim == 1:
             done_steps = done_steps[:, None]
             reward_steps = reward_steps[:, None]
+            success_steps = success_steps[:, None]
         task_id_steps = np.asarray(output.non_tensor_batch["obs.task_id"])
         task_id_steps = np.repeat(task_id_steps, chunk_steps, axis=1)
 
@@ -529,6 +532,7 @@ class TrainCluster:
             return TrainCluster._collect_non_auto_reset_trajectory_records(
                 done_steps,
                 reward_steps,
+                success_steps,
                 task_id_steps=task_id_steps,
                 chunk_steps=chunk_steps,
                 remaining=remaining,
@@ -539,26 +543,36 @@ class TrainCluster:
 
         carry_lengths = carry_state.get("length")
         carry_rewards = carry_state.get("reward")
+        carry_successes = carry_state.get("success")
         carry_task_ids = carry_state.get("task_id")
         if carry_lengths is None or carry_lengths.shape[0] != batch_size:
             carry_lengths = np.zeros(batch_size, dtype=np.int64)
             carry_rewards = np.zeros(batch_size, dtype=np.float32)
+            carry_successes = np.zeros(batch_size, dtype=bool)
             carry_task_ids = np.full(batch_size, -1, dtype=np.int64)
             carry_state["length"] = carry_lengths
             carry_state["reward"] = carry_rewards
+            carry_state["success"] = carry_successes
             carry_state["task_id"] = carry_task_ids
         else:
+            if carry_successes is None or carry_successes.shape[0] != batch_size:
+                carry_successes = np.zeros(batch_size, dtype=bool)
+                carry_state["success"] = carry_successes
             if not carry_lengths.flags.writeable:
                 carry_lengths = carry_lengths.copy()
                 carry_state["length"] = carry_lengths
             if carry_rewards is not None and not carry_rewards.flags.writeable:
                 carry_rewards = carry_rewards.copy()
                 carry_state["reward"] = carry_rewards
+            if carry_successes is not None and not carry_successes.flags.writeable:
+                carry_successes = carry_successes.copy()
+                carry_state["success"] = carry_successes
             if carry_task_ids is not None and not carry_task_ids.flags.writeable:
                 carry_task_ids = carry_task_ids.copy()
                 carry_state["task_id"] = carry_task_ids
         assert carry_lengths is not None
         assert carry_rewards is not None
+        assert carry_successes is not None
         assert carry_task_ids is not None
 
         for batch_idx in range(done_steps.shape[0]):
@@ -567,10 +581,12 @@ class TrainCluster:
 
             done_row = done_steps[batch_idx].reshape(-1)
             reward_row = reward_steps[batch_idx].reshape(-1)
+            success_row = success_steps[batch_idx].reshape(-1)
             done_indices = torch.nonzero(done_row, as_tuple=False).flatten().tolist()
             start_idx = 0
             segment_prefix_length = int(carry_lengths[batch_idx])
             segment_prefix_return = float(carry_rewards[batch_idx])
+            segment_prefix_success = bool(carry_successes[batch_idx])
             segment_task_id = int(carry_task_ids[batch_idx])
             if segment_prefix_length == 0 and task_id_steps.shape[1] > 0:
                 segment_task_id = int(task_id_steps[batch_idx, 0])
@@ -581,6 +597,7 @@ class TrainCluster:
 
                 segment = slice(start_idx, done_idx + 1)
                 trajectory_return = segment_prefix_return + float(reward_row[segment].sum().item())
+                trajectory_success = segment_prefix_success or bool(success_row[segment].any().item())
                 trajectory_length = segment_prefix_length + done_idx - start_idx + 1
                 trajectory_chunk_length = (trajectory_length + chunk_steps - 1) // chunk_steps
                 records.append(
@@ -588,7 +605,7 @@ class TrainCluster:
                         "length": int(trajectory_length),
                         "chunk_length": int(trajectory_chunk_length),
                         "return": float(trajectory_return),
-                        "success": bool(trajectory_return > 0.0),
+                        "success": trajectory_success,
                         "task_id": int(segment_task_id),
                     }
                 )
@@ -596,6 +613,7 @@ class TrainCluster:
                 start_idx = done_idx + 1
                 segment_prefix_length = 0
                 segment_prefix_return = 0.0
+                segment_prefix_success = False
                 if start_idx < task_id_steps.shape[1]:
                     segment_task_id = int(task_id_steps[batch_idx, start_idx])
 
@@ -603,6 +621,7 @@ class TrainCluster:
                 remaining_steps = int(done_row.numel()) - start_idx
                 carry_lengths[batch_idx] = segment_prefix_length + remaining_steps
                 carry_rewards[batch_idx] = segment_prefix_return + float(reward_row[start_idx:].sum().item())
+                carry_successes[batch_idx] = segment_prefix_success or bool(success_row[start_idx:].any().item())
                 carry_task_ids[batch_idx] = segment_task_id
 
         return records
@@ -611,6 +630,7 @@ class TrainCluster:
     def _collect_non_auto_reset_trajectory_records(
         done_steps: torch.Tensor,
         reward_steps: torch.Tensor,
+        success_steps: torch.Tensor,
         *,
         task_id_steps: np.ndarray,
         chunk_steps: int,
@@ -623,6 +643,7 @@ class TrainCluster:
 
             done_row = done_steps[batch_idx].reshape(-1)
             reward_row = reward_steps[batch_idx].reshape(-1)
+            success_row = success_steps[batch_idx].reshape(-1)
             done_indices = torch.nonzero(done_row, as_tuple=False).flatten().tolist()
             done_idx = int(done_indices[0]) if done_indices else int(done_row.numel()) - 1
             segment = slice(0, done_idx + 1)
@@ -634,7 +655,7 @@ class TrainCluster:
                     "length": int(done_idx + 1),
                     "chunk_length": int(done_idx // chunk_steps + 1),
                     "return": trajectory_return,
-                    "success": bool(trajectory_return > 0.0),
+                    "success": bool(success_row[segment].any().item()),
                     "task_id": task_id,
                 }
             )

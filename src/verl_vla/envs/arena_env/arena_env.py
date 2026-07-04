@@ -158,6 +158,15 @@ class IsaacLabArenaEnv(BaseEnv):
     def _success_reward_thresh(self) -> float:
         return 1.0 - 1e-6 if self.subtask_reward else 0.0
 
+    def _extract_successes(self, env_ids) -> np.ndarray:
+        state = self._raw_env.extras["subtask_success_state"]
+        successes = []
+        for env_id in np.asarray(env_ids, dtype=np.int64).reshape(-1):
+            env_state = state[int(env_id)]
+            env_state = np.asarray(env_state, dtype=bool).reshape(-1)
+            successes.append(bool(env_state.size > 0 and env_state.all()))
+        return np.asarray(successes, dtype=bool)
+
     def _reset_episode_state(self, env_ids=None) -> None:
         if env_ids is None:
             env_ids = np.arange(self.num_envs)
@@ -198,6 +207,8 @@ class IsaacLabArenaEnv(BaseEnv):
         step_reward = self._to_numpy(reward).astype(np.float32)
         timeouts = self._elapsed_steps[env_ids] >= self.max_episode_steps
         terminations = step_reward > self._success_reward_thresh
+        successes = self._extract_successes(env_ids)
+        terminations = successes
 
         obs = self._make_obs(raw_obs, env_ids=env_ids)
         return {
@@ -207,6 +218,7 @@ class IsaacLabArenaEnv(BaseEnv):
             "next.reward": to_tensor(step_reward),
             "next.terminated": to_tensor(np.asarray(terminations, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(timeouts, dtype=bool)),
+            "next.success": to_tensor(successes),
         }
 
     # Stable-action adapter: temporarily replace policy actions with a held pose.
