@@ -250,7 +250,26 @@ def flatten_trajectories(data: DataProto) -> DataProto:
     )
 
 
-def add_transition_prefixes(data: DataProto) -> DataProto:
+def add_transition_prefixes(data: DataProto, transition_boundary_mask: torch.Tensor | None = None) -> DataProto:
+    """Convert rollout slots into ``t0``/``t1`` transition fields.
+
+    ``transition_boundary_mask`` marks steps whose next observation belongs to a
+    new episode after auto reset. For those steps, ``t1.obs`` is replaced by the
+    same step's ``t0.obs`` so the previous trajectory does not consume the reset
+    observation from the next trajectory.
+
+    Example with multiple trajectories in one batch row:
+
+        obs:     o0  o1  o2  o3  o4  o5
+        done:    F   T   F   F   T   F
+
+        shift t1:
+        t1.obs:  o1  o2  o3  o4  o5  o5
+
+        fixed:
+        t1.obs:  o1  o1  o3  o4  o4  o5
+                     ^ done      ^ done
+    """
     batch = data.batch
     non_tensor_batch = data.non_tensor_batch
 
@@ -259,6 +278,16 @@ def add_transition_prefixes(data: DataProto) -> DataProto:
         if isinstance(x, torch.Tensor):
             return torch.cat([x[:, 1:, ...], last_step], dim=1)
         return np.concatenate([x[:, 1:, ...], last_step], axis=1)
+
+    def replace_boundary_steps(next_value, current_value):
+        if transition_boundary_mask is None:
+            return next_value
+        mask = transition_boundary_mask
+        while mask.ndim < next_value.ndim:
+            mask = mask.unsqueeze(-1)
+        if isinstance(next_value, torch.Tensor):
+            return torch.where(mask.to(device=next_value.device), current_value, next_value)
+        return np.where(mask.cpu().numpy(), current_value, next_value)
 
     obs_prefix = f"{OBS_KEY}."
     action_prefix = f"{ACTION_KEY}."
@@ -270,11 +299,17 @@ def add_transition_prefixes(data: DataProto) -> DataProto:
     for key in keys:
         batch[f"t0.{key}"] = batch[key]
         batch[f"t1.{key}"] = next_steps(batch[key])
+        if key.startswith(obs_prefix):
+            batch[f"t1.{key}"] = replace_boundary_steps(batch[f"t1.{key}"], batch[f"t0.{key}"])
         del batch[key]
 
     for key in non_tensor_keys:
         non_tensor_batch[f"t0.{key}"] = non_tensor_batch[key]
         non_tensor_batch[f"t1.{key}"] = next_steps(non_tensor_batch[key])
+        if key.startswith(obs_prefix):
+            non_tensor_batch[f"t1.{key}"] = replace_boundary_steps(
+                non_tensor_batch[f"t1.{key}"], non_tensor_batch[f"t0.{key}"]
+            )
         del non_tensor_batch[key]
 
     return data

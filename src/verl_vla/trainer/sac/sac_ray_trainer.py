@@ -66,7 +66,7 @@ def prepare_sac_actor_input(
     rollout_output.batch["info.success_mask"] = success_mask.float()
     rollout_output.meta_info["global_steps"] = global_steps
 
-    rollout_output = add_transition_prefixes(rollout_output)
+    rollout_output = add_transition_prefixes(rollout_output, transition_boundary_mask=done_steps)
     return flatten_trajectories(rollout_output)
 
 
