@@ -54,9 +54,7 @@ ROLE_TO_WORKER_NAME = {
 @dataclass
 class RolloutState:
     reset_future: Any | None = None
-    carry_state: dict[str, np.ndarray | None] = field(
-        default_factory=lambda: {"length": None, "reward": None, "task_id": None}
-    )
+    carry_state: dict[str, np.ndarray | None] = field(default_factory=lambda: {"length": None, "reward": None})
     lerobot_collected_once: bool = False
 
 
@@ -477,7 +475,10 @@ class TrainCluster:
         eval_step = 0
         rollout_metric_lists: dict[str, list[float]] = {}
         trajectory_records: list[dict[str, float | int | bool]] = []
-        carry_state: dict[str, np.ndarray | None] = {"length": None, "reward": None, "task_id": None}
+        carry_state: dict[str, np.ndarray | None] = {
+            "length": None,
+            "reward": None,
+        }
         while len(trajectory_records) < target_episodes:
             reset_future = env_wg.reset_env(mode="eval", reset_eval=eval_step == 0)
             rollout_output = self.env_loop.generate_sequences(reset_future, eval=True)
@@ -517,23 +518,22 @@ class TrainCluster:
         raw_done_steps = output.batch["next.terminated"].bool() | output.batch["next.truncated"].bool()
         raw_reward_steps = output.batch["next.reward"].float()
         raw_success_steps = output.batch["next.success"].bool()
-        chunk_steps = int(raw_done_steps.shape[-1]) if raw_done_steps.ndim > 2 else 1
-        done_steps = raw_done_steps.reshape(raw_done_steps.shape[0], -1)
-        reward_steps = raw_reward_steps.reshape(raw_reward_steps.shape[0], -1)
-        success_steps = raw_success_steps.reshape(raw_success_steps.shape[0], -1)
-        if done_steps.ndim == 1:
-            done_steps = done_steps[:, None]
-            reward_steps = reward_steps[:, None]
-            success_steps = success_steps[:, None]
+        done_chunks = raw_done_steps.reshape(raw_done_steps.shape[0], raw_done_steps.shape[1], -1)
+        reward_chunks = raw_reward_steps.reshape(raw_reward_steps.shape[0], raw_reward_steps.shape[1], -1)
+        success_chunks = raw_success_steps.reshape(raw_success_steps.shape[0], raw_success_steps.shape[1], -1)
+        chunk_steps = int(done_chunks.shape[-1])
+        done_steps = done_chunks.reshape(done_chunks.shape[0], -1)
+        reward_steps = reward_chunks.reshape(reward_chunks.shape[0], -1)
+        success_steps = success_chunks.reshape(success_chunks.shape[0], -1)
         task_id_steps = np.asarray(output.non_tensor_batch["obs.task_id"])
-        task_id_steps = np.repeat(task_id_steps, chunk_steps, axis=1)
+        flat_task_id_steps = np.repeat(task_id_steps, chunk_steps, axis=1)
 
         if not auto_reset:
             return TrainCluster._collect_non_auto_reset_trajectory_records(
                 done_steps,
                 reward_steps,
                 success_steps,
-                task_id_steps=task_id_steps,
+                task_id_steps=flat_task_id_steps,
                 chunk_steps=chunk_steps,
                 remaining=remaining,
             )
@@ -543,86 +543,56 @@ class TrainCluster:
 
         carry_lengths = carry_state.get("length")
         carry_rewards = carry_state.get("reward")
-        carry_successes = carry_state.get("success")
-        carry_task_ids = carry_state.get("task_id")
-        if carry_lengths is None or carry_lengths.shape[0] != batch_size:
+        if carry_lengths is None:
             carry_lengths = np.zeros(batch_size, dtype=np.int64)
             carry_rewards = np.zeros(batch_size, dtype=np.float32)
-            carry_successes = np.zeros(batch_size, dtype=bool)
-            carry_task_ids = np.full(batch_size, -1, dtype=np.int64)
             carry_state["length"] = carry_lengths
             carry_state["reward"] = carry_rewards
-            carry_state["success"] = carry_successes
-            carry_state["task_id"] = carry_task_ids
-        else:
-            if carry_successes is None or carry_successes.shape[0] != batch_size:
-                carry_successes = np.zeros(batch_size, dtype=bool)
-                carry_state["success"] = carry_successes
-            if not carry_lengths.flags.writeable:
-                carry_lengths = carry_lengths.copy()
-                carry_state["length"] = carry_lengths
-            if carry_rewards is not None and not carry_rewards.flags.writeable:
-                carry_rewards = carry_rewards.copy()
-                carry_state["reward"] = carry_rewards
-            if carry_successes is not None and not carry_successes.flags.writeable:
-                carry_successes = carry_successes.copy()
-                carry_state["success"] = carry_successes
-            if carry_task_ids is not None and not carry_task_ids.flags.writeable:
-                carry_task_ids = carry_task_ids.copy()
-                carry_state["task_id"] = carry_task_ids
         assert carry_lengths is not None
         assert carry_rewards is not None
-        assert carry_successes is not None
-        assert carry_task_ids is not None
 
         for batch_idx in range(done_steps.shape[0]):
             if remaining is not None and len(records) >= remaining:
                 break
 
-            done_row = done_steps[batch_idx].reshape(-1)
-            reward_row = reward_steps[batch_idx].reshape(-1)
-            success_row = success_steps[batch_idx].reshape(-1)
-            done_indices = torch.nonzero(done_row, as_tuple=False).flatten().tolist()
-            start_idx = 0
             segment_prefix_length = int(carry_lengths[batch_idx])
             segment_prefix_return = float(carry_rewards[batch_idx])
-            segment_prefix_success = bool(carry_successes[batch_idx])
-            segment_task_id = int(carry_task_ids[batch_idx])
-            if segment_prefix_length == 0 and task_id_steps.shape[1] > 0:
-                segment_task_id = int(task_id_steps[batch_idx, 0])
 
-            for done_idx in done_indices:
+            for chunk_idx in range(done_chunks.shape[1]):
                 if remaining is not None and len(records) >= remaining:
                     break
 
-                segment = slice(start_idx, done_idx + 1)
-                trajectory_return = segment_prefix_return + float(reward_row[segment].sum().item())
-                trajectory_success = segment_prefix_success or bool(success_row[segment].any().item())
-                trajectory_length = segment_prefix_length + done_idx - start_idx + 1
+                chunk_done = done_chunks[batch_idx, chunk_idx].reshape(-1)
+                chunk_reward = reward_chunks[batch_idx, chunk_idx].reshape(-1)
+                chunk_success = success_chunks[batch_idx, chunk_idx].reshape(-1)
+                done_indices = torch.nonzero(chunk_done, as_tuple=False).flatten().tolist()
+                if not done_indices:
+                    segment_prefix_length += chunk_steps
+                    segment_prefix_return += float(chunk_reward.sum().item())
+                    continue
+
+                done_idx = int(done_indices[0])
+                segment = slice(0, done_idx + 1)
+                task_id = int(task_id_steps[batch_idx, chunk_idx])
+                trajectory_length = segment_prefix_length
+                trajectory_length += done_idx + 1
                 trajectory_chunk_length = (trajectory_length + chunk_steps - 1) // chunk_steps
                 records.append(
                     {
                         "length": int(trajectory_length),
                         "chunk_length": int(trajectory_chunk_length),
-                        "return": float(trajectory_return),
-                        "success": trajectory_success,
-                        "task_id": int(segment_task_id),
+                        "return": float(segment_prefix_return + float(chunk_reward[segment].sum().item())),
+                        "success": bool(chunk_success[segment].any().item()),
+                        "task_id": task_id,
                     }
                 )
 
-                start_idx = done_idx + 1
                 segment_prefix_length = 0
                 segment_prefix_return = 0.0
-                segment_prefix_success = False
-                if start_idx < task_id_steps.shape[1]:
-                    segment_task_id = int(task_id_steps[batch_idx, start_idx])
 
             if remaining is None or len(records) < remaining:
-                remaining_steps = int(done_row.numel()) - start_idx
-                carry_lengths[batch_idx] = segment_prefix_length + remaining_steps
-                carry_rewards[batch_idx] = segment_prefix_return + float(reward_row[start_idx:].sum().item())
-                carry_successes[batch_idx] = segment_prefix_success or bool(success_row[start_idx:].any().item())
-                carry_task_ids[batch_idx] = segment_task_id
+                carry_lengths[batch_idx] = segment_prefix_length
+                carry_rewards[batch_idx] = segment_prefix_return
 
         return records
 
