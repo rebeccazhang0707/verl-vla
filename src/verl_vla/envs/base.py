@@ -119,6 +119,8 @@ class BaseEnv(gym.Env):
             "task": step_result["task"],
             "task_id": step_result["task_id"],
         }
+        if "eval_episode_id" in step_result:
+            obs["eval_episode_id"] = step_result["eval_episode_id"]
 
         self._latest_obs = obs
         return (
@@ -188,6 +190,10 @@ class BaseEnv(gym.Env):
                     ``observation.images.*`` and ``observation.state``.
                 task: Sequence with shape ``[B]`` containing task descriptions
                     or ids for each stepped env.
+                task_id: Array with shape ``[B]`` containing task ids.
+                eval_episode_id: Optional array with shape ``[B]`` containing
+                    eval benchmark ids for fixed-case deduplication and repeat
+                    quotas.
                 next.reward: Array or tensor with shape ``[B]`` containing the
                     reward after stepping.
                 next.terminated: Boolean array or tensor with shape ``[B]``
@@ -267,7 +273,9 @@ class BaseEnv(gym.Env):
         reset_obs = self.env_reset(
             env_ids=env_ids[reset_local_ids],
         )
-        for key in ("observation", "task", "task_id"):
+        for key in ("observation", "task", "task_id", "eval_episode_id"):
+            if key not in step_result or key not in reset_obs:
+                continue
             for reset_idx, local_id in enumerate(reset_local_ids):
                 step_result[key][local_id] = reset_obs[key][reset_idx]
         self.reset_recorder_envs(env_ids[reset_local_ids])
@@ -280,6 +288,8 @@ class BaseEnv(gym.Env):
             "task": [self._latest_obs["task"][env_id] for env_id in env_ids],
             "task_id": [self._latest_obs["task_id"][env_id] for env_id in env_ids],
         }
+        if "eval_episode_id" in self._latest_obs:
+            current_obs["eval_episode_id"] = [self._latest_obs["eval_episode_id"][env_id] for env_id in env_ids]
         return current_obs
 
     def _update_latest_obs(self, env_ids, step_result) -> None:
@@ -288,6 +298,8 @@ class BaseEnv(gym.Env):
             self._latest_obs["observation"][env_id] = step_result["observation"][local_id]
             self._latest_obs["task"][env_id] = step_result["task"][local_id]
             self._latest_obs["task_id"][env_id] = step_result["task_id"][local_id]
+            if "eval_episode_id" in step_result and "eval_episode_id" in self._latest_obs:
+                self._latest_obs["eval_episode_id"][env_id] = step_result["eval_episode_id"][local_id]
 
     @staticmethod
     def _to_numpy(value, *, copy: bool = False):

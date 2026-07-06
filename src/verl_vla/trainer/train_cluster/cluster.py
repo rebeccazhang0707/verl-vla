@@ -472,6 +472,12 @@ class TrainCluster:
         benchmark_size = int(env_wg.get_eval_benchmark_size()[0])
         target_episodes = benchmark_size if max_episodes is None else int(max_episodes)
 
+        base_count = target_episodes // benchmark_size
+        extra_count = target_episodes % benchmark_size
+        target_eval_episode_counts = np.full(benchmark_size, base_count, dtype=np.int64)
+        target_eval_episode_counts[:extra_count] += 1
+        accepted_eval_episode_counts = np.zeros(benchmark_size, dtype=np.int64)
+
         eval_step = 0
         rollout_metric_lists: dict[str, list[float]] = {}
         trajectory_records: list[dict[str, float | int | bool]] = []
@@ -485,14 +491,22 @@ class TrainCluster:
             for key, value in rollout_output.meta_info.get("metrics", {}).items():
                 rollout_metric_lists.setdefault(key, []).append(float(value))
 
-            trajectory_records.extend(
-                self._collect_trajectory_records(
-                    rollout_output,
-                    auto_reset=self.config.env.env_worker.auto_reset,
-                    remaining=target_episodes - len(trajectory_records),
-                    carry_state=carry_state,
-                )
+            new_records = self._collect_trajectory_records(
+                rollout_output,
+                auto_reset=self.config.env.env_worker.auto_reset,
+                carry_state=carry_state,
             )
+            if "obs.eval_episode_id" in rollout_output.non_tensor_batch:
+                for record in new_records:
+                    eval_episode_id = int(record.get("eval_episode_id", -1))
+                    if eval_episode_id < 0 or eval_episode_id >= benchmark_size:
+                        continue
+                    if accepted_eval_episode_counts[eval_episode_id] >= target_eval_episode_counts[eval_episode_id]:
+                        continue
+                    trajectory_records.append(record)
+                    accepted_eval_episode_counts[eval_episode_id] += 1
+            else:
+                trajectory_records.extend(new_records[: target_episodes - len(trajectory_records)])
             eval_step += 1
 
         metrics = self._trajectory_metrics_from_records(
@@ -526,7 +540,13 @@ class TrainCluster:
         reward_steps = reward_chunks.reshape(reward_chunks.shape[0], -1)
         success_steps = success_chunks.reshape(success_chunks.shape[0], -1)
         task_id_steps = np.asarray(output.non_tensor_batch["obs.task_id"])
+        eval_episode_id_steps = output.non_tensor_batch.get("obs.eval_episode_id")
+        if eval_episode_id_steps is not None:
+            eval_episode_id_steps = np.asarray(eval_episode_id_steps)
         flat_task_id_steps = np.repeat(task_id_steps, chunk_steps, axis=1)
+        flat_eval_episode_id_steps = (
+            np.repeat(eval_episode_id_steps, chunk_steps, axis=1) if eval_episode_id_steps is not None else None
+        )
 
         if not auto_reset:
             return TrainCluster._collect_non_auto_reset_trajectory_records(
@@ -534,6 +554,7 @@ class TrainCluster:
                 reward_steps,
                 success_steps,
                 task_id_steps=flat_task_id_steps,
+                eval_episode_id_steps=flat_eval_episode_id_steps,
                 chunk_steps=chunk_steps,
                 remaining=remaining,
             )
@@ -574,18 +595,22 @@ class TrainCluster:
                 done_idx = int(done_indices[0])
                 segment = slice(0, done_idx + 1)
                 task_id = int(task_id_steps[batch_idx, chunk_idx])
+                eval_episode_id = (
+                    int(eval_episode_id_steps[batch_idx, chunk_idx]) if eval_episode_id_steps is not None else None
+                )
                 trajectory_length = segment_prefix_length
                 trajectory_length += done_idx + 1
                 trajectory_chunk_length = (trajectory_length + chunk_steps - 1) // chunk_steps
-                records.append(
-                    {
-                        "length": int(trajectory_length),
-                        "chunk_length": int(trajectory_chunk_length),
-                        "return": float(segment_prefix_return + float(chunk_reward[segment].sum().item())),
-                        "success": bool(chunk_success[segment].any().item()),
-                        "task_id": task_id,
-                    }
-                )
+                record = {
+                    "length": int(trajectory_length),
+                    "chunk_length": int(trajectory_chunk_length),
+                    "return": float(segment_prefix_return + float(chunk_reward[segment].sum().item())),
+                    "success": bool(chunk_success[segment].any().item()),
+                    "task_id": task_id,
+                }
+                if eval_episode_id is not None:
+                    record["eval_episode_id"] = eval_episode_id
+                records.append(record)
 
                 segment_prefix_length = 0
                 segment_prefix_return = 0.0
@@ -603,6 +628,7 @@ class TrainCluster:
         success_steps: torch.Tensor,
         *,
         task_id_steps: np.ndarray,
+        eval_episode_id_steps: np.ndarray | None,
         chunk_steps: int,
         remaining: int | None,
     ) -> list[dict[str, float | int | bool]]:
@@ -618,17 +644,19 @@ class TrainCluster:
             done_idx = int(done_indices[0]) if done_indices else int(done_row.numel()) - 1
             segment = slice(0, done_idx + 1)
             task_id = int(task_id_steps[batch_idx, 0])
+            eval_episode_id = int(eval_episode_id_steps[batch_idx, 0]) if eval_episode_id_steps is not None else None
 
             trajectory_return = float(reward_row[segment].sum().item())
-            records.append(
-                {
-                    "length": int(done_idx + 1),
-                    "chunk_length": int(done_idx // chunk_steps + 1),
-                    "return": trajectory_return,
-                    "success": bool(success_row[segment].any().item()),
-                    "task_id": task_id,
-                }
-            )
+            record = {
+                "length": int(done_idx + 1),
+                "chunk_length": int(done_idx // chunk_steps + 1),
+                "return": trajectory_return,
+                "success": bool(success_row[segment].any().item()),
+                "task_id": task_id,
+            }
+            if eval_episode_id is not None:
+                record["eval_episode_id"] = eval_episode_id
+            records.append(record)
         return records
 
     @staticmethod

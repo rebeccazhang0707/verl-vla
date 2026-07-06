@@ -26,7 +26,7 @@ from verl import DataProto
 from verl_vla.trainer.train_cluster.cluster import TrainCluster
 
 
-def _make_output(done, *, truncated=None, success=None, reward=None, task_id=1) -> DataProto:
+def _make_output(done, *, truncated=None, success=None, reward=None, task_id=1, eval_episode_id=None) -> DataProto:
     """Build the minimum rollout output consumed by _collect_trajectory_records.
 
     `done` maps to next.terminated. `truncated` is optional because production
@@ -52,6 +52,9 @@ def _make_output(done, *, truncated=None, success=None, reward=None, task_id=1) 
         reward_tensor = torch.as_tensor(reward, dtype=torch.float32)
 
     task_ids = np.full(terminated_tensor.shape[:2], task_id, dtype=np.int64)
+    non_tensors = {"obs.task_id": task_ids}
+    if eval_episode_id is not None:
+        non_tensors["obs.eval_episode_id"] = np.asarray(eval_episode_id, dtype=np.int64)
     return DataProto.from_dict(
         tensors={
             "next.terminated": terminated_tensor,
@@ -59,7 +62,7 @@ def _make_output(done, *, truncated=None, success=None, reward=None, task_id=1) 
             "next.success": success_tensor,
             "next.reward": reward_tensor,
         },
-        non_tensors={"obs.task_id": task_ids},
+        non_tensors=non_tensors,
     )
 
 
@@ -164,6 +167,22 @@ class TestAutoResetTrajectoryRecords:
 
         assert records == [{"length": 2, "chunk_length": 1, "return": 1.0, "success": True, "task_id": 1}]
 
+    def test_records_eval_episode_id_from_done_chunk(self):
+        """Completed auto-reset records keep the benchmark id from their start chunk."""
+
+        records = TrainCluster._collect_trajectory_records(
+            _make_output(
+                [[[0, 1], [0, 1]]],
+                success=[[[0, 1], [0, 1]]],
+                reward=[[[0, 1], [0, 1]]],
+                eval_episode_id=[[10, 11]],
+            ),
+            auto_reset=True,
+            carry_state=_empty_carry_state(),
+        )
+
+        assert [record["eval_episode_id"] for record in records] == [10, 11]
+
 
 class TestNonAutoResetTrajectoryRecords:
     def test_uses_first_done_in_each_row(self):
@@ -219,3 +238,19 @@ class TestNonAutoResetTrajectoryRecords:
         )
 
         assert records == [{"length": 6, "chunk_length": 2, "return": 6.0, "success": True, "task_id": 9}]
+
+    def test_records_eval_episode_id_from_first_chunk(self):
+        """Non-auto-reset records keep the benchmark id from the trajectory start chunk."""
+
+        records = TrainCluster._collect_trajectory_records(
+            _make_output(
+                [[[0, 0, 0, 0], [0, 1, 1, 1]]],
+                success=[[[0, 0, 0, 0], [0, 1, 1, 1]]],
+                reward=[[[1, 1, 1, 1], [1, 1, 1, 1]]],
+                eval_episode_id=[[20, 21]],
+            ),
+            auto_reset=False,
+            carry_state=_empty_carry_state(),
+        )
+
+        assert records[0]["eval_episode_id"] == 20
