@@ -55,7 +55,7 @@ td3:
   # Whether to switch SAC actor updates to TD3+BC style updates.
   enabled: false
 
-  # TD3+BC alpha coefficient used in lambda = alpha / mean(|Q|).
+  # Direct BC loss weight added to the actor objective when TD3+BC is enabled.
   bc_alpha: 2.5
 
 # Optional Conservative Q-Learning critic regularization.
@@ -95,6 +95,9 @@ critic:
   # Whether to skip critic updates on steps that also update actor.
   skip_update_when_actor_update: false
 
+  # Whether critic targets use a newly sampled actor action at s1. If false, replay t1.action is used.
+  resample_target_action: true
+
   # Critic optimizer learning rate.
   lr: 1e-4
 
@@ -133,7 +136,7 @@ replay:
   save_interval: 500
 
   # Capacity of each rank-local online replay pool.
-  online_single_size: 10
+  online_single_size: 1000
 
   # Capacity of each rank-local offline RLPD replay pool.
   offline_single_size: 1000

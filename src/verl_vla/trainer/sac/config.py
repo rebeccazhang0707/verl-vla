@@ -30,8 +30,7 @@ class SACTrainerConfig(BaseConfig):
     project_name: str = "vla-sac"
     experiment_name: str = "libero-preview"
     logger: list[str] = field(default_factory=lambda: ["console"])
-    total_epochs: int = 30
-    total_training_steps: int | None = None
+    total_training_steps: int = 600
     rollout_interval: int = 20
     rollout_times: int = 1
     warm_rollout_steps: int = 22
@@ -46,11 +45,11 @@ class SACTrainerConfig(BaseConfig):
     rlpd: RLPDConfig = field(default_factory=RLPDConfig)
 
     def __post_init__(self):
-        if self.total_epochs <= 0:
-            raise ValueError(f"total_epochs must be positive, got {self.total_epochs}")
+        if self.total_training_steps <= 0:
+            raise ValueError(f"total_training_steps must be positive, got {self.total_training_steps}")
         if self.rollout_interval <= 0:
             raise ValueError(f"rollout_interval must be positive, got {self.rollout_interval}")
-        if self.rollout_times <= 0:
-            raise ValueError(f"rollout_times must be positive, got {self.rollout_times}")
+        if self.rollout_times < 0:
+            raise ValueError(f"rollout_times must be non-negative, got {self.rollout_times}")
         if self.warm_rollout_steps < 0:
             raise ValueError(f"warm_rollout_steps must be non-negative, got {self.warm_rollout_steps}")

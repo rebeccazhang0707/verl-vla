@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 from pprint import pprint
 from typing import Any
 
@@ -136,9 +137,7 @@ class RobRaySACTrainer:
         profiler_config = OmegaConf.select(self.config, "global_profiler", default=None)
         critic_only_steps_after_rollout = int(actor_config.critic.only_steps_after_rollout)
 
-        self.total_training_steps = self.trainer_config.total_epochs * rollout_interval
-        if self.trainer_config.total_training_steps is not None:
-            self.total_training_steps = self.trainer_config.total_training_steps
+        self.total_training_steps = int(self.trainer_config.total_training_steps)
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
 
         self.global_steps += 1
@@ -153,8 +152,9 @@ class RobRaySACTrainer:
         )
         next_step_profile = False
 
-        for epoch in range(self.trainer_config.total_epochs):
-            print(f"Starting epoch {epoch}")
+        total_rollout_windows = math.ceil(self.total_training_steps / rollout_interval)
+        for rollout_window in range(total_rollout_windows):
+            print(f"Starting rollout window {rollout_window}")
             for training_step in range(rollout_interval):
                 metrics = {}
                 timing_raw = {}
@@ -272,7 +272,7 @@ class RobRaySACTrainer:
                 metrics.update(
                     {
                         "training/global_step": self.global_steps,
-                        "training/epoch": epoch,
+                        "training/rollout_window": rollout_window,
                     }
                 )
                 metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})

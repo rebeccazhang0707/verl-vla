@@ -75,7 +75,6 @@ class SACTrainingWorker(TrainingWorker):
         self.offline_replay_pool = SACReplayPool(
             single_pool_capacity=self.actor_config.replay.offline_single_size,
             sample_device=get_device_name(),
-            positive_only=True,
         )
 
         self.critic_optimizer = torch.optim.Adam(
@@ -153,12 +152,15 @@ class SACTrainingWorker(TrainingWorker):
 
         offline_batch = None
         offline_sample_info = {
+            "actual_positive_sample_ratio": 0.0,
+            "positive_size": self.offline_replay_pool.positive_size,
+            "negative_size": self.offline_replay_pool.negative_size,
             "task_count": len(self.offline_replay_pool.task_pools),
         }
         if self.offline_replay_sample_batch_size > 0 and len(self.offline_replay_pool) > 0:
             offline_batch, offline_sample_info = self.offline_replay_pool.sample_batch(
                 self.offline_replay_sample_batch_size,
-                positive_sample_ratio=1.0,
+                positive_sample_ratio=positive_sample_ratio,
                 return_sample_info=True,
             )
 
@@ -174,14 +176,22 @@ class SACTrainingWorker(TrainingWorker):
         offline_sample_count = len(offline_batch) if offline_batch is not None else 0
 
         sample_info = {
-            "online_actual_positive_sample_ratio": online_sample_info["actual_positive_sample_ratio"],
-            "online_sample_count": online_sample_count,
-            "offline_sample_count": offline_sample_count,
-            "online_positive_size": online_sample_info["positive_size"],
-            "online_negative_size": online_sample_info["negative_size"],
-            "online_task_count": online_sample_info["task_count"],
-            "offline_task_count": offline_sample_info["task_count"],
-            "offline_size": len(self.offline_replay_pool),
+            "online": {
+                "actual_positive_sample_ratio": online_sample_info["actual_positive_sample_ratio"],
+                "sample_count": online_sample_count,
+                "positive_size": online_sample_info["positive_size"],
+                "negative_size": online_sample_info["negative_size"],
+                "task_count": online_sample_info["task_count"],
+                "pool_size": len(self.replay_pool),
+            },
+            "offline": {
+                "actual_positive_sample_ratio": offline_sample_info["actual_positive_sample_ratio"],
+                "sample_count": offline_sample_count,
+                "positive_size": offline_sample_info["positive_size"],
+                "negative_size": offline_sample_info["negative_size"],
+                "task_count": offline_sample_info["task_count"],
+                "pool_size": len(self.offline_replay_pool),
+            },
         }
         return [batch for batch in (online_batch, offline_batch) if batch is not None], sample_info
 
@@ -434,8 +444,10 @@ class SACTrainingWorker(TrainingWorker):
         if add_to_offline_replay_only:
             self._add_data_to_replay_pool(self.offline_replay_pool, data)
             return {
-                "sac/offline_replay_pool_size": len(self.offline_replay_pool),
-                "sac/offline_replay_task_count": len(self.offline_replay_pool.task_pools),
+                "sac/replay/offline/pool_size": len(self.offline_replay_pool),
+                "sac/replay/offline/positive_size": self.offline_replay_pool.positive_size,
+                "sac/replay/offline/negative_size": self.offline_replay_pool.negative_size,
+                "sac/replay/offline/task_count": len(self.offline_replay_pool.task_pools),
                 "sac/offline_replay_prefill_only": 1.0,
             }
 
@@ -473,7 +485,7 @@ class SACTrainingWorker(TrainingWorker):
                 logger.info(f"[{batch_idx + 1}/{len(critic_micro_batches)}] critic micro batch ")
                 micro_batch = micro_batch.to(get_device_id())
                 raw_critic_loss, q_values_0, q_values_1, critic_loss_metrics = self._forward_critic(
-                    micro_batch, resample=False
+                    micro_batch, resample=bool(self.actor_config.critic.resample_target_action)
                 )
                 (raw_critic_loss / grad_accum_steps).backward()
                 critic_loss_list.append(float(raw_critic_loss.detach().item()))
@@ -579,16 +591,40 @@ class SACTrainingWorker(TrainingWorker):
         metrics = {
             "data/reward_mean": valid_mean(critic_rewards, critic_valids).detach().item(),
             "data/valid_ratio": critic_valids.float().mean().item(),
-            "sac/critic_online_replay_sampled_ratio": critic_replay_sample_info["online_actual_positive_sample_ratio"],
-            "sac/critic_online_sample_count": critic_replay_sample_info["online_sample_count"],
-            "sac/critic_offline_sample_count": critic_replay_sample_info["offline_sample_count"],
-            "sac/online_replay_sample_batch_size": self.online_replay_sample_batch_size,
-            "sac/offline_replay_sample_batch_size": self.offline_replay_sample_batch_size,
-            "sac/actor_online_replay_sampled_ratio": actor_replay_sample_info["online_actual_positive_sample_ratio"]
+            "sac/replay/online/sample_batch_size": self.online_replay_sample_batch_size,
+            "sac/replay/online/pool_size": critic_replay_sample_info["online"]["pool_size"],
+            "sac/replay/online/positive_size": critic_replay_sample_info["online"]["positive_size"],
+            "sac/replay/online/negative_size": critic_replay_sample_info["online"]["negative_size"],
+            "sac/replay/online/task_count": critic_replay_sample_info["online"]["task_count"],
+            "sac/replay/online/critic_sample_count": critic_replay_sample_info["online"]["sample_count"],
+            "sac/replay/online/critic_actual_positive_sample_ratio": critic_replay_sample_info["online"][
+                "actual_positive_sample_ratio"
+            ],
+            "sac/replay/offline/sample_batch_size": self.offline_replay_sample_batch_size,
+            "sac/replay/offline/pool_size": critic_replay_sample_info["offline"]["pool_size"],
+            "sac/replay/offline/positive_size": critic_replay_sample_info["offline"]["positive_size"],
+            "sac/replay/offline/negative_size": critic_replay_sample_info["offline"]["negative_size"],
+            "sac/replay/offline/task_count": critic_replay_sample_info["offline"]["task_count"],
+            "sac/replay/offline/critic_sample_count": critic_replay_sample_info["offline"]["sample_count"],
+            "sac/replay/offline/critic_actual_positive_sample_ratio": critic_replay_sample_info["offline"][
+                "actual_positive_sample_ratio"
+            ],
+            "sac/replay/online/actor_actual_positive_sample_ratio": actor_replay_sample_info["online"][
+                "actual_positive_sample_ratio"
+            ]
             if update_actor
             else 0.0,
-            "sac/actor_online_sample_count": actor_replay_sample_info["online_sample_count"] if update_actor else 0,
-            "sac/actor_offline_sample_count": actor_replay_sample_info["offline_sample_count"] if update_actor else 0,
+            "sac/replay/online/actor_sample_count": actor_replay_sample_info["online"]["sample_count"]
+            if update_actor
+            else 0,
+            "sac/replay/offline/actor_actual_positive_sample_ratio": actor_replay_sample_info["offline"][
+                "actual_positive_sample_ratio"
+            ]
+            if update_actor
+            else 0.0,
+            "sac/replay/offline/actor_sample_count": actor_replay_sample_info["offline"]["sample_count"]
+            if update_actor
+            else 0,
             "sac/td3_enabled": float(self.td3_enabled),
             "sac/critic_only_update": float(critic_only_update),
             "sac/skip_critic_update_when_actor_update": float(self.skip_critic_update_when_actor_update),
@@ -603,16 +639,10 @@ class SACTrainingWorker(TrainingWorker):
                 if self.cql_enabled
                 else {}
             ),
-            "sac/replay_pool_positive_size": critic_replay_sample_info["online_positive_size"],
-            "sac/replay_pool_negative_size": critic_replay_sample_info["online_negative_size"],
-            "sac/replay_task_count": critic_replay_sample_info["online_task_count"],
-            "sac/offline_replay_task_count": critic_replay_sample_info["offline_task_count"],
             "sac/alpha": self._get_alpha().detach().item(),
             "sac/actor_ema_enabled": float(self.actor_ema_enabled),
             "sac/actor_ema_decay": self.actor_ema_decay,
             "sac/critic_target_tau": critic_target_tau,
-            "sac/replay_pool_size": len(self.replay_pool),
-            "sac/offline_replay_pool_size": len(self.offline_replay_pool),
             "critic/loss": sum(critic_loss_list) / len(critic_loss_list) if critic_loss_list else 0.0,
             "critic/lr": self.critic_optimizer.param_groups[0]["lr"],
             "critic/grad_norm": critic_grad_norm_post_clip,

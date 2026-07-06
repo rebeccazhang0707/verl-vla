@@ -96,6 +96,7 @@ class SACCriticConfig(BaseConfig):
     grad_clip: float | None = None
     warmup_steps: int = 0
     only_steps_after_rollout: int = 0
+    resample_target_action: bool = True
 
     def __post_init__(self):
         if self.gamma <= 0:
