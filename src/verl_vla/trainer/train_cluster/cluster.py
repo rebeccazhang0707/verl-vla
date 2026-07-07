@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, cast
@@ -21,7 +22,6 @@ from typing import Any, Callable, cast
 import numpy as np
 import ray
 import torch
-from ray.util.placement_group import remove_placement_group
 from verl import DataProto
 from verl.checkpoint_engine import CheckpointEngineManager
 from verl.single_controller.ray import RayClassWithInitArgs, RayWorkerGroup
@@ -32,6 +32,7 @@ from verl_vla.env_loop.env_loop import EnvLoop
 from verl_vla.trainer.train_cluster.checkpoint import CheckpointHelper
 from verl_vla.trainer.train_cluster.config import EnvLoopTrainClusterConfig, ResourceConfig, SFTTrainClusterConfig
 from verl_vla.trainer.train_cluster.resource_pool import VLAResourcePoolManager
+from verl_vla.utils.ray_utils import remove_placement_group_with_timeout
 from verl_vla.utils.recorder import merge_lerobot_datasets
 from verl_vla.utils.recorder.lerobot import REQUIRED_LEROBOT_META_FILES
 from verl_vla.workers.engine import VLAActorRolloutRefWorker, VLAActorWorker, VLARolloutWorker
@@ -49,6 +50,8 @@ ROLE_TO_WORKER_NAME = {
     Role.ActorRollout: "actor_rollout",
     Role.Env: "env",
 }
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -154,9 +157,9 @@ class TrainCluster:
             for resource_pool in self.resource_pool_manager.resource_pool_dict.values():
                 for pg in getattr(resource_pool, "pgs", None) or []:
                     try:
-                        remove_placement_group(pg)
+                        remove_placement_group_with_timeout(pg)
                     except Exception:
-                        pass
+                        logger.warning("Failed to remove Ray placement group during shutdown.", exc_info=True)
                 resource_pool.pgs = None
 
         self.worker_groups = {}
