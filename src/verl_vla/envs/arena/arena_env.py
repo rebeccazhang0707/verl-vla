@@ -158,8 +158,13 @@ class IsaacLabArenaEnv(BaseEnv):
     def _success_reward_thresh(self) -> float:
         return 1.0 - 1e-6 if self.subtask_reward else 0.0
 
-    def _extract_successes(self, env_ids) -> np.ndarray:
-        state = self._raw_env.extras["subtask_success_state"]
+    def _extract_successes(self, env_ids) -> np.ndarray | None:
+        # Only sequential Arena tasks populate a per-subtask latched state machine
+        # in extras. Non-sequential/composite tasks (e.g. plain pick-and-place)
+        # don't, so signal the caller to fall back to reward-threshold success.
+        state = self._raw_env.extras.get("subtask_success_state")
+        if state is None:
+            return None
         successes = []
         for env_id in np.asarray(env_ids, dtype=np.int64).reshape(-1):
             env_state = state[int(env_id)]
@@ -205,8 +210,9 @@ class IsaacLabArenaEnv(BaseEnv):
         del _info
         step_reward = self._to_numpy(reward).astype(np.float32)
         timeouts = self._elapsed_steps[env_ids] >= self.max_episode_steps
-        terminations = step_reward > self._success_reward_thresh
         successes = self._extract_successes(env_ids)
+        if successes is None:
+            successes = step_reward > self._success_reward_thresh
         terminations = successes
 
         obs = self._make_obs(raw_obs, env_ids=env_ids)

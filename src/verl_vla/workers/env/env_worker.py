@@ -163,9 +163,15 @@ class EnvWorker(Worker, DistProfilerExtension):
 
     def _simulators(self, mode: str):
         if mode == "eval":
-            if not self.eval_simulator_list:
-                raise RuntimeError("Eval simulator is not initialized. Add 'eval' to env.env_worker.modes.")
-            return self.eval_simulator_list
+            if self.eval_simulator_list:
+                return self.eval_simulator_list
+            # Arena / Isaac / LeRobot run a single simulator instance that serves
+            # both train and eval (eval is selected via the reset_eval option at
+            # reset time), so reuse the shared simulator list instead of a
+            # dedicated eval one.
+            if self.simulator_type in ("arena", "isaac", "lerobot") and self.simulator_list:
+                return self.simulator_list
+            raise RuntimeError("Eval simulator is not initialized. Add 'eval' to env.env_worker.modes.")
         return self.simulator_list
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
