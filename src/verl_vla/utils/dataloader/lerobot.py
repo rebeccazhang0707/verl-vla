@@ -24,6 +24,26 @@ from .config import LeRobotDataLoaderConfig
 logger = logging.getLogger(__name__)
 
 
+def resolve_multiprocessing_context(data_config: LeRobotDataLoaderConfig, num_workers: int) -> str | None:
+    if num_workers <= 0:
+        return None
+    if data_config.multiprocessing_context is not None:
+        return data_config.multiprocessing_context
+
+    try:
+        import ray
+    except ImportError:
+        return None
+
+    if ray.is_initialized():
+        # Ray actor handles created before DataLoader construction can be
+        # inherited by forked workers, and we observed workers hang while
+        # cleaning up those inherited handles. forkserver keeps multiprocessing
+        # workers isolated from the trainer's live Ray runtime state.
+        return "forkserver"
+    return None
+
+
 def build_lerobot_dataset(
     data_config: LeRobotDataLoaderConfig,
     *,
@@ -96,6 +116,7 @@ def build_lerobot_sft_dataloader(
         sampler = SequentialSampler(data_source=dataset)
 
     num_workers = int(data_config.num_workers)
+    multiprocessing_context = resolve_multiprocessing_context(data_config, num_workers)
     return StatefulDataLoader(
         dataset=dataset,
         batch_size=batch_size,
@@ -104,6 +125,7 @@ def build_lerobot_sft_dataloader(
         sampler=sampler,
         pin_memory=bool(data_config.pin_memory),
         persistent_workers=bool(data_config.persistent_workers) if num_workers > 0 else False,
+        multiprocessing_context=multiprocessing_context,
         prefetch_factor=int(data_config.prefetch_factor) if num_workers > 0 else None,
     )
 

@@ -33,6 +33,7 @@ class LeRobotDataLoaderConfig(BaseConfig):
     persistent_workers: bool = True
     prefetch_factor: int = 4
     pin_memory: bool = True
+    multiprocessing_context: str | None = None
     shuffle: bool = True
     drop_last: bool = True
     seed: int | None = 42
@@ -46,5 +47,10 @@ class LeRobotDataLoaderConfig(BaseConfig):
             raise ValueError(f"num_workers must be non-negative, got {self.num_workers}")
         if self.prefetch_factor <= 0:
             raise ValueError(f"prefetch_factor must be positive, got {self.prefetch_factor}")
+        if self.multiprocessing_context not in {None, "fork", "spawn", "forkserver"}:
+            raise ValueError(
+                "multiprocessing_context must be one of None, 'fork', 'spawn', or 'forkserver', "
+                f"got {self.multiprocessing_context!r}"
+            )
         if self.action_delta_steps < 0:
             raise ValueError(f"action_delta_steps must be non-negative, got {self.action_delta_steps}")
