@@ -39,6 +39,7 @@ class XRControllerDevice(DeviceBase):
         with self._lock:
             self._latest_frame.clear()
             self._events.clear()
+            self._clear_record_control()
             self._frame_count = 0
 
     @override
@@ -56,8 +57,16 @@ class XRControllerDevice(DeviceBase):
                 "device": self.name,
                 "frame_count": self._frame_count,
                 "timestamp": self._latest_frame.get("timestamp"),
+                "key_bindings": self.key_bindings(),
             }
 
     def latest_frame(self) -> dict[str, Any]:
         with self._lock:
             return dict(self._latest_frame)
+
+    def key_bindings(self) -> dict[str, str]:
+        return {
+            "R": "manual reward",
+            "Backspace": "restart recording episode",
+            "Enter": "stop recording episode",
+        }

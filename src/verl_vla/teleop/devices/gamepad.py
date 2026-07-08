@@ -44,6 +44,7 @@ class GamepadDevice(DeviceBase):
             self._button_states.clear()
             self._axis_values.clear()
             self._events.clear()
+            self._clear_record_control()
             self._connected = False
             self._device_id = ""
 
@@ -108,6 +109,9 @@ class GamepadDevice(DeviceBase):
             "D-Pad Up/Down": "+pitch / -pitch",
             "RT": "intervention (hold)",
             "X": "toggle gripper",
+            "R": "manual reward",
+            "Backspace": "restart recording episode",
+            "Enter": "stop recording episode",
         }
 
     def is_active(self) -> bool:

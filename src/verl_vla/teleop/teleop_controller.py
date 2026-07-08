@@ -104,19 +104,33 @@ class TeleopController:
             for device_type, input_device in self.input_devices.items()
         )
 
-    def apply_action(self, action: Any) -> Any:
+    def apply_action(self, action: Any) -> tuple[Any, bool, bool, bool]:
         overridden_action = action
         for device_type, input_device in self.input_devices.items():
             strategy = self.strategies[device_type]
             if strategy.is_intervening(input_device):
                 overridden_action = strategy.apply_action(overridden_action, input_device)
-        return overridden_action
+        manual_reward, restart_episode, stop_episode = self._pop_record_control()
+        return overridden_action, manual_reward, restart_episode, stop_episode
 
-    def get_action(self) -> Any:
+    def get_action(self) -> tuple[Any, bool, bool, bool]:
         if not self.input_devices:
             raise RuntimeError("No teleop input devices are initialized.")
         device_type = self.device if self.device in self.input_devices else next(iter(self.input_devices))
-        return self.strategies[device_type].get_action(self.input_devices[device_type])
+        action = self.strategies[device_type].get_action(self.input_devices[device_type])
+        manual_reward, restart_episode, stop_episode = self._pop_record_control()
+        return action, manual_reward, restart_episode, stop_episode
+
+    def _pop_record_control(self) -> tuple[bool, bool, bool]:
+        manual_reward = False
+        restart_episode = False
+        stop_episode = False
+        for input_device in self.input_devices.values():
+            control = input_device.pop_record_control()
+            manual_reward = manual_reward or bool(control.get("manual_reward", False))
+            restart_episode = restart_episode or bool(control.get("restart_episode", False))
+            stop_episode = stop_episode or bool(control.get("stop_episode", False))
+        return manual_reward, restart_episode, stop_episode
 
     def _get_teleop_info(self) -> dict[str, Any]:
         device_infos = []

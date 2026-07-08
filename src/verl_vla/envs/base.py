@@ -161,12 +161,20 @@ class BaseEnv(gym.Env):
         self.reset(options={"env_idx": [0]})
         done = False
         while not done:
-            action = np.asarray(self.teleops[0].get_action(), dtype=np.float32).reshape(1, -1)
+            action, manual_reward, restart_episode, stop_episode = self.teleops[0].get_action()
+            if restart_episode:
+                self.reset_recorder_envs([0])
+                self.reset(options={"env_idx": [0]})
+                continue
+
+            action = np.asarray(action, dtype=np.float32).reshape(1, -1)
             step_result = self.mask_step(
                 action,
                 np.ones(self.num_envs, dtype=bool),
                 is_intervention=np.ones(self.num_envs, dtype=bool),
                 critic_value=np.zeros(self.num_envs, dtype=np.float32),
+                manual_reward=np.full(self.num_envs, manual_reward, dtype=bool),
+                force_truncated=np.full(self.num_envs, stop_episode, dtype=bool),
             )
             done = bool(
                 np.asarray(step_result["next.terminated"], dtype=bool).any()
@@ -244,11 +252,41 @@ class BaseEnv(gym.Env):
             "reset_eval": reset_eval,
         }
 
-    def mask_step(self, action, execute_mask, is_intervention, critic_value):
+    def mask_step(self, action, execute_mask, is_intervention, critic_value, manual_reward=None, force_truncated=None):
+        """Step selected envs and apply optional manual record overrides.
+
+        Args:
+            action: Shape ``[num_envs, action_dim]``, indexed by global env id.
+            execute_mask: Shape ``[num_envs]``, indexed by global env id. Only
+                true envs are stepped; their ids become ``env_ids``.
+            is_intervention: Shape ``[num_envs]``, indexed by global env id and
+                recorded as intervention metadata.
+            critic_value: Shape ``[num_envs]``, indexed by global env id.
+            manual_reward: Optional shape ``[num_envs]``, indexed by global env
+                id. Values > 0 mark that env's local step result as successful
+                termination and set ``next.reward`` to the manual value.
+            force_truncated: Optional shape ``[num_envs]``, indexed by global
+                env id. True values mark that env's local step result as failed
+                truncation. Applied after ``manual_reward`` if both are set for
+                the same env.
+
+        Notes:
+            ``result`` returned by ``env_step`` is indexed by local result id:
+            ``local_id`` position ``i`` corresponds to global env id
+            ``env_ids[i]``.
+        """
         is_intervention = np.asarray(is_intervention, dtype=bool)
         env_ids = np.flatnonzero(execute_mask)
         action = action[env_ids]
+
         result = self.env_step(action, env_ids=env_ids)
+        result = self._apply_manual_step_overrides(
+            result,
+            env_ids=env_ids,
+            manual_reward=manual_reward,
+            force_truncated=force_truncated,
+        )
+
         critic_value = critic_value[env_ids]
         self.publish_to_teleop(result, env_ids=env_ids, critic_value=critic_value)
         self.record_step_result(
@@ -259,6 +297,30 @@ class BaseEnv(gym.Env):
             critic_value=critic_value,
         )
         self._update_latest_obs(env_ids, result)
+        return result
+
+    def _apply_manual_step_overrides(self, result, *, env_ids, manual_reward=None, force_truncated=None):
+        env_ids = np.asarray(env_ids, dtype=np.int64).reshape(-1)
+
+        if manual_reward is not None:
+            manual_reward = np.asarray(manual_reward, dtype=np.float32).reshape(-1)
+            for local_id, env_id in enumerate(env_ids):
+                reward = float(manual_reward[env_id])
+                if reward > 0.0:
+                    result["next.reward"][local_id] = reward
+                    result["next.success"][local_id] = True
+                    result["next.terminated"][local_id] = True
+                    result["next.truncated"][local_id] = False
+
+        if force_truncated is not None:
+            force_truncated = np.asarray(force_truncated, dtype=bool).reshape(-1)
+            for local_id, env_id in enumerate(env_ids):
+                if force_truncated[env_id]:
+                    result["next.reward"][local_id] = 0.0
+                    result["next.success"][local_id] = False
+                    result["next.terminated"][local_id] = False
+                    result["next.truncated"][local_id] = True
+
         return result
 
     def step_with_teleop_and_recording(self, action, critic_value=None):
@@ -360,7 +422,7 @@ class BaseEnv(gym.Env):
         for env_id, teleop in enumerate(self.teleops):
             if teleop.is_intervening():
                 intervention_mask[env_id] = True
-                action[env_id] = teleop.apply_action(action[env_id])
+                action[env_id], _, _, _ = teleop.apply_action(action[env_id])
         return action, intervention_mask
 
     def reset_teleops(self) -> None:
