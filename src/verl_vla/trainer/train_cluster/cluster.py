@@ -80,6 +80,23 @@ def ray_rollout_once(
 
 
 class TrainCluster:
+    """Ray-backed worker cluster used by trainer entrypoints.
+
+    Supported cluster configs:
+        SFTTrainClusterConfig: actor-only cluster for supervised fine-tuning.
+        EnvLoopTrainClusterConfig: env + rollout/model cluster for RL rollout,
+            policy updates, evaluation, and optional separate rollout workers.
+        EnvTrainClusterConfig: env-only cluster for teleop/data recording.
+
+    Public API:
+        start() / shutdown(): create and tear down Ray workers/resources.
+        rollout(), train(), update_weights(), eval(): env-loop RL operations.
+        record(): env-only teleop recording.
+        load_checkpoint() / save_checkpoint(): actor checkpoint lifecycle.
+        start_profiling(), stop_profiling(), dump_memory_snapshot(): diagnostics.
+        actor_worker_group and train_world_size expose actor worker metadata.
+    """
+
     def __init__(self, config: SFTTrainClusterConfig | EnvLoopTrainClusterConfig | EnvTrainClusterConfig):
         self.config = config
         if isinstance(config, SFTTrainClusterConfig):

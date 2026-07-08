@@ -12,17 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# VLA record config structure:
+# VLA DAgger config structure:
 #
-# main_record
-# |-- cluster: env-only TrainCluster settings.
-# |-- num_episodes: number of episodes to record.
+# main_dagger
+# |-- cluster: env-loop TrainCluster with rollout and env workers.
+# |-- max_episodes: number of completed episodes to collect.
 # `-- ray_kwargs: Ray init kwargs used before the cluster is constructed.
 
 defaults:
 
-  # Attach the env-only TrainCluster config under `cluster`.
-  - /cluster@cluster: env_cluster
+  # Attach the env + rollout TrainCluster config under `cluster`.
+  - /cluster@cluster: env_rollout_cluster
 
   # Attach Ray initialization config under `ray_kwargs`.
   - /ray@ray_kwargs: default
@@ -36,9 +36,8 @@ hydra:
     - pkg://verl_vla.trainer.config
 
 
-# Number of episodes to record before exiting.
-num_episodes: 1
-
+# Number of completed episodes to collect before exiting.
+max_episodes: 1
 
 
 cluster:
@@ -48,8 +47,13 @@ cluster:
       gpus_per_node: 1
       workers_per_node: 1
   env:
+    env_loop:
+      pipeline_stage_num: 1
+      max_interactions: 16
     env_worker:
+      auto_reset: True
       confirm_before_record: True
+      num_envs: 1
       teleop:
         enable: True
         devices:
@@ -60,7 +64,7 @@ cluster:
           - lerobot
           - video
         lerobot:
-          root: outputs/record/lerobot
-          repo_id: local/verl_vla_libero_record
+          root: outputs/dagger/lerobot
+          repo_id: local/verl_vla_libero_dagger
         video:
-          root: outputs/record/videos
+          root: outputs/dagger/videos
