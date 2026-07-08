@@ -404,7 +404,7 @@ def _compute_recap_annotations(
     advantage_smoothing_decay: float,
 ) -> dict[int, dict[str, np.float32 | np.int64]]:
     records = _load_recap_records(dataset_root=dataset_root, value_lookup=value_lookup)
-    advantages = _compute_n_step_return_advantages(records, n_step=n_step)
+    advantages = _compute_n_step_advantages(records, n_step=n_step)
     indicator_scores = _compute_indicator_scores(
         records=records,
         advantages=advantages,
@@ -469,32 +469,37 @@ def _load_recap_records(
     return records
 
 
-def _compute_n_step_return_advantages(records: list[dict[str, object]], *, n_step: int) -> np.ndarray:
+def _compute_n_step_advantages(records: list[dict[str, object]], *, n_step: int) -> np.ndarray:
     advantages = np.zeros(len(records), dtype=np.float32)
     for i, record in enumerate(records):
-        future_record = _n_step_future_or_episode_tail(records=records, start_index=i, n_step=n_step)
-        advantages[i] = np.float32(float(future_record["return"]) - float(record["return"]))
+        reward_sum = 0.0
+        for offset in range(n_step):
+            current_record = _n_step_record_or_episode_tail(records=records, start_index=i, offset=offset)
+            next_record = _n_step_record_or_episode_tail(records=records, start_index=i, offset=offset + 1)
+            reward_sum += float(current_record["return"]) - float(next_record["return"])
+
+        bootstrap_record = _n_step_record_or_episode_tail(records=records, start_index=i, offset=n_step)
+        advantages[i] = np.float32(reward_sum + float(bootstrap_record["value"]) - float(record["value"]))
     return advantages
 
 
-def _n_step_future_or_episode_tail(
+def _n_step_record_or_episode_tail(
     *,
     records: list[dict[str, object]],
     start_index: int,
-    n_step: int,
+    offset: int,
 ) -> dict[str, object]:
-    # recap.return is larger when the trajectory is closer to a better ending.
-    # If n_step runs past the terminal frame, clamp to the last contiguous frame
-    # instead of padding with 0, which would make failed tails look too positive.
+    # When n-step reaches past the episode tail, reuse the last contiguous frame
+    # for both recap.return and recap.value instead of padding either side with 0.
     current = records[start_index]
     future_index = start_index
-    for offset in range(1, n_step + 1):
-        candidate_index = start_index + offset
+    for step in range(1, offset + 1):
+        candidate_index = start_index + step
         if candidate_index >= len(records):
             break
         candidate = records[candidate_index]
         same_episode = candidate["episode_index"] == current["episode_index"]
-        contiguous = int(candidate["frame_index"]) == int(current["frame_index"]) + offset
+        contiguous = int(candidate["frame_index"]) == int(current["frame_index"]) + step
         if not same_episode or not contiguous:
             break
         future_index = candidate_index
