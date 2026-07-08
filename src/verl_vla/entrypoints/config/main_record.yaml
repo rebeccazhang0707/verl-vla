@@ -49,6 +49,7 @@ cluster:
       workers_per_node: 1
   env:
     env_worker:
+      confirm_before_record: True
       teleop:
         enable: True
         devices:

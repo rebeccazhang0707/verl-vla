@@ -470,7 +470,7 @@ limitations under the License.
         renderConsole(input.console);
       }
       const devices = input.devices || [];
-      const {console: _console, ...summaryInput} = input;
+      const {console: _console, record_control: _recordControl, ...summaryInput} = input;
       let activeDevice = input.active_device || {};
       for (const device of devices) {
         if (!activeDevice.device && isDeviceIntervening(device)) {

@@ -52,6 +52,7 @@ class TeleopController:
         self._teleop_server: TeleopServer | None = None
         self.input_devices: dict[str, DeviceBase] = {}
         self.strategies: dict[str, InterventionStrategyBase] = {}
+        self._record_confirmation_required = False
         for device_type in self.teleop_cfg.devices:
             input_device = self._create_input_device(device_type)
             self.input_devices[input_device.name] = input_device
@@ -113,13 +114,26 @@ class TeleopController:
         manual_reward, restart_episode, stop_episode = self._pop_record_control()
         return overridden_action, manual_reward, restart_episode, stop_episode
 
-    def get_action(self) -> tuple[Any, bool, bool, bool]:
+    def get_action(self, *, wait_for_confirm: bool = False) -> tuple[Any, bool, bool, bool]:
+        if wait_for_confirm and not self._record_confirmation_required:
+            self._record_confirmation_required = True
+            self._write_console(f"[teleop] env {self.env_id}: press Enter to start recording.")
+        elif not wait_for_confirm:
+            self._record_confirmation_required = False
+
         if not self.input_devices:
             raise RuntimeError("No teleop input devices are initialized.")
         device_type = self.device if self.device in self.input_devices else next(iter(self.input_devices))
         action = self.strategies[device_type].get_action(self.input_devices[device_type])
         manual_reward, restart_episode, stop_episode = self._pop_record_control()
+        if wait_for_confirm and stop_episode:
+            self._record_confirmation_required = False
+            self._write_console(f"[teleop] env {self.env_id}: recording started.")
         return action, manual_reward, restart_episode, stop_episode
+
+    def _write_console(self, text: str) -> None:
+        if self._teleop_server is not None:
+            self._teleop_server.write_console(text)
 
     def _pop_record_control(self) -> tuple[bool, bool, bool]:
         manual_reward = False
@@ -158,6 +172,10 @@ class TeleopController:
             "active_device": active_info,
             "is_intervening": is_intervening,
             "active": is_intervening,
+            "record_control": {
+                "confirm_before_record": self._record_confirmation_required,
+                "start_key": "Enter",
+            },
         }
 
     def reset(self) -> None:

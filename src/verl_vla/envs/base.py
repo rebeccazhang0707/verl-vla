@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import gymnasium as gym
@@ -72,6 +73,7 @@ class BaseEnv(gym.Env):
         self.teleops = self.create_teleops()
         self.recorder = self.create_recorder()
         self._recorder_episode_done = np.zeros(self.num_envs, dtype=bool)
+        self._confirm_before_record_enabled = bool(cfg.confirm_before_record)
 
     ### Gym Environment API ###
     @override
@@ -144,6 +146,8 @@ class BaseEnv(gym.Env):
         self._latest_obs = obs
         self.reset_teleops()
         self.reset_recorder_envs(env_ids)
+        self.publish_reset_obs_to_teleop(obs, env_ids=env_ids)
+        self._confirm_before_record(env_ids)
         return obs, {}
 
     @override
@@ -163,7 +167,6 @@ class BaseEnv(gym.Env):
         while not done:
             action, manual_reward, restart_episode, stop_episode = self.teleops[0].get_action()
             if restart_episode:
-                self.reset_recorder_envs([0])
                 self.reset(options={"env_idx": [0]})
                 continue
 
@@ -362,6 +365,8 @@ class BaseEnv(gym.Env):
             for reset_idx, local_id in enumerate(reset_local_ids):
                 step_result[key][local_id] = reset_obs[key][reset_idx]
         self.reset_recorder_envs(env_ids[reset_local_ids])
+        self.publish_reset_obs_to_teleop(reset_obs, env_ids=env_ids[reset_local_ids])
+        self._confirm_before_record(env_ids[reset_local_ids])
         return step_result
 
     def _slice_latest_obs(self, env_ids):
@@ -425,6 +430,18 @@ class BaseEnv(gym.Env):
                 action[env_id], _, _, _ = teleop.apply_action(action[env_id])
         return action, intervention_mask
 
+    def _confirm_before_record(self, env_ids) -> None:
+        if not self._confirm_before_record_enabled or not self.teleops:
+            return
+
+        for env_id in np.asarray(env_ids, dtype=np.int64).reshape(-1):
+            teleop = self.teleops[int(env_id)]
+            while True:
+                _, _, _, stop_episode = teleop.get_action(wait_for_confirm=True)
+                if stop_episode:
+                    break
+                time.sleep(0.05)
+
     def reset_teleops(self) -> None:
         for teleop in self.teleops:
             teleop.reset()
@@ -466,6 +483,27 @@ class BaseEnv(gym.Env):
                 extra=extra,
                 task_description=str(tasks[local_id]),
             )
+
+    def publish_reset_obs_to_teleop(self, obs, env_ids) -> None:
+        env_ids = np.asarray(env_ids, dtype=np.int64).reshape(-1)
+        if not self.teleops or len(env_ids) == 0:
+            return
+
+        num_envs = len(env_ids)
+        step_result = {
+            "observation": obs["observation"],
+            "task": obs["task"],
+            "task_id": obs["task_id"],
+            "next.reward": np.zeros(num_envs, dtype=np.float32),
+            "next.terminated": np.zeros(num_envs, dtype=bool),
+            "next.truncated": np.zeros(num_envs, dtype=bool),
+            "next.success": np.zeros(num_envs, dtype=bool),
+        }
+        self.publish_to_teleop(
+            step_result,
+            env_ids=env_ids,
+            critic_value=np.zeros(num_envs, dtype=np.float32),
+        )
 
     ### Recorder Control ###
 
