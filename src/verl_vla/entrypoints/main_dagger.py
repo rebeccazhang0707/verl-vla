@@ -49,10 +49,15 @@ def main(config):
         dataset_root = Path(config.cluster.env.env_worker.recorder.lerobot.root) / str(
             config.cluster.env.env_worker.recorder.lerobot.repo_id
         )
-        assert Path(collected_datasets["collected_dataset"]["root"]).exists()
-        shutil.move(str(collected_datasets["collected_dataset"]["root"]), str(dataset_root))
-
-        print(f"DAgger dataset saved to: {dataset_root}")
+        collected_root = Path(collected_datasets["collected_dataset"]["root"])
+        assert collected_root.exists()
+        print(f"DAgger collected dataset before move: {collected_root}")
+        if dataset_root.exists():
+            print(f"DAgger dataset destination already exists, skip moving: {dataset_root}")
+            print(f"DAgger collected dataset remains at: {collected_root}")
+        else:
+            shutil.move(str(collected_root), str(dataset_root))
+            print(f"DAgger dataset saved to: {dataset_root}")
     finally:
         cluster.shutdown()
 

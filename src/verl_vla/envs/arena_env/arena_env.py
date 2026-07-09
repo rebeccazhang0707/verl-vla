@@ -237,11 +237,11 @@ class IsaacLabArenaEnv(BaseEnv):
     @override
     def apply_teleop_action(self, action):
         action = action if self.USE_POLICY_ACTION else self._replace_with_stable_actions(action)
-        action, intervention_mask = super().apply_teleop_action(action)
+        action, intervention_mask, manual_reward, restart_episode, stop_episode = super().apply_teleop_action(action)
         if not self.USE_POLICY_ACTION:
             self._stable_actions[intervention_mask, :43] = action[intervention_mask, :43]
             self._stable_actions[intervention_mask, 46] = action[intervention_mask, 46]
-        return action, intervention_mask
+        return action, intervention_mask, manual_reward, restart_episode, stop_episode
 
     def _update_stable_actions_from_obs(self, observations: list[dict[str, Any]], env_ids: np.ndarray) -> None:
         for obs, env_id in zip(observations, np.asarray(env_ids, dtype=np.int64), strict=True):
