@@ -117,7 +117,9 @@ class TeleopController:
     def get_action(self, *, wait_for_confirm: bool = False) -> tuple[Any, bool, bool, bool]:
         if wait_for_confirm and not self._record_confirmation_required:
             self._record_confirmation_required = True
-            self._write_console(f"[teleop] env {self.env_id}: press Enter to start recording.")
+            self._write_console(
+                f"[teleop] env {self.env_id}: press {self._record_start_key_label()} to start recording."
+            )
         elif not wait_for_confirm:
             self._record_confirmation_required = False
 
@@ -174,9 +176,14 @@ class TeleopController:
             "active": is_intervening,
             "record_control": {
                 "confirm_before_record": self._record_confirmation_required,
-                "start_key": "Enter",
+                "start_key": self._record_start_key_label(),
             },
         }
+
+    def _record_start_key_label(self) -> str:
+        if "xr_controller" in self.input_devices:
+            return "Enter or A/X"
+        return "Enter"
 
     def reset(self) -> None:
         for input_device in self.input_devices.values():

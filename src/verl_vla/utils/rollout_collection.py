@@ -65,6 +65,11 @@ def collect_lerobot_rollout_dataset(
         previous_completed_episodes = completed_episodes
         new_completed_episodes = count_lerobot_episodes(collected_dataset["root"])
         completed_episodes = initial_completed_episodes + new_completed_episodes
+        if completed_episodes > target_episodes:
+            dataset_root = collected_datasets["collected_dataset"]["root"]
+            truncate_lerobot_episodes(dataset_root, target_episodes - initial_completed_episodes)
+            new_completed_episodes = target_episodes - initial_completed_episodes
+            completed_episodes = target_episodes
         active_logger.info(
             "Finished %s %s: collected_episodes=%s/%s, new_episodes=%s, metrics=%s",
             log_prefix,
@@ -78,10 +83,6 @@ def collect_lerobot_rollout_dataset(
             active_logger.info("%s %s did not add completed trajectories; continuing.", log_prefix, rollout_idx)
             rollout_idx += 1
             continue
-        if completed_episodes > target_episodes:
-            dataset_root = collected_datasets["collected_dataset"]["root"]
-            truncate_lerobot_episodes(dataset_root, target_episodes - initial_completed_episodes)
-            completed_episodes = target_episodes
         rollout_idx += 1
 
     return collected_datasets

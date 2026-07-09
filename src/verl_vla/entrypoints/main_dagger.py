@@ -15,6 +15,7 @@
 import logging
 from pathlib import Path
 from pprint import pprint
+from typing import Any
 
 import hydra
 from hydra.utils import instantiate
@@ -22,7 +23,12 @@ from omegaconf import OmegaConf
 
 from verl_vla.trainer.train_cluster import TrainCluster
 from verl_vla.utils.ray_utils import ensure_ray_initialized
-from verl_vla.utils.recorder import merge_lerobot_datasets, move_lerobot_dataset_to_output, prepare_lerobot_output_root
+from verl_vla.utils.recorder import (
+    is_lerobot_dataset,
+    merge_lerobot_datasets,
+    move_lerobot_dataset_to_output,
+    prepare_lerobot_output_root,
+)
 from verl_vla.utils.rollout_collection import collect_lerobot_rollout_dataset
 
 logger = logging.getLogger(__name__)
@@ -42,6 +48,9 @@ def main(config):
     recorder_cfg = config.cluster.env.env_worker.recorder
     dataset_root = Path(recorder_cfg.lerobot.root) / str(recorder_cfg.lerobot.repo_id)
     initial_episodes = prepare_lerobot_output_root(dataset_root, resume=resume)
+    print(
+        f"DAgger recording progress: {initial_episodes}/{target_episodes} episodes at {dataset_root} (resume={resume})"
+    )
     if initial_episodes >= target_episodes:
         print(f"DAgger dataset already has {initial_episodes}/{target_episodes} episodes: {dataset_root}")
         return
@@ -49,6 +58,7 @@ def main(config):
     ensure_ray_initialized(config)
     cluster = TrainCluster(instantiate(config.cluster, _recursive_=False))
     cluster.start()
+    collected_datasets: dict[str, dict[str, Any]] = {}
     try:
         collected_datasets = collect_lerobot_rollout_dataset(
             cluster,
@@ -58,24 +68,57 @@ def main(config):
             max_episodes_name="max_episodes",
             log=logger,
         )
-        collected_root = Path(collected_datasets["collected_dataset"]["root"])
-        assert collected_root.exists()
-        print(f"DAgger collected dataset before finalizing: {collected_root}")
-        if resume:
-            output_dataset = merge_lerobot_datasets(
-                roots=[collected_root],
-                output_root=dataset_root,
-                repo_id=str(recorder_cfg.lerobot.repo_id),
-                repo_ids=[str(collected_datasets["collected_dataset"]["repo_id"])],
-                append=True,
-                video_files_size_in_mb=recorder_cfg.lerobot.video_files_size_in_mb,
-            )
-            print(f"DAgger dataset appended to: {output_dataset['root']}")
-        else:
-            output_root = move_lerobot_dataset_to_output(collected_root, dataset_root)
-            print(f"DAgger dataset saved to: {output_root}")
+    except KeyboardInterrupt:
+        print("DAgger interrupted; finalizing any completed collected dataset before shutdown.")
     finally:
+        _finalize_dagger_collected_dataset(
+            collected_datasets,
+            recorder_cfg=recorder_cfg,
+            dataset_root=dataset_root,
+            resume=resume,
+        )
         cluster.shutdown()
+
+
+def _finalize_dagger_collected_dataset(
+    collected_datasets: dict[str, dict[str, Any]],
+    *,
+    recorder_cfg,
+    dataset_root: Path,
+    resume: bool,
+) -> Path | None:
+    target_repo_id = str(recorder_cfg.lerobot.repo_id)
+    collected_dataset = collected_datasets.get("collected_dataset")
+    if collected_dataset is None:
+        collected_repo_id = f"{target_repo_id}_collected"
+        collected_root = Path(recorder_cfg.lerobot.root) / collected_repo_id
+        if not is_lerobot_dataset(collected_root):
+            print(f"No complete DAgger collected dataset to finalize at: {collected_root}")
+            return None
+        collected_dataset = {"root": collected_root, "repo_id": collected_repo_id}
+
+    collected_root = Path(collected_dataset["root"])
+    if not is_lerobot_dataset(collected_root):
+        print(f"No complete DAgger collected dataset to finalize at: {collected_root}")
+        return None
+
+    print(f"DAgger collected dataset before finalizing: {collected_root}")
+    if resume:
+        output_dataset = merge_lerobot_datasets(
+            roots=[collected_root],
+            output_root=dataset_root,
+            repo_id=target_repo_id,
+            repo_ids=[str(collected_dataset["repo_id"])],
+            append=True,
+            video_files_size_in_mb=recorder_cfg.lerobot.video_files_size_in_mb,
+        )
+        output_root = Path(output_dataset["root"])
+        print(f"DAgger dataset appended to: {output_root}")
+        return output_root
+
+    output_root = move_lerobot_dataset_to_output(collected_root, dataset_root)
+    print(f"DAgger dataset saved to: {output_root}")
+    return output_root
 
 
 if __name__ == "__main__":

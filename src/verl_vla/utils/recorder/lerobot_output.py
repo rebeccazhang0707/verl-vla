@@ -31,9 +31,12 @@ def is_lerobot_dataset(root: str | Path) -> bool:
 def prepare_lerobot_output_root(root: str | Path, *, resume: bool) -> int:
     root = Path(root)
     if is_lerobot_dataset(root):
+        episode_count = count_lerobot_episodes(root)
         if not resume:
-            raise FileExistsError(f"LeRobot dataset already exists: {root}. Set resume=true to append.")
-        return count_lerobot_episodes(root)
+            raise FileExistsError(
+                f"LeRobot dataset already exists with {episode_count} episodes: {root}. Set resume=true to append."
+            )
+        return episode_count
     if root.exists():
         raise FileExistsError(f"Output path exists but is not a complete LeRobot dataset: {root}")
     return 0
