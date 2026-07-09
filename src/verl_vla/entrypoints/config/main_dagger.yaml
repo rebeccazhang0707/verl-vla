@@ -39,6 +39,10 @@ hydra:
 # Number of completed episodes to collect before exiting.
 max_episodes: 1
 
+# If True, append newly collected episodes to an existing output dataset and
+# count existing episodes toward max_episodes.
+resume: False
+
 
 cluster:
   resource:

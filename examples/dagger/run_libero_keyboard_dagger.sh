@@ -12,6 +12,7 @@ PYTHON=${PYTHON:-python}
 
 overrides=(
   "max_episodes=2"
+  "resume=false"
 
   "cluster.env.env_worker.simulator.libero.task_suite_name=libero_spatial"
   "cluster.env.env_worker.simulator.libero.task_ids=null"

@@ -30,6 +30,7 @@ def collect_lerobot_rollout_dataset(
     cluster,
     *,
     target_episodes: int,
+    initial_completed_episodes: int = 0,
     log_prefix: str,
     max_episodes_name: str = "max_episodes",
     log: logging.Logger | None = None,
@@ -38,9 +39,12 @@ def collect_lerobot_rollout_dataset(
     target_episodes = int(target_episodes)
     if target_episodes <= 0:
         raise ValueError(f"{max_episodes_name} must be positive, got {target_episodes}.")
+    initial_completed_episodes = int(initial_completed_episodes)
+    if initial_completed_episodes < 0:
+        raise ValueError(f"initial_completed_episodes must be non-negative, got {initial_completed_episodes}.")
 
     collected_datasets: CollectedDatasets = {}
-    completed_episodes = 0
+    completed_episodes = initial_completed_episodes
     rollout_idx = 0
     while completed_episodes < target_episodes:
         _rollout_output, collected_datasets, metrics = cluster.rollout()
@@ -59,13 +63,15 @@ def collect_lerobot_rollout_dataset(
             continue
 
         previous_completed_episodes = completed_episodes
-        completed_episodes = count_lerobot_episodes(collected_dataset["root"])
+        new_completed_episodes = count_lerobot_episodes(collected_dataset["root"])
+        completed_episodes = initial_completed_episodes + new_completed_episodes
         active_logger.info(
-            "Finished %s %s: collected_episodes=%s/%s, metrics=%s",
+            "Finished %s %s: collected_episodes=%s/%s, new_episodes=%s, metrics=%s",
             log_prefix,
             rollout_idx,
             completed_episodes,
             target_episodes,
+            new_completed_episodes,
             metrics,
         )
         if completed_episodes <= previous_completed_episodes:
@@ -74,7 +80,7 @@ def collect_lerobot_rollout_dataset(
             continue
         if completed_episodes > target_episodes:
             dataset_root = collected_datasets["collected_dataset"]["root"]
-            truncate_lerobot_episodes(dataset_root, target_episodes)
+            truncate_lerobot_episodes(dataset_root, target_episodes - initial_completed_episodes)
             completed_episodes = target_episodes
         rollout_idx += 1
 

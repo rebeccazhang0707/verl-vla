@@ -39,6 +39,10 @@ hydra:
 # Number of episodes to record before exiting.
 num_episodes: 1
 
+# If True, append newly recorded episodes to an existing output dataset and
+# count existing episodes toward num_episodes.
+resume: False
+
 
 
 cluster:

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import logging
+from pathlib import Path
 from pprint import pprint
 
 import hydra
@@ -21,6 +22,7 @@ from omegaconf import OmegaConf
 
 from verl_vla.trainer.train_cluster import TrainCluster
 from verl_vla.utils.ray_utils import ensure_ray_initialized
+from verl_vla.utils.recorder import prepare_lerobot_output_root
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +33,32 @@ def main(config):
     OmegaConf.set_struct(config, False)
     OmegaConf.resolve(config)
 
+    num_episodes = int(config.num_episodes)
+    if num_episodes <= 0:
+        raise ValueError(f"num_episodes must be positive, got {num_episodes}.")
+
+    resume = bool(config.resume)
+    recorder_cfg = config.cluster.env.env_worker.recorder
+    target_repo_id = str(recorder_cfg.lerobot.repo_id)
+    dataset_root = Path(recorder_cfg.lerobot.root) / target_repo_id
+    initial_episodes = prepare_lerobot_output_root(dataset_root, resume=resume)
+    if initial_episodes >= num_episodes:
+        print(f"Record dataset already has {initial_episodes}/{num_episodes} episodes: {dataset_root}")
+        return
+
     ensure_ray_initialized(config)
     cluster = TrainCluster(instantiate(config.cluster, _recursive_=False))
     cluster.start()
     try:
-        num_episodes = int(config.num_episodes)
-        if num_episodes <= 0:
-            raise ValueError(f"num_episodes must be positive, got {num_episodes}.")
         dataset_root = None
-        for episode_idx in range(num_episodes):
+        for episode_idx in range(initial_episodes, num_episodes):
             print(f"Recording episode {episode_idx + 1}/{num_episodes}")
             dataset_root = cluster.record()
         assert dataset_root is not None
-        print(f"Record dataset saved to: {dataset_root}")
+        if resume:
+            print(f"Record dataset appended to: {dataset_root}")
+        else:
+            print(f"Record dataset saved to: {dataset_root}")
     finally:
         cluster.shutdown()
 
