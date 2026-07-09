@@ -24,6 +24,7 @@ def main(config):
     ensure_ray_initialized(config)
     cluster = TrainCluster(instantiate(config.cluster, _recursive_=False))
     cluster.start()
+    print("Teleop started. Press Ctrl+C to stop.")
     while True:
         cluster.record(collect_dataset=False)
         print("Teleop episode finished; resetting environment.")
