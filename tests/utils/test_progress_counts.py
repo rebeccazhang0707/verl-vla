@@ -31,7 +31,7 @@ def _make_env_result(done, *, success=None) -> DataProto:
 
 
 def test_progress_counts_at_most_one_trajectory_per_chunk_lane():
-    progress_counts = {"trajectories": 0, "success": 0}
+    progress_counts = {"done_eps": 0, "succ_eps": 0}
 
     update_progress_trajectory_counts(
         _make_env_result(
@@ -43,11 +43,11 @@ def test_progress_counts_at_most_one_trajectory_per_chunk_lane():
         progress_lane_state={},
     )
 
-    assert progress_counts == {"trajectories": 1, "success": 1}
+    assert progress_counts == {"done_eps": 1, "succ_eps": 1}
 
 
 def test_progress_ignores_success_after_first_done_in_chunk():
-    progress_counts = {"trajectories": 0, "success": 0}
+    progress_counts = {"done_eps": 0, "succ_eps": 0}
 
     update_progress_trajectory_counts(
         _make_env_result(
@@ -59,4 +59,4 @@ def test_progress_ignores_success_after_first_done_in_chunk():
         progress_lane_state={},
     )
 
-    assert progress_counts == {"trajectories": 1, "success": 0}
+    assert progress_counts == {"done_eps": 1, "succ_eps": 0}

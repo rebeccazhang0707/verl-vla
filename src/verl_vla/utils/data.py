@@ -76,8 +76,8 @@ def update_progress_trajectory_counts(
     step_idx = torch.arange(episode_done.shape[1], device=episode_done.device).unsqueeze(0)
     success_before_done = (success & (step_idx <= first_done_idx.unsqueeze(1))).any(dim=1)
 
-    progress_counts["trajectories"] += int(chunk_done.sum().item())
-    progress_counts["success"] += int((chunk_done & success_before_done).sum().item())
+    progress_counts["done_eps"] += int(chunk_done.sum().item())
+    progress_counts["succ_eps"] += int((chunk_done & success_before_done).sum().item())
 
 
 def dataloader_batch_to_dataproto(batch: dict) -> DataProto:

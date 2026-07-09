@@ -227,4 +227,6 @@ class EnvLoopTrainClusterConfig(BaseConfig):
             )
         if self.checkpoint is not None and not isinstance(self.checkpoint, TrainClusterCheckpointConfig):
             object.__setattr__(self, "checkpoint", instantiate(self.checkpoint))
+        if self.env.env_worker.device is None:
+            object.__setattr__(self.env.env_worker, "device", self.resource.env.device)
         self.env.validate_worker_layout(self.resource.env)
