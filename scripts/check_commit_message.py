@@ -102,11 +102,16 @@ def validate_commit_title(title: str) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate a verl-vla commit message.")
-    parser.add_argument("commit_message_file", type=Path)
+    title_source = parser.add_mutually_exclusive_group(required=True)
+    title_source.add_argument("commit_message_file", nargs="?", type=Path)
+    title_source.add_argument("--title", help="Validate a title directly instead of reading a commit message file.")
     args = parser.parse_args()
 
-    lines = args.commit_message_file.read_text(encoding="utf-8").splitlines()
-    title = lines[0] if lines else ""
+    if args.title is not None:
+        title = args.title
+    else:
+        lines = args.commit_message_file.read_text(encoding="utf-8").splitlines()
+        title = lines[0] if lines else ""
     errors = validate_commit_title(title)
     if not errors:
         return 0

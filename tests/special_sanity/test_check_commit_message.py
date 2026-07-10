@@ -13,14 +13,17 @@
 # limitations under the License.
 
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+SCRIPT_PATH = Path(__file__).parents[2] / "scripts" / "check_commit_message.py"
+
 
 def _load_checker():
-    script_path = Path(__file__).parents[2] / "scripts" / "check_commit_message.py"
-    spec = importlib.util.spec_from_file_location("check_commit_message", script_path)
+    spec = importlib.util.spec_from_file_location("check_commit_message", SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -99,3 +102,26 @@ def test_valid_commit_titles(title: str) -> None:
 )
 def test_invalid_commit_titles(title: str, expected_error: str) -> None:
     assert any(expected_error in error for error in validate_commit_title(title))
+
+
+def test_cli_accepts_direct_title() -> None:
+    result = subprocess.run(
+        [sys.executable, SCRIPT_PATH, "--title", "[misc] chore: validate commit titles"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+
+
+def test_cli_rejects_invalid_direct_title() -> None:
+    result = subprocess.run(
+        [sys.executable, SCRIPT_PATH, "--title", "chore: validate commit titles"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Invalid commit title" in result.stdout
