@@ -1,0 +1,81 @@
+name: "🐛 Bug report"
+description: Report a reproducible problem in verl-vla
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve verl-vla. Search existing issues first and remove secrets or private data from all logs.
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the verl-vla commit or version, installation method, OS, Python, PyTorch, CUDA/ROCm, GPU, simulator or robot, and task or dataset when relevant.
+      placeholder: |
+        verl-vla commit/version:
+        Installation method:
+        OS:
+        Python:
+        PyTorch:
+        CUDA/ROCm and GPU:
+        Simulator/robot:
+        Task/dataset:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: example-source
+    attributes:
+      label: Example source
+      description: Where does the failing workflow come from?
+      options:
+        - An official verl-vla example without modifications
+        - An official example with modifications
+        - Custom code or configuration
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide minimal ordered steps, exact commands, and the relevant configuration. Paste errors, logs, and stack traces as text in fenced code blocks rather than screenshots.
+      placeholder: |
+        1. Configure ...
+        2. Run `...`
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed-behavior
+    attributes:
+      label: Observed behavior
+      description: Describe what happened, including the complete relevant error or output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected to happen and why.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add regression information, attempted workarounds, or related issues and pull requests when available.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched open and closed issues for duplicates.
+          required: true
+        - label: I removed credentials, private data, and other secrets from this report.
+          required: true

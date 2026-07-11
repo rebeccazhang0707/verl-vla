@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Issue"
+  short_description: "Prepare and create verl-vla GitHub issues"
+  default_prompt: "Use $issue to prepare and create a verl-vla GitHub issue."

@@ -1,0 +1,54 @@
+name: "🚀 Feature request"
+description: Propose a new capability or improvement for verl-vla
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an improvement. Search existing issues and pull requests before submitting.
+
+  - type: textarea
+    id: feature
+    attributes:
+      label: Feature request
+      description: Clearly describe the requested capability and its intended scope. Link related papers or implementations when available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation and use case
+      description: Explain the concrete workflow or limitation this would address and who would benefit.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-interface
+    attributes:
+      label: Proposed interface or behavior
+      description: Show a concise API, CLI, configuration, or usage example when it helps explain the request.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe existing workarounds or alternative designs, or write "None".
+    validations:
+      required: true
+
+  - type: textarea
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Explain how you could help implement or validate this feature, or write "Not currently".
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched open and closed issues and open pull requests for duplicates.
+          required: true

@@ -53,6 +53,26 @@ pip install pre-commit
 pre-commit install
 ```
 
+## Issues
+
+Search open and closed issues before filing a new report. Use the bug report
+form for reproducible incorrect behavior and the feature request form for new
+capabilities or improvements. A useful issue should be self-contained and
+actionable:
+
+- Use a concise, searchable English title.
+- For bugs, provide environment details, minimal ordered reproduction steps,
+  exact commands and relevant configuration, observed behavior, and expected
+  behavior.
+- Paste errors, logs, and stack traces as copyable text in fenced code blocks
+  instead of screenshots.
+- For features, explain the concrete motivation, requested behavior, relevant
+  papers or implementations, alternatives considered, and how you can help.
+- Link related issues and pull requests, and explain any material difference
+  from a possible duplicate.
+- Remove credentials, access tokens, private data, and other secrets before
+  submitting.
+
 ## Pull Requests
 
 Pull request titles follow the commit title convention above. A related PR
