@@ -42,7 +42,6 @@ $PYTHON -m verl_vla.entrypoints.train.sft \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.model.trust_remote_code=False \
-    actor_rollout_ref.model.override_config.attn_implementation=eager \
     data.sft.enable=True \
     data.sft.repo_id="$SFT_REPO_ID" \
     data.sft.revision="$SFT_REVISION" \

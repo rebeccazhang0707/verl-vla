@@ -113,8 +113,7 @@ $PYTHON -m verl_vla.entrypoints.train.sac \
     actor_rollout_ref.model.path=$SFT_MODEL_PATH \
     actor_rollout_ref.model.tokenizer_path=$TOKENIZER_PATH \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
-    actor_rollout_ref.model.override_config.critic_type=multi_cross_attn \
-    +actor_rollout_ref.model.override_config.attn_implementation=eager \
+    actor_rollout_ref.model.adapter.critic.type=multi_cross_attn \
     actor_rollout_ref.rollout.mode=async_envloop \
     actor_rollout_ref.rollout.prompt_length=512 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size=16 \

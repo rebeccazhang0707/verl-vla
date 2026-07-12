@@ -73,7 +73,7 @@ class ReCapValueCriticConfig(PretrainedConfig):
         sft_type: str = "value_model",
         **kwargs,
     ):
-        kwargs["architectures"] = ["ReCapValueCriticForConditionalGeneration"]
+        kwargs["architectures"] = ["ReCapValueCriticTrainableModel"]
         super().__init__(**kwargs)
         self.siglip_path = siglip_path
         self.gemma3_path = gemma3_path

@@ -28,7 +28,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, SequentialSampler, Subset
 from tqdm import tqdm
 
-from verl_vla.models.recap_value_critic import ReCapValueCriticForPrediction
+from verl_vla.models.recap_value_critic import ReCapValueCriticTrainableModel
 from verl_vla.recorder.dataset import iter_lerobot_frame_records, write_lerobot_frame_columns
 from verl_vla.utils.data import dataloader_batch_to_dataproto
 from verl_vla.utils.dataloader import LeRobotDataLoaderConfig, resolve_multiprocessing_context
@@ -310,7 +310,7 @@ def _infer_value_lookup_on_device(
     )
 
     # STEP 2: load the value model and run inference on the assigned shard.
-    model = ReCapValueCriticForPrediction.from_pretrained(
+    model = ReCapValueCriticTrainableModel.from_pretrained(
         str(model_path),
         torch_dtype=infer_cfg.torch_dtype,
         trust_remote_code=True,

@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME=verl-vla-pi0:dev
 DATA_ROOT="${REPO_ROOT}/.data/pi05_sft"
+MODEL_PATH="${DATA_ROOT}/models/torch_pi05_base"
+MODEL_MOUNT_ARGS=()
 
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   echo "Docker image not found: $IMAGE_NAME" >&2
@@ -12,9 +14,16 @@ if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   exit 2
 fi
 
-if [[ ! -f "${DATA_ROOT}/models/torch_pi05_base/config.json" ]]; then
-  echo "Pi0.5 model not found: ${DATA_ROOT}/models/torch_pi05_base" >&2
+if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
+  echo "Pi0.5 model not found: ${MODEL_PATH}" >&2
   exit 2
+fi
+
+if [[ -L "${MODEL_PATH}" ]]; then
+  RESOLVED_MODEL_PATH="$(readlink -f "${MODEL_PATH}")"
+  if [[ "${RESOLVED_MODEL_PATH}" != "${REPO_ROOT}"/* ]]; then
+    MODEL_MOUNT_ARGS=(-v "${RESOLVED_MODEL_PATH}:${RESOLVED_MODEL_PATH}:ro")
+  fi
 fi
 
 if [[ ! -f "${DATA_ROOT}/datasets/libero_spatial_image/meta/info.json" ]]; then
@@ -35,5 +44,6 @@ exec docker run --rm -it \
   --ipc=host \
   --entrypoint /bin/bash \
   -v "${REPO_ROOT}:/workspace/verl-vla" \
+  "${MODEL_MOUNT_ARGS[@]}" \
   "$IMAGE_NAME" \
   -lc 'python3 -m pip install --no-deps -e . && exec bash examples/pi05_sft/run_pi05_libero_spatial_sft.sh'

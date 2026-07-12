@@ -15,15 +15,15 @@
 # Instantiate the shared verl HuggingFace model config class.
 defaults:
 
-  # PI0 model overrides.
-  - override@override_config: pi0
+  # Model-specific adapter configuration.
+  - adapter@adapter: pi0
 
   # Apply this HuggingFace model config last.
   - _self_
 
 
 # Target class for this configuration.
-_target_: verl.workers.config.HFModelConfig
+_target_: verl_vla.workers.config.VLAModelConfig
 
 # Default model path. Override this for a different HF checkpoint.
 path: /file_system/liujincheng/models/pi05_libero_torch
@@ -46,8 +46,5 @@ enable_activation_offload: False
 # Whether to remove padding before model forward when the model/engine supports it.
 use_remove_padding: False
 
-# Model config fields overridden after loading the HF config.
-override_config:
-
-  # Use eager attention for compatibility with the current VLA model path.
-  attn_implementation: eager
+# Official policy config overrides are reserved for legacy model integrations.
+override_config: {}

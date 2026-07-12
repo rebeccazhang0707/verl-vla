@@ -288,7 +288,7 @@ class ReCapValueExpert(nn.Module):
         return self.value_expert.model.norm(suffix_hidden_states)
 
 
-class ReCapValueCriticForPrediction(PreTrainedModel, SupportSFTTraining):
+class ReCapValueCriticTrainableModel(PreTrainedModel, SupportSFTTraining):
     config_class = ReCapValueCriticConfig
     base_model_prefix = "recap_value_critic"
 
@@ -496,7 +496,3 @@ class ReCapValueCriticForPrediction(PreTrainedModel, SupportSFTTraining):
 
         valid_mask = valids.float().view(-1).to(device=per_sample_loss.device)
         return (per_sample_loss * valid_mask).sum() / valid_mask.sum().clamp_min(1.0)
-
-
-class ReCapValueCriticForConditionalGeneration(ReCapValueCriticForPrediction):
-    pass

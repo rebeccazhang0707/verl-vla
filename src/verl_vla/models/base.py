@@ -13,9 +13,12 @@
 # limitations under the License.
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 import torch
+from torch import nn
 from verl import DataProto
 
 
@@ -184,3 +187,44 @@ class SupportSFTTraining:
     ) -> torch.Tensor:
         del obs, tokenizer, actions, valids, action_mask, target_values
         raise NotImplementedError("Subclasses must implement sft_loss method.")
+
+
+class TrainableVLAModelMixin:
+    """Shared boundary for trainable adapters that contain one native policy."""
+
+    policy: nn.Module
+
+    def init_trainable_model(self, *, policy: nn.Module) -> None:
+        if not isinstance(self, nn.Module):
+            raise TypeError("TrainableVLAModelMixin requires an nn.Module trainable model")
+        self.policy = policy
+
+    @staticmethod
+    def extract_policy_state_dict(
+        state_dict: Mapping[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Extract native policy weights from a full adapter state dict."""
+
+        prefix = "policy."
+        extracted = {name.removeprefix(prefix): value for name, value in state_dict.items() if name.startswith(prefix)}
+        return extracted or dict(state_dict)
+
+    def export_policy(
+        self,
+        output_dir: str | Path,
+        *,
+        state_dict: Mapping[str, torch.Tensor] | None = None,
+    ) -> None:
+        """Export the upstream policy using its native ``save_pretrained`` API."""
+
+        save_pretrained = getattr(self.policy, "save_pretrained", None)
+        if not callable(save_pretrained):
+            raise TypeError(f"{type(self.policy).__name__} does not implement save_pretrained()")
+
+        if state_dict is not None:
+            policy_state_dict = self.extract_policy_state_dict(state_dict)
+            self.policy.load_state_dict(policy_state_dict, strict=True)
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        save_pretrained(output_dir)

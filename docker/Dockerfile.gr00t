@@ -57,37 +57,60 @@ RUN python -m pip install \
       fastapi==0.139.0 uvicorn==0.51.0
 
 # Eagle requires FlashAttention. This is the N1.6-pinned cp310/torch2.7/cu12 wheel.
-RUN python -m pip install \
-      https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.7cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+ARG FLASH_ATTN_WHEEL_URL=https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.7cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+RUN python -m pip install "${FLASH_ATTN_WHEEL_URL}"
 
-# The source package is opt-in in normal installations. This dedicated image
-# chooses to install the exact N1.6 commit while still bypassing its dependency set.
-RUN python -m pip install --no-deps \
-      "gr00t @ git+https://github.com/NVIDIA/Isaac-GR00T.git@${GR00T_COMMIT}"
-
-# The upstream wheel built from this commit omits the non-Python files under
-# Eagle-Block2A-2B-v2 (config, tokenizer and processor assets).  GR00T loads
-# that directory at runtime, so restore those package assets from the same
-# pinned source commit.  This keeps GR00T external to verl-vla and does not
-# vendor its implementation in this repository.
+# The source package is opt-in in normal installations. Install one pinned
+# source archive and restore the Eagle assets omitted by its built wheel from
+# that same archive. GR00T remains external to verl-vla and is not vendored.
+ARG GR00T_SOURCE_URL
+ARG GR00T_SOURCE_SHA256=9d4716387e27ca9d76d8b8bbe141e6536f3704a5ea41ea9726b5b1bbcf0438be
 RUN set -eux; \
     eagle_rel="gr00t/model/modules/nvidia/Eagle-Block2A-2B-v2"; \
-    source_dir="$(mktemp -d)"; \
-    git -c init.defaultBranch=main init "${source_dir}"; \
-    git -C "${source_dir}" remote add origin https://github.com/NVIDIA/Isaac-GR00T.git; \
-    git -C "${source_dir}" sparse-checkout init --cone; \
-    git -C "${source_dir}" sparse-checkout set "${eagle_rel}"; \
-    git -C "${source_dir}" fetch --depth=1 origin "${GR00T_COMMIT}"; \
-    git -C "${source_dir}" checkout --detach FETCH_HEAD; \
+    source_root="$(mktemp -d)"; \
+    source_dir="${source_root}/source"; \
+    source_archive="${source_root}/Isaac-GR00T-${GR00T_COMMIT}.tar.gz"; \
+    source_url="${GR00T_SOURCE_URL:-https://github.com/NVIDIA/Isaac-GR00T/archive/${GR00T_COMMIT}.tar.gz}"; \
+    curl --fail --location --retry 5 --retry-all-errors \
+      "${source_url}" --output "${source_archive}"; \
+    echo "${GR00T_SOURCE_SHA256}  ${source_archive}" | sha256sum --check -; \
+    mkdir -p "${source_dir}"; \
+    tar -xzf "${source_archive}" --directory "${source_dir}" --strip-components=1; \
+    python -m pip install --no-deps "${source_archive}"; \
     gr00t_root="$(python -c 'from pathlib import Path; import gr00t; print(Path(gr00t.__file__).parent)')"; \
     cp -a "${source_dir}/${eagle_rel}/." \
       "${gr00t_root}/model/modules/nvidia/Eagle-Block2A-2B-v2/"; \
     test -f "${gr00t_root}/model/modules/nvidia/Eagle-Block2A-2B-v2/config.json"; \
-    rm -rf "${source_dir}"
+    rm -rf "${source_root}"
 
 # Headless LIBERO simulator. MuJoCo 3.3.1 matches robosuite 1.4.0's mj_fullM API.
 RUN python -m pip install libero==0.1.1 \
     && python -m pip install mujoco==3.3.1 robosuite==1.4.0 numpy==1.26.4 av==15.0.0
+
+# PyPI's LIBERO wheel omits its simulation assets and otherwise downloads the
+# latest copy at first use. Pin and materialize them in the image instead.
+ARG LIBERO_ASSETS_REVISION=90001343cb134b7e26e18fde0fa2416f3ed6e6a3
+ARG LIBERO_ASSETS_ARCHIVE_URL
+ARG LIBERO_ASSETS_ARCHIVE_SHA256
+RUN set -eux; \
+    assets_dir="$(python -c 'from importlib.metadata import distribution; print(distribution("libero").locate_file("libero/libero/assets"))')"; \
+    rm -rf "${assets_dir}"; \
+    mkdir -p "${assets_dir}"; \
+    if [[ -n "${LIBERO_ASSETS_ARCHIVE_URL}" ]]; then \
+      test -n "${LIBERO_ASSETS_ARCHIVE_SHA256}"; \
+      assets_archive="$(mktemp)"; \
+      curl --fail --location --retry 5 --retry-all-errors \
+        "${LIBERO_ASSETS_ARCHIVE_URL}" --output "${assets_archive}"; \
+      echo "${LIBERO_ASSETS_ARCHIVE_SHA256}  ${assets_archive}" | sha256sum --check -; \
+      tar -xzf "${assets_archive}" --directory "${assets_dir}"; \
+      rm -f "${assets_archive}"; \
+    else \
+      hf download jadechoghari/libero-assets \
+        --revision "${LIBERO_ASSETS_REVISION}" \
+        --local-dir "${assets_dir}"; \
+      rm -rf "${assets_dir}/.cache"; \
+    fi; \
+    test -f "${assets_dir}/scenes/libero_tabletop_base_style.xml"
 
 RUN mkdir -p /usr/share/glvnd/egl_vendor.d \
     && printf '{\n  "file_format_version":"1.0.0",\n  "ICD":{"library_path":"libEGL_nvidia.so.0"}\n}\n' \
@@ -96,6 +119,7 @@ RUN mkdir -p /usr/share/glvnd/egl_vendor.d \
 WORKDIR /workspace/verl-vla
 COPY . .
 RUN python -m pip install --no-deps . \
-    && python scripts/install_checks/check_gr00t_n1d6.py
+    && python scripts/install_checks/check_gr00t_n1d6.py \
+    && python scripts/install_checks/check_libero.py
 
 CMD ["/bin/bash"]

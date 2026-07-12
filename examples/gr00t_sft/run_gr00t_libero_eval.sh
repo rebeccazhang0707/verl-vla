@@ -6,11 +6,13 @@ set -x
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
+LIBERO_PACKAGE_ROOT=$(python -c \
+  'import importlib.util; from pathlib import Path; root = Path(importlib.util.find_spec("libero").origin).parent; nested = root / "libero"; print(nested if (nested / "bddl_files").is_dir() else root)')
 DATA_ROOT=${DATA_ROOT:-/data}
 MODEL_PATH=${MODEL_PATH:-${DATA_ROOT}/models/gr00t_n1d6_libero_spatial_sft}
 NORM_STATS_PATH=${NORM_STATS_PATH:-null}
 LIBERO_CONFIG_PATH=${LIBERO_CONFIG_PATH:-${DATA_ROOT}/libero_config}
-LIBERO_ASSETS_PATH=${LIBERO_ASSETS_PATH:-${HOME}/.cache/libero/assets}
+LIBERO_ASSETS_PATH=${LIBERO_ASSETS_PATH:-${LIBERO_PACKAGE_ROOT}/assets}
 MODEL_GPUS=${MODEL_GPUS:-2}
 ENV_WORKERS=${ENV_WORKERS:-4}
 NUM_ENVS=${NUM_ENVS:-2}
@@ -31,8 +33,6 @@ export VERL_LOGGING_LEVEL=${VERL_LOGGING_LEVEL:-INFO}
 export LIBERO_CONFIG_PATH
 
 if [[ ! -f "${LIBERO_CONFIG_PATH}/config.yaml" ]]; then
-  LIBERO_PACKAGE_ROOT=$(python -c \
-    'import importlib.util; from pathlib import Path; root = Path(importlib.util.find_spec("libero").origin).parent; nested = root / "libero"; print(nested if (nested / "bddl_files").is_dir() else root)')
   mkdir -p "$LIBERO_CONFIG_PATH"
   printf '%s\n' \
     "benchmark_root: ${LIBERO_PACKAGE_ROOT}" \
@@ -46,7 +46,7 @@ fi
 python scripts/install_checks/check_gr00t_n1d6.py
 
 python -m verl_vla.entrypoints.train.sac \
-  model/override@cluster.actor_rollout_ref.model.override_config=gr00t \
+  +model/override@cluster.actor_rollout_ref.model.override_config=gr00t \
   hydra.run.dir="$HYDRA_RUN_DIR" \
   ray_kwargs.ray_init.runtime_env.env_vars.MUJOCO_GL="$MUJOCO_GL" \
   +ray_kwargs.ray_init.runtime_env.env_vars.PYOPENGL_PLATFORM="$PYOPENGL_PLATFORM" \

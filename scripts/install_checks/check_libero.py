@@ -79,6 +79,10 @@ def check_assets() -> None:
         if not asset_path.is_dir():
             raise RuntimeError(f"LIBERO {asset_name} directory does not exist: {asset_path}")
 
+    scene_path = Path(get_libero_path("assets")) / "scenes" / "libero_tabletop_base_style.xml"
+    if not scene_path.is_file():
+        raise RuntimeError(f"LIBERO scene asset does not exist: {scene_path}")
+
 
 def check_cpu_rendering() -> None:
     benchmark = get_benchmark("libero_spatial")()

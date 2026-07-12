@@ -98,7 +98,6 @@ $PYTHON -m verl_vla.entrypoints.train.sac \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.model.trust_remote_code=False \
-    +actor_rollout_ref.model.override_config.attn_implementation=eager \
     actor_rollout_ref.actor.entropy_coeff=0. \
     actor_rollout_ref.rollout.temperature=1.6 \
     actor_rollout_ref.rollout.prompt_length=512 \

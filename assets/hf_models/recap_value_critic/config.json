@@ -2,13 +2,8 @@
   "license": "apache-2.0",
   "model_type": "recap_value_critic",
   "architectures": [
-    "ReCapValueCriticForConditionalGeneration"
+    "ReCapValueCriticTrainableModel"
   ],
-  "auto_map": {
-    "AutoConfig": "configuration_recap_value_critic.ReCapValueCriticConfig",
-    "AutoModel": "modeling_recap_value_critic.ReCapValueCriticForConditionalGeneration",
-    "AutoModelForVision2Seq": "modeling_recap_value_critic.ReCapValueCriticForConditionalGeneration"
-  },
   "siglip_path": "google/siglip-so400m-patch14-384",
   "gemma3_path": "google/gemma-3-270m",
   "tokenizer_path": "google/gemma-3-270m",

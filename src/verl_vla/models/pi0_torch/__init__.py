@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .configuration_pi0_torch import PI0TorchConfig
-from .modeling_pi0_torch import PI0ForActionPrediction, PI0ForConditionalGeneration
+from .adapter_config import PI0AdapterConfig, PI0CriticConfig
+from .model.modeling_pi0 import PI0Policy
+from .trainable_model import PI0TrainableModel
 
-__all__ = ["PI0TorchConfig", "PI0ForActionPrediction", "PI0ForConditionalGeneration"]
+__all__ = ["PI0AdapterConfig", "PI0CriticConfig", "PI0Policy", "PI0TrainableModel"]

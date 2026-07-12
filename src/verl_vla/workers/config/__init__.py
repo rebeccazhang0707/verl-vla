@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import actor, engine, optimizer, rollout
+from . import actor, engine, model, optimizer, rollout
 from .actor import *  # noqa: F401
 from .engine import *  # noqa: F401
+from .model import *  # noqa: F401
 from .optimizer import *  # noqa: F401
 from .rollout import *  # noqa: F401
 
-__all__ = actor.__all__ + engine.__all__ + optimizer.__all__ + rollout.__all__
+__all__ = actor.__all__ + engine.__all__ + model.__all__ + optimizer.__all__ + rollout.__all__

@@ -13,10 +13,9 @@
 # limitations under the License.
 
 from .configuration_recap_value_critic import ReCapValueCriticConfig
-from .modeling_recap_value_critic import ReCapValueCriticForConditionalGeneration, ReCapValueCriticForPrediction
+from .modeling_recap_value_critic import ReCapValueCriticTrainableModel
 
 __all__ = [
     "ReCapValueCriticConfig",
-    "ReCapValueCriticForConditionalGeneration",
-    "ReCapValueCriticForPrediction",
+    "ReCapValueCriticTrainableModel",
 ]

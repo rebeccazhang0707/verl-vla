@@ -143,9 +143,6 @@ def prepare_libero_gripper_action(action: np.ndarray) -> np.ndarray:
 
 def load_gr00t_processor(model_path: str, norm_stats_path: str | None, *, training: bool):
     """Load the official processor without making GR00T a verl-vla dependency."""
-    from verl_vla.models.register_vla_models import register_gr00t_n1d6_model
-
-    register_gr00t_n1d6_model(required=True)
     from gr00t.configs.data.embodiment_configs import MODALITY_CONFIGS
     from gr00t.data.types import ActionConfig, ActionFormat, ActionRepresentation, ActionType
     from gr00t.model.gr00t_n1d6.processing_gr00t_n1d6 import Gr00tN1d6Processor

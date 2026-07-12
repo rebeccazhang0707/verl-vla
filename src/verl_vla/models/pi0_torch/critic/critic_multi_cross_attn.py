@@ -151,21 +151,15 @@ class MultiCrossAttentionCriticBackend(CriticBackend):
     uses_task_ids = True
 
     def init(self, model) -> None:
-        head_num = int(getattr(model.config, "critic_head_num", 2))
-        attn_heads = int(getattr(model.config, "critic_prefix_attn_heads", 8))
-        input_dim = int(getattr(model.config, "critic_input_dim", 2150))
-        hidden_dims = [int(dim) for dim in getattr(model.config, "critic_hidden_dims", [1024, 512, 256])]
-        prefix_embed_dim = int(getattr(model.config, "critic_prefix_embed_dim", 2048))
-        critic_num = int(getattr(model.config, "critic_num", 1))
-        task_to_critic = _normalize_task_to_critic(getattr(model.config, "critic_task_to_critic", None))
-        model.critic_backend = MultiCrossAttentionCritic(
-            head_num=head_num,
-            attn_heads=attn_heads,
-            input_dim=input_dim,
-            hidden_dims=hidden_dims,
-            prefix_embed_dim=prefix_embed_dim,
-            critic_num=critic_num,
-            task_to_critic=task_to_critic,
+        config = model.config.critic
+        model.critic = MultiCrossAttentionCritic(
+            head_num=int(config.head_num),
+            attn_heads=int(config.prefix_attn_heads),
+            input_dim=int(config.input_dim),
+            hidden_dims=[int(dim) for dim in config.hidden_dims],
+            prefix_embed_dim=int(config.prefix_embed_dim),
+            critic_num=int(config.num),
+            task_to_critic=_normalize_task_to_critic(config.task_to_critic),
         )
 
     def forward(
@@ -184,7 +178,7 @@ class MultiCrossAttentionCriticBackend(CriticBackend):
     ) -> torch.Tensor:
         if task_ids is None:
             raise ValueError("MultiCrossAttentionCriticBackend requires task_ids.")
-        return model.critic_backend(
+        return model.critic(
             a=a,
             state_features=state_features,
             task_ids=task_ids,
@@ -194,8 +188,8 @@ class MultiCrossAttentionCriticBackend(CriticBackend):
         )
 
     def get_critic_parameters(self, model) -> list[torch.nn.Parameter]:
-        return model.critic_backend.get_critic_parameters()
+        return model.critic.get_critic_parameters()
 
     @torch.no_grad()
     def update_target_network(self, model, tau: float) -> None:
-        model.critic_backend.update_target_network(tau)
+        model.critic.update_target_network(tau)

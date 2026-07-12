@@ -15,7 +15,7 @@
 # RECAP value-model config overrides.
 
 # Select the LIBERO policy path in the model implementation.
-policy_type: libero
+embodiment: libero
 
 # Select the value-model SFT head.
 sft_type: value_model

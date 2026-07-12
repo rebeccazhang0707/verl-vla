@@ -13,8 +13,7 @@
 # limitations under the License.
 
 from verl_vla.models.recap_value_critic.modeling_recap_value_critic import (
-    ReCapValueCriticForConditionalGeneration,
-    ReCapValueCriticForPrediction,
+    ReCapValueCriticTrainableModel,
 )
 
-__all__ = ["ReCapValueCriticForConditionalGeneration", "ReCapValueCriticForPrediction"]
+__all__ = ["ReCapValueCriticTrainableModel"]

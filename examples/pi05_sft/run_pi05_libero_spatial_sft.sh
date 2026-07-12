@@ -7,12 +7,18 @@ cd "$REPO_ROOT"
 
 DATA_ROOT=$REPO_ROOT/.data/pi05_sft
 MODEL_PATH=$DATA_ROOT/models/torch_pi05_base
+TOKENIZER_PATH=$DATA_ROOT/tokenizers/torch_pi05_base
 SFT_ROOT=$DATA_ROOT/datasets/libero_spatial_image
 NORM_STATS_PATH=$SFT_ROOT/norm_stats.json
 OUTPUT_DIR=$DATA_ROOT/output/pi05_libero_spatial_sft
 
 if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
   echo "Pi0.5 model config not found: ${MODEL_PATH}/config.json" >&2
+  exit 2
+fi
+
+if [[ ! -f "${TOKENIZER_PATH}/tokenizer.json" ]]; then
+  echo "Pi0.5 tokenizer not found: ${TOKENIZER_PATH}" >&2
   exit 2
 fi
 
@@ -30,13 +36,13 @@ fi
 python3 -m verl_vla.entrypoints.train.sft \
   hydra.run.dir="$OUTPUT_DIR/hydra" \
   cluster.actor_rollout_ref.model.path="$MODEL_PATH" \
+  cluster.actor_rollout_ref.model.tokenizer_path="$TOKENIZER_PATH" \
   cluster.actor_rollout_ref.model.enable_gradient_checkpointing=False \
   cluster.actor_rollout_ref.model.use_remove_padding=False \
   cluster.actor_rollout_ref.model.trust_remote_code=False \
-  cluster.actor_rollout_ref.model.override_config.policy_type=libero \
-  cluster.actor_rollout_ref.model.override_config.attn_implementation=eager \
-  cluster.actor_rollout_ref.model.override_config.norm_stats_path="$NORM_STATS_PATH" \
-  cluster.actor_rollout_ref.model.override_config.sac_enable=False \
+  cluster.actor_rollout_ref.model.adapter.embodiment=libero \
+  cluster.actor_rollout_ref.model.adapter.norm_stats_path="$NORM_STATS_PATH" \
+  cluster.actor_rollout_ref.model.adapter.critic.enabled=False \
   cluster.actor_rollout_ref.actor.strategy=fsdp2 \
   cluster.actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
   cluster.actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \

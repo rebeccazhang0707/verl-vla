@@ -15,7 +15,6 @@ from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
 from verl_vla.models.gr00t_n1d6 import GR00T_N1D6_COMMIT
-from verl_vla.models.register_vla_models import register_gr00t_n1d6_model
 
 _EAGLE_ASSETS = (
     "added_tokens.json",
@@ -35,13 +34,13 @@ def direct_url() -> dict:
     try:
         dist = distribution("gr00t")
     except PackageNotFoundError as exc:
-        register_gr00t_n1d6_model(required=True)
-        raise AssertionError("unreachable") from exc
+        raise ModuleNotFoundError(
+            "GR00T N1.6 is not installed. Build docker/Dockerfile.gr00t or install "
+            f"the pinned source commit {GR00T_N1D6_COMMIT}."
+        ) from exc
     direct_url_file = next((file for file in (dist.files or []) if file.name == "direct_url.json"), None)
     if direct_url_file is None:
-        raise RuntimeError(
-            "The installed gr00t distribution has no direct_url.json; install it from the pinned Git URL."
-        )
+        raise RuntimeError("The installed gr00t distribution has no direct_url.json; install it from pinned source.")
     with dist.locate_file(direct_url_file).open(encoding="utf-8") as file:
         return json.load(file)
 
@@ -49,18 +48,23 @@ def direct_url() -> dict:
 def main() -> None:
     metadata = direct_url()
     commit = metadata.get("vcs_info", {}).get("commit_id")
+    if commit is None and GR00T_N1D6_COMMIT in metadata.get("url", ""):
+        commit = GR00T_N1D6_COMMIT
     if commit != GR00T_N1D6_COMMIT:
         raise RuntimeError(
             f"Unsupported GR00T source commit {commit!r}; expected {GR00T_N1D6_COMMIT}. "
             "Reinstall with the command documented in examples/gr00t_sft/README.md."
         )
-    register_gr00t_n1d6_model(required=True)
-
     # The upstream VCS wheel does not currently include Eagle's non-Python
     # package data.  Fail during image construction instead of allowing
     # Transformers to silently infer OPTConfig from the /opt/... path.
     import gr00t
+    from gr00t.configs.model.gr00t_n1d6 import Gr00tN1d6Config
+    from gr00t.model.gr00t_n1d6.gr00t_n1d6 import Gr00tN1d6
     from transformers import AutoConfig
+
+    if Gr00tN1d6.config_class is not Gr00tN1d6Config:
+        raise RuntimeError("The installed GR00T package has an incompatible Gr00tN1d6 config class.")
 
     eagle_dir = Path(gr00t.__file__).parent / "model" / "modules" / "nvidia" / "Eagle-Block2A-2B-v2"
     missing_assets = [name for name in _EAGLE_ASSETS if not (eagle_dir / name).is_file()]

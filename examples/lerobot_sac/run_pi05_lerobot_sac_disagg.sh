@@ -125,12 +125,11 @@ $PYTHON -m verl_vla.entrypoints.train.sac \
     actor_rollout_ref.model.path=$SFT_MODEL_PATH \
     actor_rollout_ref.model.tokenizer_path=$TOKENIZER_PATH \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
-    actor_rollout_ref.model.override_config.policy_type=lerobot \
-    actor_rollout_ref.model.override_config.critic_type=cross_attn \
-    actor_rollout_ref.model.override_config.critic_prefix_embed_dim=2048 \
-    actor_rollout_ref.model.override_config.critic_input_dim=2140 \
-    actor_rollout_ref.model.override_config.critic_hidden_dims=[1024,512,256] \
-    +actor_rollout_ref.model.override_config.attn_implementation=eager \
+    actor_rollout_ref.model.adapter.embodiment=lerobot \
+    actor_rollout_ref.model.adapter.critic.type=cross_attn \
+    actor_rollout_ref.model.adapter.critic.prefix_embed_dim=2048 \
+    actor_rollout_ref.model.adapter.critic.input_dim=2140 \
+    actor_rollout_ref.model.adapter.critic.hidden_dims=[1024,512,256] \
     actor_rollout_ref.rollout.mode=async_envloop \
     actor_rollout_ref.rollout.prompt_length=512 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size=16 \

@@ -95,7 +95,7 @@ def make_att_2d_masks(pad_masks: torch.Tensor, att_masks: torch.Tensor) -> torch
     return att_2d_masks
 
 
-class PI0Model(ModelMixin, ConfigMixin):
+class PI0Policy(ModelMixin, ConfigMixin):
     """pi0: A Vision-Language-Action Flow Model for General Robot Control.
 
     [Paper](https://www.physicalintelligence.company/download/pi0.pdf)

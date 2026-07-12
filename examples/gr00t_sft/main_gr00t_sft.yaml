@@ -4,8 +4,8 @@ defaults:
   # Reuse the actor-only SFT cluster and trainer.
   - /base/sft@_global_
 
-  # Remove PI0-only model fields from the shared HF model configuration.
-  - override /model/override@cluster.actor_rollout_ref.model.override_config: gr00t
+  # Add GR00T compatibility fields to the shared native-model configuration.
+  - /model/override@cluster.actor_rollout_ref.model.override_config: gr00t
 
   - _self_
 
@@ -34,10 +34,6 @@ cluster:
       override_config:
         # Eagle requires BF16 initialization at this GR00T commit.
         load_bf16: true
-
-        # Select verl's vision-to-sequence HF exporter. The wrapper resets the
-        # exported architecture name to upstream Gr00tN1d6.
-        architectures: ["Gr00tN1d6ForConditionalGeneration"]
 
     actor:
       checkpoint:

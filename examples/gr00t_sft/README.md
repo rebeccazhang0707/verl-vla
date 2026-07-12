@@ -54,18 +54,19 @@ and Python source code live during development without rebuilding the image for
 every code change. Rebuild the image only when dependencies or the Dockerfile
 change.
 
-The resulting directory layout should look like this:
+The resulting directory layout matches the PI0.5 example:
 
 ```text
-verl-vla-data/
-├── datasets/libero_spatial_image/
-│   ├── data/
-│   ├── meta/
-│   ├── videos/
-│   └── norm_stats.json
+.data/gr00t_sft/
+├── datasets/
+│   └── libero_spatial_image/
+│       ├── data/
+│       ├── meta/
+│       ├── videos/
+│       └── norm_stats.json
 ├── models/
-├── output/
-└── huggingface/
+│   └── gr00t_n1d6_3b/
+└── output/
 ```
 
 ## 1. Install the runtime environment
@@ -216,6 +217,20 @@ step 10000.
 
 ### Docker
 
+The repository provides a direct launcher. It defaults to 8 GPUs and keeps the
+dataset, the pinned initial model, and outputs under `.data/gr00t_sft`. On the
+first run it downloads `nvidia/GR00T-N1.6-3B` revision
+`d0814e7ecb19202e7c8468b46098b0b7ef3a6d61` into
+`.data/gr00t_sft/models/gr00t_n1d6_3b`:
+
+```bash
+bash examples/gr00t_sft/run_docker.sh
+```
+
+Set `DATA_ROOT`, `NUM_GPUS`, or any of the batch-size variables before running
+the script to override its defaults. The expanded equivalent command is shown
+below for users who need to customize Docker options directly.
+
 ```bash
 export NUM_GPUS=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
 export GLOBAL_BATCH_SIZE=64
@@ -337,7 +352,6 @@ docker run --rm \
   --ulimit stack=67108864 \
   -v "$DATA_HOST:/data" \
   -v "$REPO_HOST:/workspace/verl-vla:ro" \
-  -v "$DATA_HOST/libero_cache/assets:/root/.cache/libero/assets:ro" \
   -e HF_HOME=/data/huggingface \
   -e PYTHONPATH=/workspace/verl-vla/src \
   -e PYTHONDONTWRITEBYTECODE=1 \
@@ -395,7 +409,6 @@ docker run --rm \
   --ulimit stack=67108864 \
   -v "$DATA_HOST:/data" \
   -v "$REPO_HOST:/workspace/verl-vla:ro" \
-  -v "$DATA_HOST/libero_cache/assets:/root/.cache/libero/assets:ro" \
   -e HF_HOME=/data/huggingface \
   -e PYTHONPATH=/workspace/verl-vla/src \
   -e PYTHONDONTWRITEBYTECODE=1 \

@@ -25,14 +25,12 @@ from verl.utils.memory_utils import aggressive_empty_cache
 from verl.workers.engine import EngineRegistry
 from verl.workers.engine.fsdp.transformer_impl import FSDPEngine
 
-from verl_vla.models import register_vla_models
-
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
 @EngineRegistry.register(model_type="vla_model", backend=["fsdp", "fsdp2"], device=["cuda", "npu"])
-class FSDPEngineWithActionHEAD(FSDPEngine):
+class VLAFSDPEngine(FSDPEngine):
     """VLA-specific FSDP engine skeleton."""
 
     def __init__(self, *args, **kwargs):
@@ -43,9 +41,36 @@ class FSDPEngineWithActionHEAD(FSDPEngine):
         self._fsdp_unshard_exit_stack = None
 
     def _build_module(self):
-        register_vla_models()
-        logger.info("Registered VLA models before building VLA FSDP engine")
-        return super()._build_module()
+        if getattr(self.model_config, "native_architecture", None) is None:
+            raise ValueError(
+                "VLA checkpoint architecture was not recognized. Add an explicit builder in "
+                "verl_vla.models.builder instead of registering the model with a Transformers AutoClass."
+            )
+
+        from verl.utils.torch_dtypes import PrecisionType
+
+        from verl_vla.models import build_vla_model
+
+        torch_dtype = self.engine_config.model_dtype
+        if torch_dtype is None:
+            torch_dtype = torch.float32 if not self.engine_config.forward_only else torch.bfloat16
+        torch_dtype = PrecisionType.to_dtype(torch_dtype)
+        module = build_vla_model(self.model_config, torch_dtype=torch_dtype)
+        module.to(torch_dtype)
+        return module
+
+    def initialize(self):
+        super().initialize()
+        from .native_policy_checkpoint_manager import NativePolicyFSDPCheckpointManager
+
+        self.checkpoint_manager = NativePolicyFSDPCheckpointManager(
+            model=self.module,
+            optimizer=self.optimizer,
+            lr_scheduler=self.lr_scheduler,
+            processing_class=self.model_config.get_processor(),
+            checkpoint_config=self.checkpoint_config,
+            trust_remote_code=self.model_config.trust_remote_code,
+        )
 
     def switch_to_rollout(self):
         if self._rollout_eval_ctx is not None:

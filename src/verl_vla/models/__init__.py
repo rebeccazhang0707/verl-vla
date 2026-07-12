@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .register_vla_models import register_vla_models
+from .base import TrainableVLAModelMixin
+from .builder import build_vla_model
 
 __all__ = [
-    "register_vla_models",
+    "TrainableVLAModelMixin",
+    "build_vla_model",
 ]

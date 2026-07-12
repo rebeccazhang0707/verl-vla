@@ -12,21 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Deprecated compatibility aliases for PI0 embodiment mappings.
+
+Use :mod:`verl_vla.models.pi0_torch.embodiments` in new code.  This module is
+kept so existing extensions do not break during the terminology migration.
+"""
+
 from .arena_policy import ArenaPi0Input, ArenaPi0Output
 from .base import Pi0Input, Pi0Output
 from .lerobot_policy import LerobotPi0Input, LerobotPi0Output
 from .libero_policy import LiberoPi0Input, LiberoPi0Output
 
-_PI0_POLICY_REGISTRY = {
-    "arena": (ArenaPi0Input, ArenaPi0Output),
-    "libero": (LiberoPi0Input, LiberoPi0Output),
-    "lerobot": (LerobotPi0Input, LerobotPi0Output),
-}
-
 
 def get_pi0_policy_classes(policy_type: str) -> tuple[type[Pi0Input], type[Pi0Output]]:
-    try:
-        return _PI0_POLICY_REGISTRY[policy_type]
-    except KeyError as exc:
-        supported = ", ".join(sorted(_PI0_POLICY_REGISTRY))
-        raise ValueError(f"Unknown pi0 policy_type: {policy_type}. Supported values: {supported}") from exc
+    from ..embodiments import get_pi0_embodiment_classes
+
+    return get_pi0_embodiment_classes(policy_type)
+
+
+__all__ = [
+    "ArenaPi0Input",
+    "ArenaPi0Output",
+    "LerobotPi0Input",
+    "LerobotPi0Output",
+    "LiberoPi0Input",
+    "LiberoPi0Output",
+    "Pi0Input",
+    "Pi0Output",
+    "get_pi0_policy_classes",
+]

@@ -26,29 +26,28 @@ import torch.nn.functional as F
 from onnx_ir import Tensor
 from torch import nn
 from torch.distributed.fsdp import register_fsdp_forward_method
-from transformers import PreTrainedModel
 from typing_extensions import override
 from verl.protocol import DataProto
 from verl.utils.device import get_device_name
 
 from verl_vla.utils.scalar_schedule import ScheduledScalar
 
-from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining
-from .configuration_pi0_torch import PI0TorchConfig
+from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelMixin
+from .adapter_config import PI0AdapterConfig
 from .critic import (
     CrossAttentionCriticBackend,
     MeanPoolCriticBackend,
     MultiCrossAttentionCriticBackend,
 )
-from .model.modeling_pi0 import PI0Model, make_att_2d_masks
+from .embodiments import get_pi0_embodiment_classes
+from .embodiments.base import Pi0Output
+from .model.modeling_pi0 import PI0Policy, make_att_2d_masks
 from .pi0_utils import (
     ImageTransform,
     Normalize,
     PromptTokenizerTransform,
     Unnormalize,
 )
-from .policy import get_pi0_policy_classes
-from .policy.base import Pi0Output
 
 CRITIC_BACKENDS = {
     "cross_attn": CrossAttentionCriticBackend(),
@@ -80,34 +79,39 @@ def load_pi0_norm_stats(path: str | os.PathLike[str]) -> tuple[dict, dict]:
     return state_stats, action_stats
 
 
-class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTraining):
-    config_class = PI0TorchConfig
-    base_model_prefix = "pi0_torch"
-
-    def __init__(self, config: PI0TorchConfig):
-        super().__init__(config)
+class PI0TrainableModel(
+    nn.Module,
+    TrainableVLAModelMixin,
+    SupportSACTraining,
+    SupportSFTTraining,
+):
+    def __init__(self, config: PI0AdapterConfig, policy: PI0Policy | None = None):
+        super().__init__()
+        self.config = config
         SupportSFTTraining.__init__(self, config)
-        self.model = PI0Model(
-            max_state_dim=int(getattr(config, "max_state_dim", 32)),
-            max_action_dim=int(getattr(config, "max_action_dim", 32)),
-            proj_width=int(getattr(config, "proj_width", 1024)),
-            n_action_steps=int(getattr(config, "n_action_steps", 50)),
-            num_steps=int(getattr(config, "num_steps", 10)),
-            use_cache=bool(getattr(config, "use_cache", True)),
-            pi05_enabled=bool(getattr(config, "pi05_enabled", False)),
-        )
+        if policy is None:
+            policy = PI0Policy(
+                max_state_dim=int(getattr(config, "max_state_dim", 32)),
+                max_action_dim=int(getattr(config, "max_action_dim", 32)),
+                proj_width=int(getattr(config, "proj_width", 1024)),
+                n_action_steps=int(getattr(config, "n_action_steps", 50)),
+                num_steps=int(getattr(config, "num_steps", 10)),
+                use_cache=bool(getattr(config, "use_cache", True)),
+                pi05_enabled=bool(getattr(config, "pi05_enabled", False)),
+            )
+        self.init_trainable_model(policy=policy)
         norm_stats_path = getattr(config, "norm_stats_path", None)
         if hasattr(config, "norm_stats_path"):
             delattr(config, "norm_stats_path")
         if not norm_stats_path:
-            model_path = getattr(config, "_name_or_path", None)
+            model_path = config.model_path
             checkpoint_stats_path = Path(model_path).expanduser() / "norm_stats.json" if model_path else None
             if checkpoint_stats_path and checkpoint_stats_path.is_file():
                 norm_stats_path = checkpoint_stats_path
         if norm_stats_path:
             norm_stats_path = Path(norm_stats_path).expanduser()
             if not norm_stats_path.is_absolute():
-                model_path = getattr(config, "_name_or_path", None)
+                model_path = config.model_path
                 if model_path:
                     norm_stats_path = Path(model_path).expanduser() / norm_stats_path
             self.state_norm_stats, self.action_norm_stats = load_pi0_norm_stats(norm_stats_path)
@@ -117,13 +121,14 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             self.action_norm_stats = config.action_norm_stats
             self.norm_stats_path = None
         self.pi05_enabled = config.pi05_enabled
-        self.policy_type = config.policy_type
+        self.embodiment = getattr(config, "embodiment", getattr(config, "policy_type", "libero"))
         self.action_chunk_size = int(getattr(config, "action_chunk_size", 10))
-        self.critic_type = getattr(config, "critic_type", "cross_attn")
+        self.critic_type = config.critic.type
+        self.critic = None
 
-        assert self.state_norm_stats, "state_norm_stats must be provided in PI0TorchConfig"
-        assert self.action_norm_stats, "action_norm_stats must be provided in PI0TorchConfig"
-        assert isinstance(self.pi05_enabled, bool), "pi05_enabled must be provided in PI0TorchConfig"
+        assert self.state_norm_stats, "state_norm_stats must be provided for the PI0 adapter"
+        assert self.action_norm_stats, "action_norm_stats must be provided for the PI0 adapter"
+        assert isinstance(self.pi05_enabled, bool), "pi05_enabled must be provided by the native PI0 policy config"
 
         # Input transforms
         self.state_normalize_transform = Normalize(self.state_norm_stats, use_quantiles=self.pi05_enabled)
@@ -156,14 +161,18 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         self.register_buffer("flow_sde_step", torch.zeros((), dtype=torch.long))
 
         ##### SAC Algorithm Support #####
-        if getattr(self.config, "sac_enable", False):
+        if self.config.critic.enabled:
             if self.critic_type not in CRITIC_BACKENDS:
                 raise ValueError(f"Unsupported critic_type: {self.critic_type}")
             self.critic_api = CRITIC_BACKENDS[self.critic_type]
             self.critic_api.init(self)
 
+    def _get_pi0_embodiment_classes(self):
+        return get_pi0_embodiment_classes(self.embodiment)
+
     def _get_pi0_policy_classes(self):
-        return get_pi0_policy_classes(self.policy_type)
+        """Compatibility alias for downstream extensions using the old name."""
+        return self._get_pi0_embodiment_classes()
 
     def _to(self, device: torch.device | str):
         self.state_normalize_transform.to(device)
@@ -197,10 +206,10 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             Predicted v_t with shape (B, n_action_steps, action_dim).
         """
 
-        if self.model is None:
-            raise RuntimeError("PI0ForActionPrediction.model is not initialized. Did from_pretrained() run?")
+        if self.policy is None:
+            raise RuntimeError("PI0TrainableModel.policy is not initialized. Did from_pretrained() run?")
 
-        return self.model(
+        return self.policy(
             images,
             img_masks,
             lang_tokens,
@@ -247,7 +256,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         )
 
         if self.flow_sde_enable and not eval:
-            prefix_features = self.model.embed_prefix(
+            prefix_features = self.policy.embed_prefix(
                 images=images,
                 img_masks=pi0_input.img_masks,
                 lang_tokens=lang_tokens,
@@ -261,7 +270,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
                 task_ids=torch.tensor(env_obs.non_tensor_batch["task_id"], device=state.device, dtype=torch.long),
             )
         else:
-            pred_action = self.model.sample_actions(images, pi0_input.img_masks, lang_tokens, lang_masks, state=state)
+            pred_action = self.policy.sample_actions(images, pi0_input.img_masks, lang_tokens, lang_masks, state=state)
             rollout_log_probs = torch.zeros(pred_action.shape[0], device=pred_action.device, dtype=torch.float32)
 
         # Output transforms
@@ -288,21 +297,42 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        del model_args
         config = kwargs.pop("config", None)
+        adapter_config = kwargs.pop("adapter_config", None)
+        policy_load_keys = {"cache_dir", "force_download", "local_files_only", "proxies", "revision", "token"}
+        policy_load_kwargs = {key: kwargs.pop(key) for key in tuple(kwargs) if key in policy_load_keys}
+        torch_dtype = kwargs.pop("torch_dtype", None)
+        if torch_dtype is not None:
+            policy_load_kwargs["torch_dtype"] = torch_dtype
 
+        policy = PI0Policy.from_pretrained(pretrained_model_name_or_path, **policy_load_kwargs)
+        policy_config = dict(policy.config)
         if config is None:
-            config = PI0TorchConfig.from_pretrained(pretrained_model_name_or_path)
-
-        policy = cls(config)
-        policy.model = PI0Model.from_pretrained(pretrained_model_name_or_path)
-        return policy
+            overrides = dict(adapter_config or {})
+            overrides.update(kwargs)
+            config = PI0AdapterConfig(
+                policy_config=policy_config,
+                model_path=pretrained_model_name_or_path,
+                **overrides,
+            )
+        elif not isinstance(config, PI0AdapterConfig):
+            config = PI0AdapterConfig(
+                policy_config=policy_config,
+                model_path=pretrained_model_name_or_path,
+                **dict(config),
+            )
+        return cls(config=config, policy=policy)
 
     def save_pretrained(self, save_directory, *args, state_dict=None, **kwargs):
         os.makedirs(save_directory, exist_ok=True)
 
+        policy_to_save = self.policy
         if state_dict is not None:
-            self.load_state_dict(state_dict, strict=False)
-        self.model.save_pretrained(save_directory, *args, **kwargs)
+            policy_state_dict = self.extract_policy_state_dict(state_dict)
+            policy_to_save = PI0Policy.from_config(dict(self.policy.config))
+            policy_to_save.load_state_dict(policy_state_dict, strict=True)
+        policy_to_save.save_pretrained(save_directory, *args, **kwargs)
 
         norm_stats_path = self.norm_stats_path
         if not norm_stats_path:
@@ -314,7 +344,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         exported_stats_path = Path(save_directory) / "norm_stats.json"
         source_stats_path = Path(norm_stats_path).expanduser()
         if not source_stats_path.is_absolute():
-            model_path = getattr(self.config, "_name_or_path", None)
+            model_path = self.config.model_path
             if model_path:
                 source_stats_path = Path(model_path).expanduser() / source_stats_path
 
@@ -330,18 +360,31 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             self.config.state_norm_stats = original_state_stats
             self.config.action_norm_stats = original_action_stats
 
+    def export_policy(self, output_dir, *, state_dict=None) -> None:
+        """Export PI0 weights together with its normalization statistics."""
+
+        self.save_pretrained(output_dir, state_dict=state_dict)
+
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
-        filtered_state_dict = {
-            key.removeprefix("model."): value for key, value in state_dict.items() if key.startswith("model.")
-        }
-        return self.model.load_state_dict(filtered_state_dict, strict=False, assign=assign)
+        # Preserve complete adapter checkpoints, including critic/target state.
+        normalized_state_dict = {}
+        for key, value in state_dict.items():
+            if key.startswith("critic_backend."):
+                key = f"critic.{key.removeprefix('critic_backend.')}"
+            elif key.startswith("auxiliary_modules.critic."):
+                key = f"critic.{key.removeprefix('auxiliary_modules.critic.')}"
+            normalized_state_dict[key] = value
+        return nn.Module.load_state_dict(self, normalized_state_dict, strict=strict, assign=assign)
+
+    def can_generate(self) -> bool:
+        return False
 
     def freeze_vision_tower(self) -> None:
         """Freeze the vision tower parameters."""
 
-        if self.model is None:
-            raise RuntimeError("PI0ForActionPrediction.model is not initialized. Did from_pretrained() run?")
-        vision_tower = self.model.paligemma_with_expert.vision_tower
+        if self.policy is None:
+            raise RuntimeError("PI0TrainableModel.policy is not initialized. Did from_pretrained() run?")
+        vision_tower = self.policy.paligemma_with_expert.vision_tower
         vision_tower.requires_grad_(False)
         vision_tower.eval()
 
@@ -366,9 +409,9 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         del target_values
         pi0_input_cls, _ = self._get_pi0_policy_classes()
         action_tensor = actions["action"]
-        action_horizon = self.model.n_action_steps
+        action_horizon = self.policy.n_action_steps
         action_length = min(action_tensor.shape[1], action_horizon)
-        action_tensor = action_tensor[:, :action_horizon, : self.model.max_action_dim]
+        action_tensor = action_tensor[:, :action_horizon, : self.policy.max_action_dim]
         if action_mask is not None:
             action_mask = action_mask[:, :action_horizon]
         if action_tensor.shape[1] < action_horizon:
@@ -392,7 +435,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             action_tensor,
             (
                 0,
-                self.model.max_action_dim - action_tensor.shape[-1],
+                self.policy.max_action_dim - action_tensor.shape[-1],
             ),
             value=0.0,
         )
@@ -407,7 +450,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
                 {"task": pi0_input.task, "observation.state": states}, tokenizer
             )
 
-        noise = self.model.sample_noise(action_tensor.shape, device=action_tensor.device)
+        noise = self.policy.sample_noise(action_tensor.shape, device=action_tensor.device)
         gamma1 = torch.empty((action_tensor.shape[0],), device=action_tensor.device).uniform_(0, 1).pow(1 / 1.5)
         gamma2 = torch.empty((action_tensor.shape[0],), device=action_tensor.device).uniform_(0, 1).pow(1 / 1.0)
         time = (gamma1 / (gamma1 + gamma2)) * 0.999 + 0.001
@@ -417,7 +460,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         x_t = time_expanded * noise + (1.0 - time_expanded) * action_tensor
         u_t = noise - action_tensor
 
-        model_pred = self.model(images, img_masks, lang_tokens, lang_masks, states, x_t, time)
+        model_pred = self.policy(images, img_masks, lang_tokens, lang_masks, states, x_t, time)
         loss = F.mse_loss(u_t, model_pred, reduction="none").mean(dim=-1)
         valids = valids.to(device=loss.device, dtype=loss.dtype)
         if action_mask is None:
@@ -520,19 +563,19 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         )
 
         past_key_values = self._build_kv_cache_from_prefix(prefix_features)
-        actions_shape = (batch_size, self.model.n_action_steps, self.model.max_action_dim)
+        actions_shape = (batch_size, self.policy.n_action_steps, self.policy.max_action_dim)
         x_t = torch.randn(actions_shape, device=device, dtype=prefix_embs.dtype)
 
-        timesteps = torch.linspace(1.0, 0.0, self.model.num_steps + 1, dtype=torch.float32, device=device)
+        timesteps = torch.linspace(1.0, 0.0, self.policy.num_steps + 1, dtype=torch.float32, device=device)
         step_log_probs: list[torch.Tensor] = []
 
-        for idx in range(self.model.num_steps):
+        for idx in range(self.policy.num_steps):
             t_cur = timesteps[idx]
             t_next = timesteps[idx + 1]
             delta = (t_cur - t_next).clamp_min(1e-6)
 
             if requires_grad:
-                v_t = self.model.denoise_step(
+                v_t = self.policy.denoise_step(
                     states,
                     prefix_pad_masks,
                     past_key_values,
@@ -541,7 +584,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
                 )
             else:
                 with torch.no_grad():
-                    v_t = self.model.denoise_step(
+                    v_t = self.policy.denoise_step(
                         states,
                         prefix_pad_masks,
                         past_key_values,
@@ -595,12 +638,12 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
         with torch.no_grad():
-            _, past_key_values = self.model.paligemma_with_expert.forward(
+            _, past_key_values = self.policy.paligemma_with_expert.forward(
                 attention_mask=prefix_att_2d_masks,
                 position_ids=prefix_position_ids,
                 past_key_values=None,
                 inputs_embeds=[prefix_embs, None],
-                use_cache=self.model.use_cache,
+                use_cache=self.policy.use_cache,
                 fill_kv_cache=True,
                 adarms_cond=[None, None],
             )
@@ -732,7 +775,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
 
     @override
     def sac_get_named_actor_parameters(self) -> list[tuple[str, torch.nn.Parameter]]:
-        named_parameters = [(name, param) for name, param in self.model.named_parameters() if param.requires_grad]
+        named_parameters = [(name, param) for name, param in self.policy.named_parameters() if param.requires_grad]
         return named_parameters
 
     @override
@@ -750,7 +793,7 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             lang_tokens, lang_masks = self.prompt_tokenizer_transform.call_batch(
                 {"task": pi0_input.task, "observation.state": state}, tokenizer
             )
-            prefix_features = self.model.embed_prefix(
+            prefix_features = self.policy.embed_prefix(
                 images=images,
                 img_masks=pi0_input.img_masks,
                 lang_tokens=lang_tokens,
@@ -762,7 +805,3 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
     @torch.no_grad()
     def sac_update_target_network(self, tau: float):
         self.critic_api.update_target_network(self, tau)
-
-
-class PI0ForConditionalGeneration(PI0ForActionPrediction):
-    pass

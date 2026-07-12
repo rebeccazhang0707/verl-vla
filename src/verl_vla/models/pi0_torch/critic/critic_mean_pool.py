@@ -112,13 +112,11 @@ class MeanPoolCriticBackend(CriticBackend):
     uses_task_ids = False
 
     def init(self, model) -> None:
-        head_num = int(getattr(model.config, "critic_head_num", 2))
-        input_dim = int(getattr(model.config, "critic_input_dim", 2150))
-        hidden_dims = [int(dim) for dim in getattr(model.config, "critic_hidden_dims", [1024, 512, 256])]
-        model.critic_backend = MeanPoolCriticGroup(
-            head_num=head_num,
-            input_dim=input_dim,
-            hidden_dims=hidden_dims,
+        config = model.config.critic
+        model.critic = MeanPoolCriticGroup(
+            head_num=int(config.head_num),
+            input_dim=int(config.input_dim),
+            hidden_dims=[int(dim) for dim in config.hidden_dims],
         )
 
     def forward(
@@ -136,7 +134,7 @@ class MeanPoolCriticBackend(CriticBackend):
         requires_grad: bool = False,
     ) -> torch.Tensor:
         del task_ids
-        return model.critic_backend(
+        return model.critic(
             a=a,
             state_features=state_features,
             use_target_network=use_target_network,
@@ -145,8 +143,8 @@ class MeanPoolCriticBackend(CriticBackend):
         )
 
     def get_critic_parameters(self, model) -> list[torch.nn.Parameter]:
-        return model.critic_backend.get_critic_parameters()
+        return model.critic.get_critic_parameters()
 
     @torch.no_grad()
     def update_target_network(self, model, tau: float) -> None:
-        model.critic_backend.update_target_network(tau)
+        model.critic.update_target_network(tau)

@@ -31,13 +31,12 @@ from verl.workers.config import HFModelConfig, TrainingWorkerConfig
 from verl.workers.engine_workers import ActorRolloutRefWorker
 from verl.workers.rollout.base import BaseRollout, get_rollout_class
 
-from verl_vla.models.register_vla_models import register_vla_models
 from verl_vla.workers.config import ActorConfig, ActorDataKeysConfig, RolloutConfig, SFTActorConfig
 from verl_vla.workers.engine.sac import SACTrainingWorker
 from verl_vla.workers.engine.sft import SFTTrainingWorker
 from verl_vla.workers.rollout import register_vla_rollouts
 
-from .fsdp import FSDPEngineWithActionHEAD
+from .fsdp import VLAFSDPEngine
 
 register_vla_rollouts()
 
@@ -101,13 +100,13 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
             self, DistProfiler(rank=self.rank, config=profiler_config, tool_config=tool_config)
         )
 
-    def _require_fsdp_rollout_engine(self) -> FSDPEngineWithActionHEAD:
+    def _require_fsdp_rollout_engine(self) -> VLAFSDPEngine:
         if self.config.actor.strategy not in {"fsdp", "fsdp2"}:
             raise RuntimeError(
                 "switch_to_rollout/switch_to_train are only supported when actor.strategy is fsdp or fsdp2."
             )
-        if self.actor is None or not isinstance(self.actor.engine, FSDPEngineWithActionHEAD):
-            raise RuntimeError("VLA rollout switching requires a FSDPEngineWithActionHEAD-backed actor engine.")
+        if self.actor is None or not isinstance(self.actor.engine, VLAFSDPEngine):
+            raise RuntimeError("VLA rollout switching requires a VLAFSDPEngine-backed actor engine.")
         return self.actor.engine
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
@@ -272,6 +271,3 @@ class VLAActorWorker(VLAActorRolloutRefWorker):
 class VLARolloutWorker(VLAActorRolloutRefWorker):
     def __init__(self, config, role=None):
         super().__init__(config, role="rollout")
-
-
-register_vla_models()

@@ -57,46 +57,20 @@ class HFRollout(BaseRollout):
         if self.module is None:
             logger.info("No shared actor engine provided, loading model from path...")
 
-            from transformers import AutoConfig
-            from verl.utils.model import update_model_config
-            from verl.utils.transformers_compat import get_auto_model_for_vision2seq
-
-            # 1. Get the correct AutoClass
-            AutoModelForVision2Seq = get_auto_model_for_vision2seq()
-
-            # 2. Load and apply override_config to hf_config
-            hf_config = AutoConfig.from_pretrained(
-                model_config.path,
-                trust_remote_code=True,
-            )
-
-            # Apply override_config, ensure sac_enable=True
-            if hasattr(model_config, "override_config") and model_config.override_config:
-                override_config = (
-                    model_config.override_config["model_config"]
-                    if "model_config" in model_config.override_config
-                    else model_config.override_config
+            if getattr(model_config, "native_architecture", None) is None:
+                raise ValueError(
+                    "VLA checkpoint architecture was not recognized. Add an explicit model builder instead of "
+                    "using a Transformers AutoClass."
                 )
-                update_model_config(hf_config, override_config)
 
-            # Ensure sac_enable is True (if critic is needed)
+            from verl_vla.models import build_vla_model
+
             if self.output_critic_value:
-                if not getattr(hf_config, "sac_enable", False):
-                    logger.info("Setting sac_enable=True for rollout to use critic...")
-                    hf_config.sac_enable = True
-
-            # 3. Load model with correct config
-            self.module = AutoModelForVision2Seq.from_pretrained(
-                model_config.path,
-                config=hf_config,
-                trust_remote_code=True,
-            )
+                model_config.adapter.setdefault("critic", {})["enabled"] = True
+            self.module = build_vla_model(model_config, torch_dtype=torch.bfloat16)
             self.module = self.module.to(get_device_name())
             self.module.eval()
-
-            # 4. Initialize SAC components
             if hasattr(self.module, "sac_init"):
-                logger.info("Initializing SAC components for rollout model...")
                 self.module.sac_init()
 
         from torch.distributed.fsdp import register_fsdp_forward_method
