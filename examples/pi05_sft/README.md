@@ -6,8 +6,8 @@ example. The launcher is configured for one node with eight GPUs.
 
 ## Directory layout
 
-Keep the model, dataset, and training output under the repository-local
-`.data/pi05_sft` directory:
+Keep the dataset, Hugging Face cache, and training output under the
+repository-local `.data/pi05_sft` directory:
 
 ```text
 .data/pi05_sft/
@@ -17,24 +17,23 @@ Keep the model, dataset, and training output under the repository-local
 │       ├── meta/
 │       ├── videos/
 │       └── norm_stats.json
-├── models/
-│   └── torch_pi05_base/
-│       ├── config.json
-│       ├── tokenizer.json
-│       └── diffusion_pytorch_model-*.safetensors
+├── huggingface/
 └── output/
 ```
 
 Both launch methods use the same repository-relative locations:
 
 ```text
-model:   .data/pi05_sft/models/torch_pi05_base
+model:   Miical/pi05-base
 dataset: .data/pi05_sft/datasets/libero_spatial_image
 output:  .data/pi05_sft/output/pi05_libero_spatial_sft
 ```
 
-Docker mounts the repository at `/workspace/verl-vla`; native execution uses
-the local repository path directly.
+The converted PI0.5 policy and tokenizer are downloaded from the same Hugging
+Face repository. Docker keeps the Hub cache in `.data/pi05_sft/huggingface`
+instead of storing the 13 GB checkpoint in its temporary writable layer.
+Set `MODEL_PATH` and optionally `TOKENIZER_PATH` to use a different Hub repo or
+local directory.
 
 ## Option 1: Docker
 
@@ -83,10 +82,10 @@ Run the host-side launcher from anywhere in the repository:
 bash examples/pi05_sft/run_docker.sh
 ```
 
-The launcher verifies the image, checkpoint, dataset, and `norm_stats.json`,
-then exposes all eight GPUs and starts training. Because the source repository
-is bind-mounted and installed in editable mode, Python changes do not require
-rebuilding the image.
+The launcher verifies the image, dataset, and `norm_stats.json`, downloads the
+model if it is not already cached, then exposes all eight GPUs and starts
+training. Because the source repository is bind-mounted and installed in
+editable mode, Python changes do not require rebuilding the image.
 
 ## Option 2: Native
 

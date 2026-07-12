@@ -6,18 +6,18 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "$REPO_ROOT"
 
 DATA_ROOT=$REPO_ROOT/.data/pi05_sft
-MODEL_PATH=$DATA_ROOT/models/torch_pi05_base
-TOKENIZER_PATH=$DATA_ROOT/tokenizers/torch_pi05_base
+MODEL_PATH=${MODEL_PATH:-Miical/pi05-base}
+TOKENIZER_PATH=${TOKENIZER_PATH:-$MODEL_PATH}
 SFT_ROOT=$DATA_ROOT/datasets/libero_spatial_image
 NORM_STATS_PATH=$SFT_ROOT/norm_stats.json
 OUTPUT_DIR=$DATA_ROOT/output/pi05_libero_spatial_sft
 
-if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
+if [[ "${MODEL_PATH}" == /* && ! -f "${MODEL_PATH}/config.json" ]]; then
   echo "Pi0.5 model config not found: ${MODEL_PATH}/config.json" >&2
   exit 2
 fi
 
-if [[ ! -f "${TOKENIZER_PATH}/tokenizer.json" ]]; then
+if [[ "${TOKENIZER_PATH}" == /* && ! -f "${TOKENIZER_PATH}/tokenizer.json" ]]; then
   echo "Pi0.5 tokenizer not found: ${TOKENIZER_PATH}" >&2
   exit 2
 fi

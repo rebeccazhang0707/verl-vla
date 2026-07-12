@@ -5,7 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME=verl-vla-pi0:dev
 DATA_ROOT="${REPO_ROOT}/.data/pi05_sft"
-MODEL_PATH="${DATA_ROOT}/models/torch_pi05_base"
+MODEL_PATH=${MODEL_PATH:-Miical/pi05-base}
+TOKENIZER_PATH=${TOKENIZER_PATH:-$MODEL_PATH}
 MODEL_MOUNT_ARGS=()
 
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
@@ -14,16 +15,22 @@ if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   exit 2
 fi
 
-if [[ ! -f "${MODEL_PATH}/config.json" ]]; then
+if [[ -e "${MODEL_PATH}" ]]; then
+  MODEL_PATH="$(realpath "${MODEL_PATH}")"
+  MODEL_MOUNT_ARGS+=(-v "${MODEL_PATH}:${MODEL_PATH}:ro")
+elif [[ "${MODEL_PATH}" == /* ]]; then
   echo "Pi0.5 model not found: ${MODEL_PATH}" >&2
   exit 2
 fi
 
-if [[ -L "${MODEL_PATH}" ]]; then
-  RESOLVED_MODEL_PATH="$(readlink -f "${MODEL_PATH}")"
-  if [[ "${RESOLVED_MODEL_PATH}" != "${REPO_ROOT}"/* ]]; then
-    MODEL_MOUNT_ARGS=(-v "${RESOLVED_MODEL_PATH}:${RESOLVED_MODEL_PATH}:ro")
+if [[ -e "${TOKENIZER_PATH}" ]]; then
+  TOKENIZER_PATH="$(realpath "${TOKENIZER_PATH}")"
+  if [[ "${TOKENIZER_PATH}" != "${MODEL_PATH}" ]]; then
+    MODEL_MOUNT_ARGS+=(-v "${TOKENIZER_PATH}:${TOKENIZER_PATH}:ro")
   fi
+elif [[ "${TOKENIZER_PATH}" == /* ]]; then
+  echo "Pi0.5 tokenizer not found: ${TOKENIZER_PATH}" >&2
+  exit 2
 fi
 
 if [[ ! -f "${DATA_ROOT}/datasets/libero_spatial_image/meta/info.json" ]]; then
@@ -37,7 +44,7 @@ if [[ ! -f "${DATA_ROOT}/datasets/libero_spatial_image/norm_stats.json" ]]; then
   exit 2
 fi
 
-mkdir -p "${DATA_ROOT}/output"
+mkdir -p "${DATA_ROOT}/huggingface" "${DATA_ROOT}/output"
 
 exec docker run --rm -it \
   --gpus all \
@@ -45,5 +52,9 @@ exec docker run --rm -it \
   --entrypoint /bin/bash \
   -v "${REPO_ROOT}:/workspace/verl-vla" \
   "${MODEL_MOUNT_ARGS[@]}" \
+  -e HF_ENDPOINT \
+  -e HF_HOME=/workspace/verl-vla/.data/pi05_sft/huggingface \
+  -e MODEL_PATH="${MODEL_PATH}" \
+  -e TOKENIZER_PATH="${TOKENIZER_PATH}" \
   "$IMAGE_NAME" \
   -lc 'python3 -m pip install --no-deps -e . && exec bash examples/pi05_sft/run_pi05_libero_spatial_sft.sh'

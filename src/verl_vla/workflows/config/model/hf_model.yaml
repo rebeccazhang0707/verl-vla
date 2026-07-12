@@ -26,7 +26,7 @@ defaults:
 _target_: verl_vla.workers.config.VLAModelConfig
 
 # Default model path. Override this for a different HF checkpoint.
-path: /file_system/liujincheng/models/pi05_libero_torch
+path: Miical/pi05-base
 
 # Tokenizer path defaults to the model path.
 tokenizer_path: ${.path}
