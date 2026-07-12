@@ -71,7 +71,11 @@ class EnvLoop:
         rollout_meta_info = {"eval": True} if eval else {}
         env_mode = "eval" if eval else "train"
 
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
         if self.switch_actor_rollout_mode:
             self.rollout_wg.switch_to_rollout()
