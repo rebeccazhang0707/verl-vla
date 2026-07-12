@@ -43,7 +43,7 @@ if [[ ! -f "${LIBERO_CONFIG_PATH}/config.yaml" ]]; then
     > "${LIBERO_CONFIG_PATH}/config.yaml"
 fi
 
-python scripts/check_gr00t_n1d6_install.py
+python scripts/install_checks/check_gr00t_n1d6.py
 
 python -m verl_vla.entrypoints.train.sac \
   model/override@cluster.actor_rollout_ref.model.override_config=gr00t \
@@ -59,7 +59,7 @@ python -m verl_vla.entrypoints.train.sac \
   cluster.actor_rollout_ref.model.override_config.num_attention_heads=32 \
   cluster.actor_rollout_ref.model.override_config.num_key_value_heads=32 \
   cluster.actor_rollout_ref.model.override_config.verl_processor_path="$MODEL_PATH" \
-  cluster.actor_rollout_ref.model.override_config.verl_norm_stats_path="$NORM_STATS_PATH" \
+  cluster.actor_rollout_ref.model.override_config.norm_stats_path="$NORM_STATS_PATH" \
   cluster.actor_rollout_ref.model.override_config.verl_action_chunk_size="$ACTION_CHUNK_SIZE" \
   cluster.actor_rollout_ref.actor.strategy=fsdp2 \
   cluster.actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

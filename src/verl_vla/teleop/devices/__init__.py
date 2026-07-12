@@ -15,7 +15,6 @@
 from verl_vla.teleop.devices.device_base import DeviceBase, DeviceEvent
 from verl_vla.teleop.devices.gamepad import GamepadDevice, GamepadDeviceCfg
 from verl_vla.teleop.devices.keyboard import KeyboardDevice, KeyboardDeviceCfg
-from verl_vla.teleop.devices.lerobot import LerobotDevice, LerobotDeviceCfg
 from verl_vla.teleop.devices.xr_controller import XRControllerDevice, XRControllerDeviceCfg
 
 __all__ = [
@@ -25,8 +24,6 @@ __all__ = [
     "GamepadDeviceCfg",
     "KeyboardDevice",
     "KeyboardDeviceCfg",
-    "LerobotDevice",
-    "LerobotDeviceCfg",
     "XRControllerDevice",
     "XRControllerDeviceCfg",
 ]

@@ -1,6 +1,6 @@
 verl==0.7.1
-lerobot==0.4.4
-feetech-servo-sdk==1.0.0
-numpy<2.0.0
-timm==0.9.16
-onnx-ir
+
+# Browser teleoperation server and control strategies.
+fastapi<1.0
+uvicorn[standard]
+scipy

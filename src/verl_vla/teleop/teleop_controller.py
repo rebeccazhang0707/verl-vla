@@ -23,8 +23,6 @@ from verl_vla.teleop.devices import (
     GamepadDeviceCfg,
     KeyboardDevice,
     KeyboardDeviceCfg,
-    LerobotDevice,
-    LerobotDeviceCfg,
     XRControllerDevice,
     XRControllerDeviceCfg,
 )
@@ -204,6 +202,15 @@ class TeleopController:
         if device_type == "gamepad":
             return GamepadDevice(GamepadDeviceCfg(max_events=self.teleop_cfg.gamepad.max_events))
         if device_type == "lerobot":
+            try:
+                from verl_vla.teleop.devices.lerobot import LerobotDevice, LerobotDeviceCfg
+            except ModuleNotFoundError as exc:
+                if exc.name != "lerobot":
+                    raise
+                raise ModuleNotFoundError(
+                    "LeRobot is required for LeRobot teleoperation. Use the project Docker image or install the "
+                    "compatible LeRobot 0.4.4 environment before enabling the lerobot device."
+                ) from exc
             return LerobotDevice(
                 LerobotDeviceCfg(
                     teleop_type=self.teleop_cfg.lerobot.teleop_type,

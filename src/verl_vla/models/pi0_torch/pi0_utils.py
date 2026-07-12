@@ -62,11 +62,16 @@ class Normalize:
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         x_dim = x.shape[-1]
         if self.use_quantiles:
-            return (x - self.q01[..., :x_dim]) / (
-                self.q99[..., :x_dim] - self.q01[..., :x_dim] + self.EPSILON
+            stats_dim = min(x_dim, self.q01.shape[-1])
+            normalized = (x[..., :stats_dim] - self.q01[..., :stats_dim]) / (
+                self.q99[..., :stats_dim] - self.q01[..., :stats_dim] + self.EPSILON
             ) * 2.0 - 1.0
         else:
-            return (x - self.mean[..., :x_dim]) / (self.std[..., :x_dim] + self.EPSILON)
+            stats_dim = min(x_dim, self.mean.shape[-1])
+            normalized = (x[..., :stats_dim] - self.mean[..., :stats_dim]) / (self.std[..., :stats_dim] + self.EPSILON)
+        if stats_dim == x_dim:
+            return normalized
+        return torch.cat((normalized, x[..., stats_dim:]), dim=-1)
 
 
 class Unnormalize:
@@ -93,11 +98,16 @@ class Unnormalize:
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         x_dim = x.shape[-1]
         if self.use_quantiles:
-            return (x + 1.0) / 2.0 * (self.q99[..., :x_dim] - self.q01[..., :x_dim] + self.EPSILON) + self.q01[
-                ..., :x_dim
-            ]
+            stats_dim = min(x_dim, self.q01.shape[-1])
+            unnormalized = (x[..., :stats_dim] + 1.0) / 2.0 * (
+                self.q99[..., :stats_dim] - self.q01[..., :stats_dim] + self.EPSILON
+            ) + self.q01[..., :stats_dim]
         else:
-            return x * (self.std[..., :x_dim] + self.EPSILON) + self.mean[..., :x_dim]
+            stats_dim = min(x_dim, self.mean.shape[-1])
+            unnormalized = x[..., :stats_dim] * (self.std[..., :stats_dim] + self.EPSILON) + self.mean[..., :stats_dim]
+        if stats_dim == x_dim:
+            return unnormalized
+        return torch.cat((unnormalized, x[..., stats_dim:]), dim=-1)
 
 
 class DeltaActions:

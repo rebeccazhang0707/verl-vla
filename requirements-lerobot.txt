@@ -1,0 +1,23 @@
+# LeRobot 0.4.4 runtime compatible with verl 0.7.1 and NumPy 1.26.
+torch==2.7.1
+torchvision==0.22.1
+torchcodec==0.4.0
+
+numpy==1.26.4
+transformers==4.51.3
+diffusers==0.35.1
+datasets==4.0.0
+huggingface-hub==0.35.3
+peft==0.17.1
+
+av==15.0.0
+imageio[ffmpeg]==2.37.3
+opencv-python-headless==4.10.0.84
+rerun-sdk==0.23.1
+gymnasium==1.2.2
+draccus==0.10.0
+deepdiff==8.6.2
+jsonlines==4.0.0
+packaging==25.0
+pyserial
+pynput

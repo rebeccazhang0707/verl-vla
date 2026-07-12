@@ -96,6 +96,6 @@ RUN mkdir -p /usr/share/glvnd/egl_vendor.d \
 WORKDIR /workspace/verl-vla
 COPY . .
 RUN python -m pip install --no-deps . \
-    && python scripts/check_gr00t_n1d6_install.py
+    && python scripts/install_checks/check_gr00t_n1d6.py
 
 CMD ["/bin/bash"]

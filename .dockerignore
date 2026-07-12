@@ -12,6 +12,8 @@ dist/
 logs/
 outputs/
 tensorboard_log/
+tensorboard_log.*/
+tests/
 tmp/
 wandb/
 

@@ -14,7 +14,7 @@ OUTPUT_DIR=${OUTPUT_DIR:-${DATA_ROOT}/output/gr00t_n1d6_libero_spatial_sft}
 HYDRA_RUN_DIR=${HYDRA_RUN_DIR:-${OUTPUT_DIR}/hydra}
 
 if [[ -z "$NORM_STATS_PATH" ]]; then
-  echo "NORM_STATS_PATH is required. Generate it with scripts/compute_norm_stats.py --include-min-max." >&2
+  echo "NORM_STATS_PATH is required. Generate it with scripts/compute_norm_stats.py." >&2
   exit 2
 fi
 
@@ -40,7 +40,7 @@ WRAP_CLASSES=${WRAP_CLASSES:-"[Qwen3DecoderLayer,Siglip2EncoderLayer,BasicTransf
 PROJECT_NAME=${PROJECT_NAME:-gr00t-n1d6-libero-sft}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-gr00t_n1d6_libero_spatial_sft}
 
-python scripts/check_gr00t_n1d6_install.py
+python scripts/install_checks/check_gr00t_n1d6.py
 
 python -m verl_vla.entrypoints.train.sft \
   --config-path "$SCRIPT_DIR" \
@@ -56,7 +56,7 @@ python -m verl_vla.entrypoints.train.sft \
   cluster.actor_rollout_ref.model.override_config.num_attention_heads=32 \
   cluster.actor_rollout_ref.model.override_config.num_key_value_heads=32 \
   cluster.actor_rollout_ref.model.override_config.verl_processor_path="$MODEL_PATH" \
-  cluster.actor_rollout_ref.model.override_config.verl_norm_stats_path="$NORM_STATS_PATH" \
+  cluster.actor_rollout_ref.model.override_config.norm_stats_path="$NORM_STATS_PATH" \
   cluster.actor_rollout_ref.model.override_config.verl_action_chunk_size=8 \
   cluster.actor_rollout_ref.actor.strategy=fsdp2 \
   cluster.actor_rollout_ref.actor.fsdp_config.model_dtype=float32 \

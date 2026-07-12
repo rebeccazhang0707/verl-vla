@@ -20,6 +20,9 @@ policy_type: libero
 # Attention implementation used by the PI0 backbone.
 attn_implementation: eager
 
+# Optional external state/action normalization statistics JSON.
+norm_stats_path: null
+
 # Enable SAC-specific model heads.
 sac_enable: True
 

@@ -80,7 +80,7 @@ environment must provide dependency versions compatible with the Dockerfile.
 python -m pip install --no-deps \
   "gr00t @ git+https://github.com/NVIDIA/Isaac-GR00T.git@e29d8fc50b0e4745120ae3fb72447986fe638aa6"
 python -m pip install --no-deps .
-python scripts/check_gr00t_n1d6_install.py
+python scripts/install_checks/check_gr00t_n1d6.py
 ```
 
 ### Docker
@@ -96,7 +96,7 @@ docker build \
   .
 ```
 
-The image build runs `scripts/check_gr00t_n1d6_install.py`. There is no need to
+The image build runs `scripts/install_checks/check_gr00t_n1d6.py`. There is no need to
 install or verify GR00T again on the host.
 
 ## 2. Download the LIBERO Spatial training dataset
@@ -145,7 +145,6 @@ python scripts/compute_norm_stats.py \
   --repo-id lerobot/libero_spatial_image \
   --root "$DATA_ROOT/datasets/libero_spatial_image" \
   --output-path "$DATA_ROOT/datasets/libero_spatial_image/norm_stats.json" \
-  --include-min-max \
   --batch-size 32 \
   --num-workers 8
 ```
@@ -168,7 +167,6 @@ docker run --rm \
     --repo-id lerobot/libero_spatial_image \
     --root /data/datasets/libero_spatial_image \
     --output-path /data/datasets/libero_spatial_image/norm_stats.json \
-    --include-min-max \
     --batch-size 32 \
     --num-workers 8
 ```

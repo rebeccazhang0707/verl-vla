@@ -22,14 +22,6 @@ from transformers import AutoConfig, AutoImageProcessor, AutoModel, AutoProcesso
 from verl.utils.transformers_compat import get_auto_model_for_vision2seq
 
 from .gr00t_n1d6 import GR00T_N1D6_COMMIT
-from .openvla_oft.configuration_prismatic import OpenVLAConfig
-from .openvla_oft.modeling_prismatic import OpenVLAForActionPrediction
-from .openvla_oft.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
-from .pi0_torch import PI0ForConditionalGeneration, PI0TorchConfig
-from .recap_value_critic import (
-    ReCapValueCriticConfig,
-    ReCapValueCriticForConditionalGeneration,
-)
 
 _REGISTERED_MODELS = {
     "openvla_oft": False,
@@ -40,10 +32,16 @@ _REGISTERED_MODELS = {
 AutoModelForVision2Seq = get_auto_model_for_vision2seq()
 
 
-def register_openvla_oft() -> None:
+def register_openvla_oft() -> bool:
     """Register the OpenVLA OFT model and processors."""
     if _REGISTERED_MODELS["openvla_oft"]:
-        return
+        return True
+    if importlib.util.find_spec("timm") is None:
+        return False
+
+    from .openvla_oft.configuration_prismatic import OpenVLAConfig
+    from .openvla_oft.modeling_prismatic import OpenVLAForActionPrediction
+    from .openvla_oft.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 
     AutoConfig.register("openvla", OpenVLAConfig)
     AutoImageProcessor.register(OpenVLAConfig, PrismaticImageProcessor)
@@ -51,12 +49,15 @@ def register_openvla_oft() -> None:
     AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
 
     _REGISTERED_MODELS["openvla_oft"] = True
+    return True
 
 
 def register_pi0_torch_model() -> None:
     """Register the PI0 wrapper with the HF auto classes."""
     if _REGISTERED_MODELS["pi0_torch"]:
         return
+
+    from .pi0_torch import PI0ForConditionalGeneration, PI0TorchConfig
 
     AutoConfig.register("pi0_torch", PI0TorchConfig)
     AutoModelForVision2Seq.register(PI0TorchConfig, PI0ForConditionalGeneration)
@@ -103,6 +104,11 @@ def register_recap_value_critic_model() -> None:
     """Register the RECAP value critic with the HF auto classes."""
     if _REGISTERED_MODELS["recap_value_critic"]:
         return
+
+    from .recap_value_critic import (
+        ReCapValueCriticConfig,
+        ReCapValueCriticForConditionalGeneration,
+    )
 
     AutoConfig.register("recap_value_critic", ReCapValueCriticConfig)
     AutoModel.register(ReCapValueCriticConfig, ReCapValueCriticForConditionalGeneration)

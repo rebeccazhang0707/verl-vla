@@ -151,7 +151,7 @@ class VerlGr00tN1d6(Gr00tN1d6, SupportSFTTraining):
                 )
             self._verl_processor = load_gr00t_processor(
                 str(processor_path),
-                getattr(self.config, "verl_norm_stats_path", None),
+                getattr(self.config, "norm_stats_path", None),
                 training=training,
             )
         elif self._verl_processor_training != training:
@@ -171,12 +171,12 @@ class VerlGr00tN1d6(Gr00tN1d6, SupportSFTTraining):
         """
         processor = self._get_verl_processor(training=False)
         original_processor_path = getattr(self.config, "verl_processor_path", None)
-        original_norm_stats_path = getattr(self.config, "verl_norm_stats_path", None)
+        original_norm_stats_path = getattr(self.config, "norm_stats_path", None)
         original_architectures = getattr(self.config, "architectures", None)
 
         # The exported checkpoint must not retain paths from the training host.
         self.config.verl_processor_path = None
-        self.config.verl_norm_stats_path = None
+        self.config.norm_stats_path = None
         try:
             result = super().save_pretrained(save_directory, *args, **kwargs)
             self.config.architectures = ["Gr00tN1d6"]
@@ -187,7 +187,7 @@ class VerlGr00tN1d6(Gr00tN1d6, SupportSFTTraining):
             return result
         finally:
             self.config.verl_processor_path = original_processor_path
-            self.config.verl_norm_stats_path = original_norm_stats_path
+            self.config.norm_stats_path = original_norm_stats_path
             self.config.architectures = original_architectures
 
     @torch.no_grad()

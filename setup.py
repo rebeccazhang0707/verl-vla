@@ -12,69 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pathlib import Path
+from setuptools import setup
 
-from setuptools import find_packages, setup
-
-THIS_DIRECTORY = Path(__file__).parent
-
-
-def read_version() -> str:
-    version_ns = {}
-    version_file = THIS_DIRECTORY / "src" / "verl_vla" / "version.py"
-    exec(version_file.read_text(), version_ns)
-    return version_ns["__version__"]
-
-
-def read_requirements(filename: str) -> list[str]:
-    requirements = []
-    for line in (THIS_DIRECTORY / filename).read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        requirements.append(line)
-    return requirements
-
-
-INSTALL_REQUIRES = read_requirements("requirements.txt")
-TEST_REQUIRES = read_requirements("requirements-test.txt")
-
-extras_require = {
-    "test": TEST_REQUIRES,
-}
-
-long_description = (THIS_DIRECTORY / "README.md").read_text()
-
-setup(
-    name="verl-vla",
-    version=read_version(),
-    package_dir={"": "src"},
-    packages=find_packages(where="src"),
-    url="https://github.com/verl-project/verl-vla",
-    license="Apache 2.0",
-    author="Bytedance",
-    description="VLA training framework of Volcano Engine",
-    install_requires=INSTALL_REQUIRES,
-    extras_require=extras_require,
-    entry_points={
-        "console_scripts": [
-            "vvla-dagger=verl_vla.entrypoints.dagger:main",
-            "vvla-record=verl_vla.entrypoints.record:main",
-            "vvla-teleop=verl_vla.entrypoints.teleop:main",
-            "vvla-train-ppo=verl_vla.entrypoints.train.ppo:main",
-            "vvla-train-recap=verl_vla.entrypoints.train.recap:main",
-            "vvla-train-sac=verl_vla.entrypoints.train.sac:main",
-            "vvla-train-sft=verl_vla.entrypoints.train.sft:main",
-        ],
-    },
-    package_data={
-        "verl_vla": [
-            "workflows/config/*.yaml",
-            "workflows/config/*/*.yaml",
-            "workflows/config/*/*/*.yaml",
-        ],
-    },
-    include_package_data=True,
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-)
+# Package metadata, dependencies, entry points, and package discovery are
+# configured in pyproject.toml. Keep this file as a compatibility entry point
+# for tooling that still invokes setup.py directly.
+setup()

@@ -24,7 +24,7 @@ num_key_value_heads: 32
 verl_processor_path: null
 
 # Optional runtime statistics override; merged checkpoints carry statistics.
-verl_norm_stats_path: null
+norm_stats_path: null
 
 # Number of predicted actions executed per environment interaction.
 verl_action_chunk_size: 8

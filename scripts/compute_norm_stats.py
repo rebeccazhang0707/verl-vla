@@ -18,14 +18,15 @@
 This script follows the same dataset loading style as the current VLA SFT pipeline:
 `LeRobotDataset` + `StatefulDataLoader`.
 
-It computes mean/std/q01/q99 for state and action tensors, with optional min/max,
+It computes min/max/mean/std/q01/q99 for state and action tensors,
 and writes a JSON file like:
 {
   "state": {"min": [...], "max": [...], "mean": [...], "std": [...], "q01": [...], "q99": [...]},
   "action": {"min": [...], "max": [...], "mean": [...], "std": [...], "q01": [...], "q99": [...]}
 }
 
-``min`` and ``max`` are emitted only when ``--include-min-max`` is set.
+``min`` and ``max`` are included by default and can be disabled with
+``--no-include-min-max``.
 """
 
 from __future__ import annotations
@@ -156,7 +157,7 @@ class RunningStats:
         self._update_histograms(x)
         self.count += int(batch_count)
 
-    def get_statistics(self, *, include_min_max: bool = False) -> dict[str, list[float]]:
+    def get_statistics(self, *, include_min_max: bool = True) -> dict[str, list[float]]:
         if self.sum_ is None or self.sq_sum_ is None or self.count == 0:
             raise ValueError("No data collected for running stats.")
 
@@ -252,7 +253,7 @@ def compute_norm_stats(
     revision: str | None = None,
     video_backend: str | None = "pyav",
     drop_last: bool = False,
-    include_min_max: bool = False,
+    include_min_max: bool = True,
 ) -> None:
     dataloader, num_batches = create_lerobot_dataloader(
         repo_id=repo_id,
@@ -338,8 +339,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--drop-last", action="store_true")
     parser.add_argument(
         "--include-min-max",
-        action="store_true",
-        help="Include per-dimension min/max values required by GR00T normalization.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include per-dimension min/max values (enabled by default).",
     )
     return parser.parse_args()
 

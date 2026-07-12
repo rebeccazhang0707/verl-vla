@@ -35,6 +35,22 @@ vvla-train-recap = "verl_vla.entrypoints.train.recap:main"
 vvla-train-sac = "verl_vla.entrypoints.train.sac:main"
 vvla-train-sft = "verl_vla.entrypoints.train.sft:main"
 
+[project.optional-dependencies]
+libero = [
+    "libero==0.1.1",
+    "mujoco==3.3.1",
+]
+lerobot-teleop = [
+    "feetech-servo-sdk==1.0.0",
+]
+openvla-oft = [
+    "timm==0.9.16",
+]
+pi0 = [
+    "diffusers==0.35.1",
+    "onnx-ir",
+]
+
 # -------------------------------
 # tool.ruff - Linting configuration
 # -------------------------------

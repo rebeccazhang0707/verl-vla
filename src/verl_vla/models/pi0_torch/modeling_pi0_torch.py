@@ -14,8 +14,11 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import shutil
+from pathlib import Path
 from typing import Literal, cast
 
 import torch
@@ -54,6 +57,29 @@ CRITIC_BACKENDS = {
 }
 
 
+def load_pi0_norm_stats(path: str | os.PathLike[str]) -> tuple[dict, dict]:
+    stats_path = Path(path).expanduser()
+    if not stats_path.is_file():
+        raise FileNotFoundError(f"Pi0 normalization statistics do not exist: {stats_path}")
+
+    with stats_path.open(encoding="utf-8") as file:
+        payload = json.load(file)
+    if not isinstance(payload, dict):
+        raise TypeError(f"Pi0 normalization statistics must be a JSON object: {stats_path}")
+
+    state_stats = payload.get("state")
+    action_stats = payload.get("action")
+    for name, stats in (("state", state_stats), ("action", action_stats)):
+        if not isinstance(stats, dict):
+            raise ValueError(f"Pi0 normalization statistics are missing a {name!r} object: {stats_path}")
+        for field in ("mean", "std", "q01", "q99"):
+            values = stats.get(field)
+            if not isinstance(values, list) or not values:
+                raise ValueError(f"Pi0 {name} normalization field {field!r} must be a non-empty list: {stats_path}")
+
+    return state_stats, action_stats
+
+
 class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTraining):
     config_class = PI0TorchConfig
     base_model_prefix = "pi0_torch"
@@ -70,8 +96,26 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
             use_cache=bool(getattr(config, "use_cache", True)),
             pi05_enabled=bool(getattr(config, "pi05_enabled", False)),
         )
-        self.state_norm_stats = config.state_norm_stats
-        self.action_norm_stats = config.action_norm_stats
+        norm_stats_path = getattr(config, "norm_stats_path", None)
+        if hasattr(config, "norm_stats_path"):
+            delattr(config, "norm_stats_path")
+        if not norm_stats_path:
+            model_path = getattr(config, "_name_or_path", None)
+            checkpoint_stats_path = Path(model_path).expanduser() / "norm_stats.json" if model_path else None
+            if checkpoint_stats_path and checkpoint_stats_path.is_file():
+                norm_stats_path = checkpoint_stats_path
+        if norm_stats_path:
+            norm_stats_path = Path(norm_stats_path).expanduser()
+            if not norm_stats_path.is_absolute():
+                model_path = getattr(config, "_name_or_path", None)
+                if model_path:
+                    norm_stats_path = Path(model_path).expanduser() / norm_stats_path
+            self.state_norm_stats, self.action_norm_stats = load_pi0_norm_stats(norm_stats_path)
+            self.norm_stats_path = norm_stats_path
+        else:
+            self.state_norm_stats = config.state_norm_stats
+            self.action_norm_stats = config.action_norm_stats
+            self.norm_stats_path = None
         self.pi05_enabled = config.pi05_enabled
         self.policy_type = config.policy_type
         self.action_chunk_size = int(getattr(config, "action_chunk_size", 10))
@@ -259,7 +303,32 @@ class PI0ForActionPrediction(PreTrainedModel, SupportSACTraining, SupportSFTTrai
         if state_dict is not None:
             self.load_state_dict(state_dict, strict=False)
         self.model.save_pretrained(save_directory, *args, **kwargs)
-        self.config.save_pretrained(save_directory)
+
+        norm_stats_path = self.norm_stats_path
+        if not norm_stats_path:
+            self.config.save_pretrained(save_directory)
+            return
+
+        original_state_stats = self.config.state_norm_stats
+        original_action_stats = self.config.action_norm_stats
+        exported_stats_path = Path(save_directory) / "norm_stats.json"
+        source_stats_path = Path(norm_stats_path).expanduser()
+        if not source_stats_path.is_absolute():
+            model_path = getattr(self.config, "_name_or_path", None)
+            if model_path:
+                source_stats_path = Path(model_path).expanduser() / source_stats_path
+
+        # Keep exported checkpoints self-contained without retaining stale
+        # embedded statistics or an absolute path from the training host.
+        if source_stats_path.resolve() != exported_stats_path.resolve():
+            shutil.copyfile(source_stats_path, exported_stats_path)
+        self.config.state_norm_stats = {}
+        self.config.action_norm_stats = {}
+        try:
+            self.config.save_pretrained(save_directory)
+        finally:
+            self.config.state_norm_stats = original_state_stats
+            self.config.action_norm_stats = original_action_stats
 
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
         filtered_state_dict = {

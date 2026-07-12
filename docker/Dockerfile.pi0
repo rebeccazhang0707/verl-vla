@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1
+# Minimal x86_64 base for verl-vla + Pi0.
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/workspace/verl-vla/src
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        git \
+        libgl1 \
+        libglib2.0-0 \
+        libosmesa6 \
+        python3 \
+        python3-dev \
+        python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+WORKDIR /workspace/verl-vla
+
+COPY requirements-lerobot.txt requirements-lerobot.txt
+COPY . .
+
+# verl 0.7.1 requires NumPy <2, while LeRobot 0.4.4 requires rerun-sdk>=0.24,
+# whose Linux wheels require NumPy 2. Install the verified LeRobot runtime and
+# bypass only LeRobot's unsatisfiable dependency metadata.
+RUN python3 -m pip install --requirement requirements-lerobot.txt
+RUN python3 -m pip install --no-deps lerobot==0.4.4
+RUN python3 -m pip install ".[pi0,libero]"
+
+# The PyPI source distribution omits LIBERO's scene and object assets. Fetch
+# the assets from a pinned revision of the official repository so environment
+# creation never depends on an implicit first-run download.
+ARG LIBERO_ASSETS_COMMIT=8f1084e3132a39270c3a13ebe37270a43ece2a01
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+ARG LIBERO_ASSETS_URL=https://codeload.github.com/Lifelong-Robot-Learning/LIBERO/tar.gz/${LIBERO_ASSETS_COMMIT}
+ARG LIBERO_ASSETS_SHA256=05ffcf8349b2e7ef31b038451253d76ca757debbf88c3a0c1de569ca38a80b14
+RUN curl --fail --location \
+        --retry 5 --retry-all-errors \
+        --connect-timeout 20 \
+        --output /tmp/libero-source.tar.gz \
+        "${LIBERO_ASSETS_URL}" \
+    && echo "${LIBERO_ASSETS_SHA256}  /tmp/libero-source.tar.gz" | sha256sum --check --strict \
+    && rm -rf /usr/local/lib/python3.10/dist-packages/libero/libero/assets \
+    && tar -xzf /tmp/libero-source.tar.gz \
+        --strip-components=3 \
+        -C /usr/local/lib/python3.10/dist-packages/libero/libero \
+        "LIBERO-${LIBERO_ASSETS_COMMIT}/libero/libero/assets" \
+    && rm /tmp/libero-source.tar.gz
+
+RUN python3 scripts/install_checks/check_libero.py
+
+CMD ["/bin/bash", "-lc", "python3 -m pip install --no-deps -e . && exec /bin/bash"]
