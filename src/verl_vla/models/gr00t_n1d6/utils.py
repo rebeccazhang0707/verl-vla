@@ -80,12 +80,13 @@ class EmbodimentSpec:
 
     name: str
     embodiment_id: int
-    state_group_dims: "OrderedDict[str, int]"
+    state_group_dims: OrderedDict[str, int]
 
     @property
     def action_dim(self) -> int:
         """Total action/state width as the sum of ``state_group_dims`` values."""
         return sum(self.state_group_dims.values())
+
 
 ################################################################################
 # GR1 humanoid: 26-DoF joint layout used by the Arena GR1 mapping.
@@ -105,7 +106,7 @@ LIBERO_PANDA = EmbodimentSpec(
 )
 
 # Registry of known embodiment tags → fallback specs.
-EMBODIMENTS: "dict[str, EmbodimentSpec]" = {
+EMBODIMENTS: dict[str, EmbodimentSpec] = {
     GR1.name: GR1,
     LIBERO_PANDA.name: LIBERO_PANDA,
 }
@@ -113,6 +114,7 @@ EMBODIMENTS: "dict[str, EmbodimentSpec]" = {
 # Filename written next to a checkpoint with ``{tag: embodiment_id}`` mapping.
 _EMBODIMENT_ID_FILENAME = "embodiment_id.json"
 ################################################################################
+
 
 def load_embodiment_id(tag: str, model_path: Optional[str] = None) -> int:
     """Resolve projector ``embodiment_id`` for ``tag``.
@@ -151,8 +153,8 @@ def load_embodiment_id(tag: str, model_path: Optional[str] = None) -> int:
 
 def split_flat_state_to_groups(
     state_flat: np.ndarray,
-    group_dims: "OrderedDict[str, int]",
-) -> "OrderedDict[str, np.ndarray]":
+    group_dims: OrderedDict[str, int],
+) -> OrderedDict[str, np.ndarray]:
     """Split a flat policy-order state into named joint groups.
 
     Args:

@@ -53,7 +53,7 @@ class Gr00tInput(ABC):
 
     @classmethod
     @abstractmethod
-    def from_env_obs(cls, env_obs: DataProto) -> "Gr00tInput": ...
+    def from_env_obs(cls, env_obs: DataProto) -> Gr00tInput: ...
 
     @classmethod
     def actions_to_processor_space(cls, actions: torch.Tensor) -> torch.Tensor:
@@ -70,7 +70,7 @@ class Gr00tInput(ABC):
         cls,
         obs: DataProto,
         actions: torch.Tensor | None = None,
-    ) -> "Gr00tInput":
+    ) -> Gr00tInput:
         """Build from a shared VLA ``DataProto``; optional actions for SFT."""
         model_input = cls.from_env_obs(obs)
         if actions is not None:
@@ -99,7 +99,7 @@ class Gr00tOutput(ModelOutput):
 
     @classmethod
     @abstractmethod
-    def from_model_output(cls, model_output: dict) -> "Gr00tOutput": ...
+    def from_model_output(cls, model_output: dict) -> Gr00tOutput: ...
 
     def to_data_proto(self) -> DataProto:
         tensor_batch = {"action": self.action}

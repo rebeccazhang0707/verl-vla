@@ -16,8 +16,8 @@
 # Must run inside the GR00T docker (isaaclab_arena:cuda_gr00t_gn16), NOT
 # verl-vla-arena. Launch it from the host with:
 #
-#   ARENA_TASK=gr1 EVAL_SCRIPT=examples/arena_sac/run_gr00t_arena_eval.sh \
-#     examples/arena_sac/run_docker.sh
+#   ARENA_TASK=gr1 EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh \
+#     examples/gr00t_arena_sac/run_docker.sh
 #
 # See README.md for the full path / variable reference.
 #
@@ -50,7 +50,7 @@ PYTHON="${PYTHON:-/isaac-sim/python.sh}"
 ARENA_TASK="${ARENA_TASK:-gr1}"
 
 # ── Common paths / knobs ─────────────────────────────────────────────────────
-GROOT_MODEL_PATH="${GROOT_MODEL_PATH:-/models/checkpoint-5000}"
+GROOT_MODEL_PATH="${GROOT_MODEL_PATH:-/models/checkpoint-10000}"
 MAX_EPISODES="${MAX_EPISODES:-10}"
 NUM_ACTION_CHUNKS="${NUM_ACTION_CHUNKS:-16}"
 
@@ -108,10 +108,6 @@ export TORCH_CUDNN_SDPA_ENABLED="${TORCH_CUDNN_SDPA_ENABLED:-0}"
 # transformers 4.51.3 (Eagle) lives in /opt/groot_deps -> must be PREPENDED so it
 # wins over Isaac Sim's newer bundled transformers.
 export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${PYTHONPATH:-}"
-
-if [[ -d /opt/cuda128-compat ]]; then
-  export LD_LIBRARY_PATH="/opt/cuda128-compat:${LD_LIBRARY_PATH:-}"
-fi
 
 # The Arena GR00T image has no verl / a few verl-only deps (unlike verl-vla-arena).
 # verl==0.7.1 declares numpy<2.0, but this image ships numpy 2.x for GR00T — so

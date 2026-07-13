@@ -115,9 +115,7 @@ def test_critic_action_horizon_defaults_to_num_action_chunks():
         critic={"action_horizon": None},
     )
     # Modeling resolves None critic.action_horizon -> num_action_chunks.
-    resolved = int(
-        cfg.critic.action_horizon if cfg.critic.action_horizon is not None else cfg.num_action_chunks
-    )
+    resolved = int(cfg.critic.action_horizon if cfg.critic.action_horizon is not None else cfg.num_action_chunks)
     assert resolved == 16
     assert resolved != action_horizon
     cfg.critic.action_horizon = 32

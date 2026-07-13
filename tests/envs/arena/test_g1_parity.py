@@ -45,10 +45,7 @@ def _legacy_to_uint8_rgb(image: np.ndarray) -> np.ndarray:
 
 def _legacy_extract_camera_images(raw_obs, *, camera_names) -> dict[str, np.ndarray]:
     camera_obs = raw_obs.get("camera_obs", {}) if isinstance(raw_obs, dict) else {}
-    return {
-        f"observation.images.{name}": _legacy_to_uint8_rgb(camera_obs[name])
-        for name in camera_names
-    }
+    return {f"observation.images.{name}": _legacy_to_uint8_rgb(camera_obs[name]) for name in camera_names}
 
 
 def _legacy_extract_state(raw_obs, *, num_envs, state_dim) -> np.ndarray:

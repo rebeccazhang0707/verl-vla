@@ -137,7 +137,9 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         self.add_pos_embed = bool(_cfg_get(policy_cfg, "add_pos_embed", False))
         self.use_alternate_vl_dit = bool(_cfg_get(policy_cfg, "use_alternate_vl_dit", False))
         self.state_horizon = int(
-            _cfg_get(adapter_config, "state_horizon", _cfg_get(adapter_config, "sac_state_horizon", GR00TDim.STATE_HORIZON))
+            _cfg_get(
+                adapter_config, "state_horizon", _cfg_get(adapter_config, "sac_state_horizon", GR00TDim.STATE_HORIZON)
+            )
         )
 
         self.num_action_chunks = min(
@@ -159,9 +161,7 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         if (not critic_cfg.use_encoded_state) and critic_cfg.state_real_dim is not None:
             base_state_width = int(critic_cfg.state_real_dim)
         self._critic_state_width = base_state_width
-        pooled_dim = (
-            int(critic_cfg.pool_proj_dim) if int(critic_cfg.pool_proj_dim) > 0 else self.backbone_feature_dim
-        )
+        pooled_dim = int(critic_cfg.pool_proj_dim) if int(critic_cfg.pool_proj_dim) > 0 else self.backbone_feature_dim
         privileged_dim = int(critic_cfg.privileged_obs_dim or 0) if critic_cfg.privileged_obs else 0
         resolved_input_dim = (
             pooled_dim
@@ -265,10 +265,7 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         return get_gr00t_policy_classes(self.policy_type)
 
     def _resolve_norm_stats_path(self) -> str | None:
-        path = (
-            getattr(self.config, "norm_stats_path", None)
-            or getattr(self.policy.config, "norm_stats_path", None)
-        )
+        path = getattr(self.config, "norm_stats_path", None) or getattr(self.policy.config, "norm_stats_path", None)
         if path in (None, "", "null", "None"):
             return None
         return str(path)
@@ -280,10 +277,7 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
                     "Gr00tN1d6TrainableModel: cannot build GR00TN16Adapter without a checkpoint path; "
                     "set adapter.model_path / adapter_model_path."
                 )
-            processor_path = (
-                getattr(self.policy.config, "verl_processor_path", None)
-                or self._adapter_model_path
-            )
+            processor_path = getattr(self.policy.config, "verl_processor_path", None) or self._adapter_model_path
             norm_stats_path = self._resolve_norm_stats_path()
             self._adapter = GR00TN16Adapter(
                 str(processor_path),
@@ -804,21 +798,15 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
                 demo = F.pad(demo, (0, self.max_action_dim - D), value=0.0)
             elif D > self.max_action_dim:
                 demo = demo[..., : self.max_action_dim]
-            mask = torch.zeros(
-                (B, self.action_horizon, self.max_action_dim), device=device, dtype=dtype
-            )
+            mask = torch.zeros((B, self.action_horizon, self.max_action_dim), device=device, dtype=dtype)
             real_h = min(H, self.action_horizon)
             mask[:, :real_h, : self.action_dim] = 1.0
             return demo, mask
 
         if "action" not in actions:
-            raise KeyError(
-                "Gr00t BC requires `full_action` (normalised) or env-space `action` in the actions dict."
-            )
+            raise KeyError("Gr00t BC requires `full_action` (normalised) or env-space `action` in the actions dict.")
         if raw_state_groups is None:
-            raise ValueError(
-                "Env-space `action` demos require raw_state_groups from `_prepare_inputs`."
-            )
+            raise ValueError("Env-space `action` demos require raw_state_groups from `_prepare_inputs`.")
         input_cls, _ = self._get_policy_classes()
         env_act = input_cls.actions_to_processor_space(actions["action"])
         if env_act.ndim != 3:

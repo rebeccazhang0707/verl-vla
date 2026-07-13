@@ -53,9 +53,7 @@ class Gr00tCriticGroup(nn.Module):
         else:
             self.sac_action_train_mask = None
 
-        self.critic_heads = nn.ModuleList(
-            [CriticMLP(input_dim, use_layernorm=layernorm) for _ in range(head_num)]
-        )
+        self.critic_heads = nn.ModuleList([CriticMLP(input_dim, use_layernorm=layernorm) for _ in range(head_num)])
         self.target_critic_heads = copy.deepcopy(self.critic_heads)
         for p in self.target_critic_heads.parameters():
             p.requires_grad_(False)
@@ -95,12 +93,8 @@ class Gr00tCriticGroup(nn.Module):
             self.target_prefix_cross_attn = None
 
         if self.privileged_obs and self.privileged_obs_dim > 0:
-            self.register_buffer(
-                "priv_obs_running_mean", torch.zeros(self.privileged_obs_dim, dtype=torch.float32)
-            )
-            self.register_buffer(
-                "priv_obs_running_var", torch.ones(self.privileged_obs_dim, dtype=torch.float32)
-            )
+            self.register_buffer("priv_obs_running_mean", torch.zeros(self.privileged_obs_dim, dtype=torch.float32))
+            self.register_buffer("priv_obs_running_var", torch.ones(self.privileged_obs_dim, dtype=torch.float32))
             self.register_buffer("priv_obs_running_count", torch.zeros((), dtype=torch.float64))
 
     def _cross_attention_pool(

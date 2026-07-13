@@ -318,9 +318,7 @@ def test_use_policy_action_is_config_driven():
     # on an identity joint-space (no arena_joint_space_spec), the adapter defaults
     # to False. Policy-driven GR1 joint + Franka LIBERO keep True.
     g1 = make_arena_embodiment(_g1_cfg(), num_envs=1)
-    g1_default = make_arena_embodiment(
-        {k: v for k, v in _g1_cfg().items() if k != "use_policy_action"}, num_envs=1
-    )
+    g1_default = make_arena_embodiment({k: v for k, v in _g1_cfg().items() if k != "use_policy_action"}, num_envs=1)
     gr1 = make_arena_embodiment(_gr1_cfg(), num_envs=1)
     franka = make_arena_embodiment(_task_space_cfg(), num_envs=1)
     assert g1.use_policy_action is False

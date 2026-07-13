@@ -125,7 +125,24 @@ def patch_fsdp2_interpolate_for_dtensor() -> None:
 
 
 def apply_gr00t_compat_patches() -> None:
-    """Apply all GR00T load-time shims (idempotent). Call before model registration."""
-    disable_cudnn_sdpa()
-    patch_eagle_compat()
-    patch_fsdp2_interpolate_for_dtensor()
+    """Apply GR00T load-time shims (idempotent). Call before model registration.
+
+    Patches are **opt-in** and default to off. Enable them via
+    ``GR00T_COMPAT_PATCHES`` (comma-separated names, or ``all``):
+    e.g. ``GR00T_COMPAT_PATCHES=all`` or
+    ``GR00T_COMPAT_PATCHES=cudnn_sdpa,fsdp2_interpolate``.
+    """
+    import os
+
+    enable = {s.strip() for s in os.environ.get("GR00T_COMPAT_PATCHES", "").split(",") if s.strip()}
+    if not enable:
+        return
+    all_on = "all" in enable
+
+    if all_on or "cudnn_sdpa" in enable:
+        disable_cudnn_sdpa()
+    if all_on or "eagle" in enable:
+        patch_eagle_compat()
+    if all_on or "fsdp2_interpolate" in enable:
+        patch_fsdp2_interpolate_for_dtensor()
+    logger.warning("GR00T compat patches enabled via env: %s", ",".join(sorted(enable)))

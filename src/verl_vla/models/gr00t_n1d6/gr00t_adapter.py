@@ -70,7 +70,7 @@ class GR00TN16Adapter:
         self,
         model_path: str,
         embodiment_tag: str = "gr1",
-        state_group_dims: "Optional[OrderedDict[str, int]]" = None,
+        state_group_dims: Optional[OrderedDict[str, int]] = None,
         *,
         processor: Any | None = None,
         norm_stats_path: str | None = None,
@@ -120,9 +120,14 @@ class GR00TN16Adapter:
 
         logger.info(
             "GR00TN16Adapter: tag=%s embodiment_id=%d video=%s state=%s(%s) action=%s(%s) lang=%s",
-            self.embodiment_tag.value, self.embodiment_id, self.video_keys,
-            self.state_keys, dict(self.state_group_dims),
-            self.action_keys, dict(self.action_group_dims), self.language_key,
+            self.embodiment_tag.value,
+            self.embodiment_id,
+            self.video_keys,
+            self.state_keys,
+            dict(self.state_group_dims),
+            self.action_keys,
+            dict(self.action_group_dims),
+            self.language_key,
         )
 
     # -- processor factory ------------------------------------------------
@@ -234,7 +239,7 @@ class GR00TN16Adapter:
         self.processor.train() if training else self.processor.eval()
         self._training = training
 
-    def _derive_group_dims(self, modality: str) -> "Optional[OrderedDict[str, int]]":
+    def _derive_group_dims(self, modality: str) -> Optional[OrderedDict[str, int]]:
         """Per-key widths for ``modality`` ('state'|'action') from the checkpoint.
 
         Reads the raw (pre sin/cos-encoding) per-group dimension that the processor
@@ -247,8 +252,9 @@ class GR00TN16Adapter:
             return OrderedDict((k, int(np.asarray(norm[k]["dim"]).item())) for k in keys)
         except Exception as exc:  # noqa: BLE001 - never let stats introspection break loading
             logger.warning(
-                "GR00TN16Adapter: could not derive %s group dims from processor (%s); "
-                "falling back to GR1 layout", modality, exc,
+                "GR00TN16Adapter: could not derive %s group dims from processor (%s); falling back to GR1 layout",
+                modality,
+                exc,
             )
             return None
 
@@ -327,7 +333,7 @@ class GR00TN16Adapter:
         *,
         actions: torch.Tensor | np.ndarray | None = None,
         action_valid_mask: torch.Tensor | np.ndarray | None = None,
-    ) -> tuple[Any, "OrderedDict[str, np.ndarray]"]:
+    ) -> tuple[Any, OrderedDict[str, np.ndarray]]:
         """Run processor + collator -> full collated batch (for ``get_action`` / SFT).
 
         ``images`` maps ``observation.images.<name>`` -> ``(B, H, W, C) uint8`` in
@@ -385,7 +391,7 @@ class GR00TN16Adapter:
         *,
         actions: torch.Tensor | np.ndarray | None = None,
         action_valid_mask: torch.Tensor | np.ndarray | None = None,
-    ) -> tuple[dict, "OrderedDict[str, np.ndarray]"]:
+    ) -> tuple[dict, OrderedDict[str, np.ndarray]]:
         """Run the processor + collator -> model-ready ``inputs`` dict.
 
         Same as :meth:`build_collated` but returns the inner ``inputs`` payload
@@ -405,18 +411,16 @@ class GR00TN16Adapter:
 
     def decode_actions(
         self,
-        normalized_action: np.ndarray,                     # (B, horizon, max_action_dim)
-        raw_state_groups: "OrderedDict[str, np.ndarray]",  # {group: (B, T, d)}
+        normalized_action: np.ndarray,  # (B, horizon, max_action_dim)
+        raw_state_groups: OrderedDict[str, np.ndarray],  # {group: (B, T, d)}
     ) -> dict[str, np.ndarray]:
         """Un-normalise (and convert relative->absolute) model actions -> per-group joints."""
-        return self.processor.decode_action(
-            normalized_action, self.embodiment_tag, raw_state_groups
-        )
+        return self.processor.decode_action(normalized_action, self.embodiment_tag, raw_state_groups)
 
     def decode_actions_flat(
         self,
         normalized_action: np.ndarray,
-        raw_state_groups: "OrderedDict[str, np.ndarray]",
+        raw_state_groups: OrderedDict[str, np.ndarray],
     ) -> np.ndarray:
         """Decoded actions concatenated back to flat (B, horizon, action_dim) policy order.
 
@@ -429,8 +433,8 @@ class GR00TN16Adapter:
 
     def encode_actions_flat(
         self,
-        env_action: np.ndarray,                            # (B, horizon, action_dim)
-        raw_state_groups: "OrderedDict[str, np.ndarray]",  # {group: (B, T, d)}
+        env_action: np.ndarray,  # (B, horizon, action_dim)
+        raw_state_groups: OrderedDict[str, np.ndarray],  # {group: (B, T, d)}
         *,
         max_action_dim: int,
         max_action_horizon: int,

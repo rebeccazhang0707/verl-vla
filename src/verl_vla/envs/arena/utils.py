@@ -54,7 +54,6 @@ def arena_subtask_graded_reward(env):
     )
 
 
-
 def apply_arena_rl_reward(env_cfg, subtask_reward: bool = False) -> bool:
     """Turn the Arena ``success`` termination into a sparse RL REWARD (reward half only).
 

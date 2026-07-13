@@ -18,9 +18,9 @@
 # Must run inside the GR00T docker (isaaclab_arena:cuda_gr00t_gn16). Launch from
 # the host with:
 #
-#   ARENA_TASK=gr1 EVAL_SCRIPT=examples/arena_sac/run_gr00t_arena_sac.sh \
+#   ARENA_TASK=gr1 EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
 #     OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
-#     examples/arena_sac/run_docker.sh
+#     examples/gr00t_arena_sac/run_docker.sh
 #
 # See README.md for the full path / variable reference.
 #
@@ -39,7 +39,7 @@ PYTHON="${PYTHON:-/isaac-sim/python.sh}"
 ARENA_TASK="${ARENA_TASK:-gr1}"
 
 # ── Common paths ─────────────────────────────────────────────────────────────
-GROOT_MODEL_PATH="${GROOT_MODEL_PATH:-/models/checkpoint-5000}"
+GROOT_MODEL_PATH="${GROOT_MODEL_PATH:-/models/checkpoint-10000}"
 NUM_ACTION_CHUNKS="${NUM_ACTION_CHUNKS:-16}"
 
 # ── Task-specific defaults ───────────────────────────────────────────────────
@@ -135,10 +135,6 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
 # Do NOT set RAY_ADDRESS=auto here: that makes Ray try to attach to an existing
 # cluster. Collocated single-node runs should let ensure_ray_initialized() start
 # a local cluster via ray.init().
-
-if [[ -d /opt/cuda128-compat ]]; then
-  export LD_LIBRARY_PATH="/opt/cuda128-compat:${LD_LIBRARY_PATH:-}"
-fi
 
 # Same verl bootstrap as the eval script (image has no verl; pin torch/transformers/numpy).
 if ! "$PYTHON" -c "import verl, datasets, torchdata, codetiming" >/dev/null 2>&1; then

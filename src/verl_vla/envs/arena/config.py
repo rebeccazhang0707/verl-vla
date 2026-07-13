@@ -79,7 +79,6 @@ class ArenaSimulatorConfig(BaseConfig):
     arena_joint_space_state_yaml: str | None = None
 
 
-
 @dataclass
 class ArenaLiberoSimulatorConfig(ArenaSimulatorConfig):
     """Arena simulator config for the Franka LIBERO external environment."""

@@ -183,7 +183,7 @@ class ArenaJointMapping:
         policy_yaml: str = DEFAULT_POLICY_YAML,
         action_yaml: str = DEFAULT_ACTION_YAML,
         state_yaml: str = DEFAULT_STATE_YAML,
-        expected_group_dims: "Optional[OrderedDict[str, int]]" = None,
+        expected_group_dims: Optional[OrderedDict[str, int]] = None,
     ) -> tuple[list[int], list[int], int, int]:
         """Derive ``(state_full_to_policy, policy_to_action, sim_action_dim, state_full_dim)``.
 
@@ -226,7 +226,7 @@ class ArenaJointMapping:
         policy_yaml: str = DEFAULT_POLICY_YAML,
         action_yaml: str = DEFAULT_ACTION_YAML,
         state_yaml: str = DEFAULT_STATE_YAML,
-    ) -> "ArenaJointMapping":
+    ) -> ArenaJointMapping:
         """Build a mapping for ``spec`` from the Arena joint-space YAMLs under ``joint_dir``.
 
         The YAMLs are the single source of truth (no hardcoded index fallback). Callers
@@ -390,9 +390,7 @@ class ArenaEmbodiment(abc.ABC):
             if not camera_obs:
                 raise KeyError("Camera observations are missing although enable_cameras=True")
             raise KeyError(f"Camera(s) {missing} not found in camera_obs; available={available}")
-        return {
-            f"observation.images.{name}": _to_uint8_rgb(camera_obs[name]) for name in self.camera_names
-        }
+        return {f"observation.images.{name}": _to_uint8_rgb(camera_obs[name]) for name in self.camera_names}
 
     @property
     def policy_action_dim(self) -> Optional[int]:
@@ -454,9 +452,7 @@ class JointSpaceEmbodiment(ArenaEmbodiment):
         # Mapped embodiments (arena_joint_space_spec set, e.g. GR1) keep the class/cfg True.
         # Explicit cfg.use_policy_action still wins via _cfg_or_class above; only apply the
         # G1 default when the cfg left the knob unset (None).
-        if _cfg_get(cfg, "use_policy_action", None) is None and not _cfg_get(
-            cfg, "arena_joint_space_spec", None
-        ):
+        if _cfg_get(cfg, "use_policy_action", None) is None and not _cfg_get(cfg, "arena_joint_space_spec", None):
             self.use_policy_action = False
 
     def add_cli_args(self, args: argparse.Namespace, cfg: Any) -> None:
@@ -487,9 +483,7 @@ class JointSpaceEmbodiment(ArenaEmbodiment):
         try:
             spec = EMBODIMENTS[spec_name]
         except KeyError as exc:
-            raise KeyError(
-                f"Unknown arena_joint_space_spec {spec_name!r}; known: {list(EMBODIMENTS)}"
-            ) from exc
+            raise KeyError(f"Unknown arena_joint_space_spec {spec_name!r}; known: {list(EMBODIMENTS)}") from exc
 
         return ArenaJointMapping.from_yaml_dir(
             spec,
@@ -547,7 +541,6 @@ class JointSpaceEmbodiment(ArenaEmbodiment):
         if isinstance(state, torch.Tensor):
             state = state.detach().cpu().numpy()
         return np.asarray(state, dtype=np.float32)
-
 
 
 def _quat_xyzw_to_rotvec(quat_xyzw: np.ndarray) -> np.ndarray:

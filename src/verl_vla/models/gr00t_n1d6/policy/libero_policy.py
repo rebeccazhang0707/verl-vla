@@ -31,12 +31,8 @@ from .base import Gr00tInput, Gr00tOutput
 # Flat LeRobot LIBERO statistics layout (dataset format, not processor keys).
 # Runtime group dims come from the checkpoint processor via GR00TN16Adapter.
 LIBERO_KEYS = ("x", "y", "z", "roll", "pitch", "yaw", "gripper")
-LIBERO_STATE_GROUP_DIMS: OrderedDict[str, int] = OrderedDict(
-    x=1, y=1, z=1, roll=1, pitch=1, yaw=1, gripper=2
-)
-LIBERO_ACTION_GROUP_DIMS: OrderedDict[str, int] = OrderedDict(
-    x=1, y=1, z=1, roll=1, pitch=1, yaw=1, gripper=1
-)
+LIBERO_STATE_GROUP_DIMS: OrderedDict[str, int] = OrderedDict(x=1, y=1, z=1, roll=1, pitch=1, yaw=1, gripper=2)
+LIBERO_ACTION_GROUP_DIMS: OrderedDict[str, int] = OrderedDict(x=1, y=1, z=1, roll=1, pitch=1, yaw=1, gripper=1)
 
 
 def _slices_from_group_dims(group_dims: OrderedDict[str, int]) -> dict[str, tuple[int, int]]:
@@ -191,7 +187,7 @@ class LiberoGr00tInput(Gr00tInput):
 
     @override
     @classmethod
-    def from_env_obs(cls, env_obs: DataProto) -> "LiberoGr00tInput":
+    def from_env_obs(cls, env_obs: DataProto) -> LiberoGr00tInput:
         model_input = cls()
         for key in LIBERO_IMAGE_KEYS:
             if key not in env_obs.batch:
@@ -203,9 +199,7 @@ class LiberoGr00tInput(Gr00tInput):
 
     @classmethod
     def actions_to_processor_space(cls, actions: torch.Tensor) -> torch.Tensor:
-        action_np = libero_gripper_to_gr00t(
-            actions.detach().to(device="cpu", dtype=torch.float32).numpy()
-        )
+        action_np = libero_gripper_to_gr00t(actions.detach().to(device="cpu", dtype=torch.float32).numpy())
         return torch.from_numpy(action_np)
 
 
@@ -214,7 +208,7 @@ class LiberoGr00tOutput(Gr00tOutput):
 
     @override
     @classmethod
-    def from_model_output(cls, model_output: dict) -> "LiberoGr00tOutput":
+    def from_model_output(cls, model_output: dict) -> LiberoGr00tOutput:
         output = cls()
 
         full_action = model_output.get("full_action")
