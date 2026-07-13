@@ -39,6 +39,13 @@ def build_vla_model(model_config, *, torch_dtype: torch.dtype):
 
         config = Gr00tN1d6Config.from_pretrained(path)
         _apply_overrides(config, overrides)
+        # Arena SAC loads ``Gr00tN1d6ForSAC`` directly (implements SupportSACTraining).
+        # LIBERO SFT / deterministic eval keep the thin trainable wrapper.
+        wants_sac = bool(overrides.get("sac_enable", False)) or str(overrides.get("policy_type", "")).lower() == "arena"
+        if wants_sac:
+            from .gr00t_n1d6.modeling_gr00t_sac import load_gr00t_n1d6_for_sac
+
+            return load_gr00t_n1d6_for_sac(path, config=config, torch_dtype=torch_dtype)
         policy = load_gr00t_n1d6_policy(path, config=config, torch_dtype=torch_dtype)
         return Gr00tN1d6TrainableModel(policy)
 

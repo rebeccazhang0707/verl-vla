@@ -1,0 +1,54 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+
+# Isaac Lab Arena simulator configuration for the LIBERO-in-Arena task (Franka, eef_pose).
+#
+# NOTE: this task requires the Isaac Sim / GR00T docker image and the external Arena
+# LIBERO environment (isaaclab_arena_examples.external_environments.libero). It is not
+# exercisable in the plain verl-vla environment and has not been runtime-validated
+# here; the values below mirror the legacy run_gr00t_arena_libero_sac* launchers.
+
+_target_: verl_vla.envs.arena.config.ArenaLiberoSimulatorConfig
+
+simulator_type: arena
+
+# Embodiment adapter: Franka end-effector Abs-IK (sim: pos+quat+gripper).
+arena_state_mode: eef_pose
+
+seed: 42
+
+# GR00T rel_rotvec LIBERO: policy pos(3)+rotvec(3)+gripper(1)=7.
+# Sim Abs-IK action is pos(3)+quat_xyzw(4)+gripper(1)=8 (rotvec<->quat in embodiment).
+action_dim: 7
+state_dim: 7
+
+# LIBERO benchmark migrated into Arena as an external environment.
+env_name: libero
+external_env_class_path: isaaclab_arena_examples.external_environments.libero:LiberoEnvironment
+# Nominal robot type for recorder metadata (LIBERO uses NoEmbodiment + ported Abs-IK cfg).
+embodiment: franka
+task_description: Complete the LIBERO manipulation task.
+
+# LIBERO task selection (task suite + id within the suite).
+libero_task_suite: libero_spatial
+libero_task_id: 3
+
+enable_cameras: true
+# Franka cameras (agentview + eye-in-hand) in one flat list, read from camera_obs
+# with Arena ``{sensor}_{dtype}`` naming (same as G1/GR1).
+camera_names:
+  - agentview_cam_rgb
+  - eye_in_hand_cam_rgb
+image_shape:
+  - 224
+  - 224
+  - 3
+
+rl_success_reward: true
+subtask_reward: false
+
+env_spacing: 3.0
+disable_fabric: false
+solve_relations: true
+enable_pinocchio: true

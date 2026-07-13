@@ -25,10 +25,10 @@ import torch
 from omegaconf import OmegaConf
 from typing_extensions import override
 
+from verl_vla.envs.arena.embodiment import make_arena_embodiment
 from verl_vla.envs.arena.utils import (
-    apply_rl_reward_and_disable_autoreset,
-    build_env_cfg_without_recorder,
     disable_lightwheel_ssl_verify,
+    register_external_arena_env,
 )
 from verl_vla.envs.base import BaseEnv
 from verl_vla.utils.envs.action import to_tensor
@@ -37,11 +37,24 @@ logger = logging.getLogger(__name__)
 
 
 class IsaacLabArenaEnv(BaseEnv):
-    """Arena vector environment with BaseEnv-owned chunking, recording and teleop."""
+    """Arena vector environment with BaseEnv-owned chunking, recording and teleop.
+
+    Embodiment-agnostic: every robot/control-mode-specific concern (CLI args, env
+    cfg patching, policy->sim action conversion, state/image extraction, stable-hold
+    joint indices) lives in an :class:`~verl_vla.envs.arena.embodiment.ArenaEmbodiment`
+    adapter held as ``self.embodiment`` and selected by ``arena_state_mode`` (default
+    ``g1_wbc_joint``).
+
+    Auto-reset is layered: IsaacLab resets terminated/timed-out envs *intra-chunk*
+    (``ManagerBasedRLEnv.step`` keeps the termination terms and resets done envs
+    in-step), while ``env_step`` passes the sim's ``reward``/``terminated``/``truncated``
+    straight through. Because the chunk-wise MDP keeps stepping the remaining chunk
+    actions on those in-step-reset envs, ``BaseEnv._reset_done_envs`` re-resets the
+    done envs at the *chunk boundary* via ``env_reset`` so the next chunk starts from a
+    clean episode.
+    """
 
     env_type = "arena"
-    USE_POLICY_ACTION = False
-    _DEFAULT_BASE_HEIGHT_COMMAND = 0.75
 
     def __init__(
         self,
@@ -61,16 +74,26 @@ class IsaacLabArenaEnv(BaseEnv):
         self.enable_cameras = self.arena_cfg.enable_cameras
         self.camera_names = list(self.arena_cfg.camera_names)
         self.task_description = self.arena_cfg.task_description
-        self.subtask_reward = self.arena_cfg.subtask_reward
-        self._elapsed_steps = np.zeros(int(cfg.num_envs), dtype=np.int32)
-        self.max_episode_steps = int(self.arena_cfg.max_episode_steps)
 
         self.action_dim = int(self.arena_cfg.action_dim)
         self.state_dim = int(self.arena_cfg.state_dim or self.action_dim)
         self.env = None
         self.app = None
+
+        # Embodiment adapter: owns joint maps, action conversion, state/image
+        # extraction, CLI args, env-cfg patching, camera names and the stable-hold
+        # indices. The wrapper delegates to it so it stays embodiment-agnostic.
+        self.embodiment = make_arena_embodiment(self.arena_cfg, num_envs=int(cfg.num_envs))
+        # Whether to step the raw policy action or route through the stable-hold /
+        # teleop adapter. Embodiment-driven: G1 WBC -> False (unchanged smoke path),
+        # GR1 joint / Franka LIBERO -> True (execute real policy actions).
+        self.use_policy_action = bool(self.embodiment.use_policy_action)
+
+        # Stable-hold buffer: hold the leading joint targets + base-height command.
+        # The magic indices live on the embodiment (None => stable-hold disabled).
         self._stable_actions = np.zeros((int(cfg.num_envs), self.action_dim), dtype=np.float32)
-        self._stable_actions[:, 46] = self._DEFAULT_BASE_HEIGHT_COMMAND
+        if self.embodiment.base_height_index is not None:
+            self._stable_actions[:, self.embodiment.base_height_index] = self.embodiment.base_height_command
 
         from isaaclab.app import AppLauncher
 
@@ -82,7 +105,10 @@ class IsaacLabArenaEnv(BaseEnv):
         self._init_env()
 
     def _build_args(self) -> argparse.Namespace:
-        return argparse.Namespace(
+        # Generic builder args; embodiment/task-specific knobs (object/kitchen_style
+        # for G1/GR1, task_suite/task_id/... for LIBERO) are added by the adapter so
+        # this method stays embodiment-agnostic.
+        args = argparse.Namespace(
             num_envs=self.num_envs,
             env_spacing=self.arena_cfg.env_spacing,
             disable_fabric=self.arena_cfg.disable_fabric,
@@ -94,13 +120,12 @@ class IsaacLabArenaEnv(BaseEnv):
             placement_seed=self.arena_cfg.placement_seed,
             resolve_on_reset=self.arena_cfg.resolve_on_reset,
             presets=self.arena_cfg.presets,
-            object=self.arena_cfg.object,
             embodiment=self.arena_cfg.embodiment,
             enable_cameras=self.enable_cameras,
             teleop_device=None,
-            kitchen_style=self.arena_cfg.kitchen_style,
-            object_set=self.arena_cfg.object_set,
         )
+        self.embodiment.add_cli_args(args, self.arena_cfg)
+        return args
 
     def _init_env(self) -> None:
         from isaaclab_arena.environments.arena_env_builder import ArenaEnvBuilder
@@ -116,7 +141,11 @@ class IsaacLabArenaEnv(BaseEnv):
             omni.usd.get_context().new_stage()
 
         disable_lightwheel_ssl_verify()
+
         args = self._build_args()
+
+        # External (non-built-in) Arena env registration
+        register_external_arena_env(self.arena_cfg.env_name, self.arena_cfg.external_env_class_path)
         if self.arena_cfg.env_name not in ExampleEnvironments:
             raise ValueError(
                 f"Arena env '{self.arena_cfg.env_name}' not found. Available: {sorted(ExampleEnvironments.keys())}"
@@ -130,9 +159,12 @@ class IsaacLabArenaEnv(BaseEnv):
                 self.task_description = desc
 
         env_builder = ArenaEnvBuilder(arena_env, args)
-        env_cfg = build_env_cfg_without_recorder(env_builder)
-        if self.arena_cfg.rl_success_reward:
-            apply_rl_reward_and_disable_autoreset(env_cfg, subtask_reward=self.subtask_reward)
+        _, env_cfg = env_builder.build_registered()
+        # Embodiment-owned cfg patch: for G1/GR1 this turns composite-success into a
+        # sparse RL reward (gated on rl_success_reward) -- WITHOUT touching the
+        # termination terms, so IsaacLab keeps owning auto-reset (episode horizon stays
+        # the Arena task's native episode_length_s).
+        self.embodiment.patch_env_cfg(env_cfg, self.arena_cfg)
         self.env = env_builder.make_registered(env_cfg=env_cfg)
 
         self.action_space = self.env.action_space
@@ -141,10 +173,9 @@ class IsaacLabArenaEnv(BaseEnv):
         action_mgr = getattr(base, "action_manager", None)
         if action_mgr is not None:
             self.action_dim = int(action_mgr.total_action_dim)
-        joint_pos_space = self.observation_space["policy"]["robot_joint_pos"]
-        self.state_dim = int(np.prod(joint_pos_space.shape))
         logger.info(
-            "Arena environment initialised: action_dim=%d state_dim=%d cameras=%s",
+            "Arena environment initialised: state_mode=%s action_dim=%d state_dim=%d cameras=%s",
+            self.embodiment.state_mode,
             self.action_dim,
             self.state_dim,
             self.camera_names,
@@ -154,31 +185,27 @@ class IsaacLabArenaEnv(BaseEnv):
     def _raw_env(self):
         return getattr(self.env, "unwrapped", self.env)
 
-    @property
-    def _success_reward_thresh(self) -> float:
-        return 1.0 - 1e-6 if self.subtask_reward else 0.0
+    def _extract_success(self, sim_terminated: np.ndarray) -> np.ndarray:
+        """Per-env success = the sim's dedicated ``success`` termination term this step.
 
-    def _extract_successes(self, env_ids) -> np.ndarray | None:
-        # Only sequential Arena tasks populate a per-subtask latched state machine
-        # in extras. Non-sequential/composite tasks (e.g. plain pick-and-place)
-        # don't, so signal the caller to fall back to reward-threshold success.
-        state = self._raw_env.extras.get("subtask_success_state")
-        if state is None:
-            return None
-        successes = []
-        for env_id in np.asarray(env_ids, dtype=np.int64).reshape(-1):
-            env_state = state[int(env_id)]
-            env_state = np.asarray(env_state, dtype=bool).reshape(-1)
-            successes.append(bool(env_state.size > 0 and env_state.all()))
-        return np.asarray(successes, dtype=bool)
+        The sim's ``terminated`` conflates success with failure terminations (e.g.
+        ``object_dropped``), so we read the ``success`` term specifically from the
+        TerminationManager (it survives the in-step reset -- ``_term_dones`` is only
+        overwritten on the next ``compute``). Tasks without a ``success`` term (should
+        not happen for G1/GR1) fall back to the natural termination.
+        """
+        tm = getattr(self._raw_env, "termination_manager", None)
+        if tm is not None and "success" in getattr(tm, "active_terms", []):
+            return self._to_numpy(tm.get_term("success")).astype(bool)
+        return np.asarray(sim_terminated, dtype=bool)
 
     def _reset_episode_state(self, env_ids=None) -> None:
         if env_ids is None:
             env_ids = np.arange(self.num_envs)
         env_ids = np.asarray(env_ids, dtype=np.int64)
-        self._elapsed_steps[env_ids] = 0
         self._stable_actions[env_ids] = 0.0
-        self._stable_actions[env_ids, 46] = self._DEFAULT_BASE_HEIGHT_COMMAND
+        if self.embodiment.base_height_index is not None:
+            self._stable_actions[env_ids, self.embodiment.base_height_index] = self.embodiment.base_height_command
 
     ### BaseEnv hooks ###
 
@@ -196,24 +223,27 @@ class IsaacLabArenaEnv(BaseEnv):
         del _info
         self._reset_episode_state(env_ids)
         obs = self._make_obs(raw_obs, env_ids=env_ids)
-        if not self.USE_POLICY_ACTION:
+        if not self.use_policy_action:
             self._update_stable_actions_from_obs(obs["observation"], env_ids)
         return obs
 
     @override
     def env_step(self, action, *, env_ids):
         env_ids = np.asarray(env_ids, dtype=np.int64)
-        action = torch.as_tensor(action, dtype=torch.float32, device=self.device)
-        self._elapsed_steps[env_ids] += 1
+        # Policy action -> sim action via the embodiment (identity 50->50 for G1 WBC,
+        # 26->36 joint scatter for GR1, pose passthrough+reorder for Franka LIBERO).
+        sim_action = self.embodiment.policy_to_sim_action(action, self.device)
 
-        raw_obs, reward, _terminations, _truncations, _info = self._raw_env.step(action)
+        # IsaacLab owns auto-reset: ``ManagerBasedRLEnv.step`` computes reward +
+        # terminated (success | failure) + truncated (time_out), resets the done envs
+        # in-step, and returns the post-reset obs for them. We pass those signals
+        # straight through; ``next.success`` is the sim's dedicated success term.
+        raw_obs, reward, sim_terminated, sim_truncated, _info = self._raw_env.step(sim_action)
         del _info
         step_reward = self._to_numpy(reward).astype(np.float32)
-        timeouts = self._elapsed_steps[env_ids] >= self.max_episode_steps
-        successes = self._extract_successes(env_ids)
-        if successes is None:
-            successes = step_reward > self._success_reward_thresh
-        terminations = successes
+        terminations = self._to_numpy(sim_terminated).astype(bool)
+        timeouts = self._to_numpy(sim_truncated).astype(bool)
+        successes = self._extract_success(terminations)
 
         obs = self._make_obs(raw_obs, env_ids=env_ids)
         return {
@@ -221,8 +251,8 @@ class IsaacLabArenaEnv(BaseEnv):
             "task": obs["task"],
             "task_id": obs["task_id"],
             "next.reward": to_tensor(step_reward),
-            "next.terminated": to_tensor(np.asarray(terminations, dtype=bool)),
-            "next.truncated": to_tensor(np.asarray(timeouts, dtype=bool)),
+            "next.terminated": to_tensor(terminations),
+            "next.truncated": to_tensor(timeouts),
             "next.success": to_tensor(successes),
         }
 
@@ -230,7 +260,7 @@ class IsaacLabArenaEnv(BaseEnv):
 
     @override
     def step_with_teleop_and_recording(self, action, chunk_intervened, merged_step_result, critic_value=None):
-        if not self.USE_POLICY_ACTION:
+        if not self.use_policy_action:
             action = self._replace_with_stable_actions(action)
         return super().step_with_teleop_and_recording(
             action,
@@ -247,17 +277,26 @@ class IsaacLabArenaEnv(BaseEnv):
 
     @override
     def apply_teleop_action(self, action):
-        action = action if self.USE_POLICY_ACTION else self._replace_with_stable_actions(action)
+        action = action if self.use_policy_action else self._replace_with_stable_actions(action)
         action, intervention_mask, manual_reward, restart_episode, stop_episode = super().apply_teleop_action(action)
-        if not self.USE_POLICY_ACTION:
-            self._stable_actions[intervention_mask, :43] = action[intervention_mask, :43]
-            self._stable_actions[intervention_mask, 46] = action[intervention_mask, 46]
+        if not self.use_policy_action:
+            hold_slice = self.embodiment.stable_hold_joint_slice
+            base_height_index = self.embodiment.base_height_index
+            if hold_slice is not None:
+                self._stable_actions[intervention_mask, :hold_slice] = action[intervention_mask, :hold_slice]
+            if base_height_index is not None:
+                self._stable_actions[intervention_mask, base_height_index] = action[
+                    intervention_mask, base_height_index
+                ]
         return action, intervention_mask, manual_reward, restart_episode, stop_episode
 
     def _update_stable_actions_from_obs(self, observations: list[dict[str, Any]], env_ids: np.ndarray) -> None:
+        hold_slice = self.embodiment.stable_hold_joint_slice
+        if hold_slice is None:
+            return
         for obs, env_id in zip(observations, np.asarray(env_ids, dtype=np.int64), strict=True):
             state = np.asarray(obs["observation.state"], dtype=np.float32)
-            self._stable_actions[int(env_id), :43] = state[:43]
+            self._stable_actions[int(env_id), :hold_slice] = state[:hold_slice]
 
     # End stable-action adapter.
 
@@ -272,11 +311,16 @@ class IsaacLabArenaEnv(BaseEnv):
 
     @override
     def get_recorder_strategy_kwargs(self) -> dict[str, Any]:
+        # The recorder logs the POLICY action passed to env.step (26-DOF for GR1),
+        # NOT the scattered sim action (self.action_dim, overwritten to the 36-DOF
+        # sim width in _init_env). Prefer the embodiment's policy action width and
+        # fall back to the sim action_dim for identity embodiments (G1: unchanged).
+        recorder_action_dim = self.embodiment.policy_action_dim or self.action_dim
         return {
             "camera_names": tuple(self.camera_names),
             "image_shape": self._image_shape(),
             "state_dim": self.state_dim,
-            "action_dim": self.action_dim,
+            "action_dim": recorder_action_dim,
             "fps": int(self.cfg.recorder.video.fps),
             "robot_type": self.arena_cfg.embodiment,
         }
@@ -291,74 +335,21 @@ class IsaacLabArenaEnv(BaseEnv):
 
     def _make_observations(self, raw_obs, *, env_ids) -> list[dict[str, Any]]:
         env_ids = np.asarray(env_ids, dtype=np.int64)
-        camera_images = self._extract_camera_images(raw_obs)
-        state = self._extract_state(raw_obs)
+        # Delegate embodiment-specific extraction. G1 WBC reproduces the previous
+        # wrapper behaviour bit for bit; GR1/Franka gather joints / read camera_obs.
+        scene = getattr(self._raw_env, "scene", None)
+        camera_images = self.embodiment.extract_images(raw_obs)
+        state = self.embodiment.extract_state(raw_obs, scene)
         self.state_dim = int(state.shape[-1])
 
         observations = []
-        for local_id, env_id in enumerate(env_ids):
+        for env_id in env_ids:
             item = {key: value[env_id] for key, value in camera_images.items()}
             item["observation.state"] = state[env_id].astype(np.float32)
             observations.append(item)
         return observations
 
-    def _extract_camera_images(self, raw_obs) -> dict[str, np.ndarray]:
-        camera_obs = raw_obs.get("camera_obs", {}) if isinstance(raw_obs, dict) else {}
-        images = {}
-        available = list(camera_obs.keys())
-
-        selected = self.camera_names
-        if not available and self.enable_cameras:
-            raise KeyError("Camera observations are missing although enable_cameras=True")
-        if available and any(name not in camera_obs for name in selected):
-            missing = [name for name in selected if name not in camera_obs]
-            logger.warning("Arena camera(s) %s not found; available=%s", missing, available)
-            selected = [name for name in selected if name in camera_obs] or [available[0]]
-
-        for name in selected:
-            rgb = camera_obs[name]
-            if isinstance(rgb, torch.Tensor):
-                rgb = rgb.detach().cpu().numpy()
-            rgb = np.asarray(rgb)
-            images[f"observation.images.{name}"] = self._to_uint8_rgb(rgb)
-
-        if not images:
-            images["observation.images.image"] = np.zeros((self.num_envs, 1, 1, 3), dtype=np.uint8)
-        return images
-
-    def _extract_state(self, raw_obs) -> np.ndarray:
-        policy_obs = raw_obs.get("policy", {}) if isinstance(raw_obs, dict) else {}
-        if "robot_joint_pos" in policy_obs:
-            state = policy_obs["robot_joint_pos"]
-        else:
-            parts = list(policy_obs.values())
-            if not parts:
-                return np.zeros((self.num_envs, self.state_dim), dtype=np.float32)
-            tensors = [part if isinstance(part, torch.Tensor) else torch.as_tensor(part) for part in parts]
-            state = torch.cat([tensor.reshape(tensor.shape[0], -1) for tensor in tensors], dim=-1)
-
-        if isinstance(state, torch.Tensor):
-            state = state.detach().cpu().numpy()
-        return np.asarray(state, dtype=np.float32)
-
     def _image_shape(self) -> tuple[int, int, int]:
         if self.enable_cameras:
             return self.arena_cfg.image_shape
         return (1, 1, 3)
-
-    @staticmethod
-    def _normalize_camera_names(camera_names) -> list[str]:
-        if isinstance(camera_names, str):
-            return [camera_names]
-        return [str(name) for name in camera_names]
-
-    @staticmethod
-    def _to_uint8_rgb(image: np.ndarray) -> np.ndarray:
-        image = np.asarray(image)
-        if image.shape[-1] > 3:
-            image = image[..., :3]
-        if image.dtype != np.uint8:
-            if image.max(initial=0) <= 1.0:
-                image = image * 255.0
-            image = np.clip(image, 0, 255).astype(np.uint8)
-        return np.ascontiguousarray(image)

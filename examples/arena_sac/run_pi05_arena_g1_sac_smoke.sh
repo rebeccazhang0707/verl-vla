@@ -26,7 +26,7 @@ if [[ ! -f "$SSL_CERTFILE" || ! -f "$SSL_KEYFILE" ]]; then
     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 fi
 
-"$PYTHON" -m verl_vla.trainer.main_recap \
+"$PYTHON" -m verl_vla.entrypoints.train.recap \
   "ray_kwargs.ray_init.runtime_env.env_vars.VERL_LOGGING_LEVEL=INFO" \
   "recap.policy_eval.enable=false" \
   "recap.collect_data.enable=true" \

@@ -7,6 +7,9 @@
 # /workspaces/verl-vla, so eval videos land in ./outputs/arena_g1_eval on the
 # host (visible in the IDE).
 #
+# GR00T eval: do NOT use this script — verl-vla-arena has no gr00t deps.
+# Use examples/arena_sac/run_docker_gr00t_eval.sh (isaaclab_arena:cuda_gr00t_gn16).
+#
 # Usage:
 #   examples/arena_sac/run_docker_eval.sh              # start container + run eval
 #   examples/arena_sac/run_docker_eval.sh --shell      # start container + drop into a shell
@@ -19,6 +22,7 @@
 #   MOUNT_REPO=0     do NOT bind-mount the host repo (use the image's baked copy)
 #   MODEL_PATH       policy checkpoint passed through to the eval script
 #   MAX_EPISODES     number of episodes to evaluate (default 10)
+#   EVAL_SCRIPT      eval script path inside the container (default: PI0.5 G1)
 #
 set -euo pipefail
 

@@ -19,88 +19,70 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def arena_task_success_reward(env, success_func, success_params):
-    """RL reward = Arena composite-task success (+1.0 the step the whole task is solved).
+def arena_success_reward(env):
+    """Sparse RL reward = the Arena ``success`` termination (+1.0 the step the task is solved).
 
-    Reuses the sequential-task success function so the *stateful* subtask state
-    machine (``_current_subtask_idx`` / ``_subtask_success_state`` /
-    ``env.extras['subtask_success_state']``) is advanced exactly once per step --
-    it now runs inside the RewardManager instead of the (removed) TerminationManager.
-    ``IsaacLabArenaEnv.env_step`` derives ``done`` / ``success_once`` from this
-    reward, so this term is what makes a success visible to training (the raw
-    Arena task defines no reward term at all).
+    The raw Arena G1/GR1 task defines no reward term at all, so a success would
+    otherwise be invisible to training. We simply READ the ``success`` termination the
+    ``TerminationManager`` already computed this step: in ``ManagerBasedRLEnv.step``
+    terminations run *before* rewards, so ``term_dones`` is fresh and we do NOT
+    recompute (nor double-advance a stateful success). Scaled by the reward weight
+    (``1/step_dt``) so exactly ``+1.0`` is emitted per solved step.
     """
-    success = success_func(env, **success_params)
-    return success.float()
+    return env.termination_manager.get_term("success").float()
 
 
-def arena_subtask_graded_reward(env, success_func, success_params):
-    """Graded RL reward for a SEQUENTIAL task = fraction of subtasks completed.
+def arena_subtask_graded_reward(env):
+    """Graded RL reward for a SEQUENTIAL task = fraction of subtasks completed (0 / 0.5 / 1.0).
 
-    Returns 0 / 0.5 / 1.0 (for a 2-subtask task) — the latched progress, so e.g. +0.5 once
-    pick-and-place is done and +1.0 once the door is also closed. ``success_func`` (the
-    sequential-task success fn) is still called first so it advances the subtask state machine
-    and writes ``env.extras['subtask_success_state']`` (a per-env list of per-subtask latched
-    bools); we read that to compute the graded progress. This gives the long-horizon task an
-    early (PnP) learning signal instead of a single composite +1 only after BOTH subtasks.
-
-    NB: with this reward, ``reward > 0`` no longer means full success, so the
-    Arena env wrapper must derive episode success from the composite threshold.
+    Reads the latched per-subtask state the ``success`` termination wrote to
+    ``env.extras['subtask_success_state']`` this step (terminations run before rewards,
+    so the state is fresh and not advanced twice). Gives long-horizon tasks an early
+    (e.g. pick-and-place) credit signal instead of a single composite +1 only after
+    BOTH subtasks. Falls back to the composite ``success`` term when the task exposes
+    no subtask state.
     """
     import torch
 
-    composite = success_func(env, **success_params)  # advances state machine + writes extras
     state = getattr(env, "extras", {}).get("subtask_success_state", None)
     if not state:
-        return composite.float()
-    progress = torch.tensor(
+        return env.termination_manager.get_term("success").float()
+    return torch.tensor(
         [(sum(1 for x in s if x) / max(len(s), 1)) for s in state],
-        device=composite.device,
+        device=env.device,
         dtype=torch.float32,
     )
-    return progress
 
 
-def build_env_cfg_without_recorder(env_builder):
-    """Build the Arena env cfg and disable IsaacLab's demo/metric recorder.
 
-    BaseEnv owns rollout/video recording for verl-vla. IsaacLab-Arena's internal
-    recorder is aimed at demo datasets and task metrics; in RL mode we also move
-    the success termination into a reward and disable terminations, which makes
-    Arena's success-rate recorder assert during reset. Disable the internal
-    recorder manager entirely before env construction.
+def apply_arena_rl_reward(env_cfg, subtask_reward: bool = False) -> bool:
+    """Turn the Arena ``success`` termination into a sparse RL REWARD (reward half only).
 
-    Returns the built ``env_cfg`` (ready to be patched further / handed to
-    ``env_builder.make_registered``).
-    """
-    _, env_cfg = env_builder.build_registered()
-    env_cfg.recorders = None
-    return env_cfg
+    The raw Arena G1/GR1 task defines **no reward term at all**, so a success would
+    otherwise be invisible to training. This mirrors the LIBERO RL setup
+    (franka_libero_rl_env_cfg + isaac_env.py): install a ``RewTerm(weight = 1/step_dt)``
+    that reads the ``success`` termination so exactly ``+1.0`` is emitted per solved
+    step (or graded 0/0.5/1.0 subtask progress when ``subtask_reward``).
 
+    Crucially this ONLY adds the reward -- the termination terms are LEFT IN PLACE, so
+    IsaacLab keeps owning per-step episode auto-reset (see ``docs/mdp_auto_reset.md``).
+    On a success step the reward fires ``+1`` AND IsaacLab flags ``terminated`` and
+    resets the env; the reward func just reads ``term_dones`` (terminations run before
+    rewards in the sim step) so nothing is double-computed.
 
-def apply_rl_reward_and_disable_autoreset(env_cfg, subtask_reward: bool = False) -> None:
-    """Turn the Arena composite-success TERMINATION into a sparse RL REWARD and
-    disable IsaacLab auto-reset (verl owns episode resets + horizon).
-
-    Mirrors the LIBERO RL setup (franka_libero_rl_env_cfg + isaac_env.py):
-      * success DoneTerm -> RewTerm(weight = 1 / step_dt), so the Arena wrapper
-        can derive episode success from reward. The raw Arena task otherwise has
-        no reward term, so a success would be invisible to training.
-      * every termination term -> None, so reset_buf stays False (no auto-reset
-        mid-rollout, which would corrupt fixed-length trajectories).
-
-    RL-only: patches the env cfg built inside verl; the shared Arena task /
-    eval / mimic configs are untouched. Gate off with
-    ``env.train.rl_success_reward=False``.
+    RL-only: patches the env cfg built inside verl; the shared Arena task / eval /
+    mimic configs are untouched. Gate off with ``rl_success_reward=False``.
 
     Args:
         env_cfg: the Arena env cfg to patch in place.
         subtask_reward: if True, use the graded subtask reward (0/0.5/1.0 = fraction
             of subtasks done) for earlier long-horizon credit, vs the single
-            composite +1. Gate: ``env.train.subtask_reward``.
-    """
-    import dataclasses
+            composite +1. Gate: ``subtask_reward``.
 
+    Returns:
+        True if the success reward was installed, False if no success termination
+        term was found (nothing patched).
+    """
     from isaaclab.managers import RewardTermCfg
     from isaaclab.utils import configclass
 
@@ -108,7 +90,7 @@ def apply_rl_reward_and_disable_autoreset(env_cfg, subtask_reward: bool = False)
     succ_term = getattr(term_cfg, "success", None) if term_cfg is not None else None
     if succ_term is None:
         logger.warning("[arena_env] terminations.success not found; skipping RL success-reward patch")
-        return
+        return False
 
     # step_dt = sim.dt * decimation (Arena default 1/200 * 4 = 0.02s -> 50 Hz).
     # RewardManager scales every term by step_dt, so weight = 1/step_dt emits
@@ -122,31 +104,22 @@ def apply_rl_reward_and_disable_autoreset(env_cfg, subtask_reward: bool = False)
     class _ArenaRLRewardsCfg:
         task_success: RewardTermCfg = None
 
-    # Sequential-task option: graded subtask reward vs the single composite +1.
-    reward_func = arena_subtask_graded_reward if subtask_reward else arena_task_success_reward
+    # Sequential-task option: graded subtask reward vs the single composite +1. Both
+    # read the success term / subtask state the sim already computed (no params needed).
+    reward_func = arena_subtask_graded_reward if subtask_reward else arena_success_reward
 
     rewards = _ArenaRLRewardsCfg()
-    rewards.task_success = RewardTermCfg(
-        func=reward_func,
-        weight=weight,
-        params={"success_func": succ_term.func, "success_params": succ_term.params},
-    )
+    rewards.task_success = RewardTermCfg(func=reward_func, weight=weight, params={})
     env_cfg.rewards = rewards
 
-    # Disable auto-reset: null every termination term (composite success now
-    # lives in the reward above; subtask terms like object_dropped and any
-    # time_out are dropped so verl controls when envs reset).
-    disabled = [f.name for f in dataclasses.fields(term_cfg)]
-    for name in disabled:
-        setattr(term_cfg, name, None)
-
     logger.info(
-        "[arena_env] RL patch: success->RewTerm weight=%.3f (step_dt=%.4fs); "
-        "terminations disabled (%s) -> no auto-reset",
+        "[arena_env] RL reward patch: success->RewTerm weight=%.3f (step_dt=%.4fs, subtask_reward=%s); "
+        "termination terms kept -> IsaacLab owns per-step auto-reset",
         weight,
         step_dt,
-        ", ".join(disabled) or "none",
+        subtask_reward,
     )
+    return True
 
 
 _LIGHTWHEEL_SSL_PATCHED = False
@@ -183,3 +156,24 @@ def disable_lightwheel_ssl_verify() -> None:
         logger.warning("Disabled TLS verification for lightwheel asset-registry requests (expired cert workaround)")
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"Could not patch lightwheel SSL verification: {exc}")
+
+
+def register_external_arena_env(env_name: str, external_class_path: str) -> None:
+    """Register a non-built-in Arena env by ``module_path:ClassName`` (idempotent).
+
+    Mirrors the Arena policy_runner's ``--external_environment_class_path`` flag so
+    external tasks (e.g. the migrated LIBERO env) can be selected via
+    ``arena_state_mode``/``env_name`` without living in Arena's built-in
+    ``ExampleEnvironments`` dict. No-op when the env is already registered.
+    """
+    if not external_class_path:
+        return
+
+    from isaaclab_arena_environments.cli import (
+        ExampleEnvironments,
+        parse_and_return_external_environment_from_string,
+    )
+
+    if env_name in ExampleEnvironments:
+        return
+    ExampleEnvironments.update(parse_and_return_external_environment_from_string(external_class_path))

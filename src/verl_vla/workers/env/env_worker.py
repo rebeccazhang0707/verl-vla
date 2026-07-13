@@ -288,15 +288,6 @@ class EnvWorker(Worker, DistProfilerExtension):
             )
         stage_id: int = data.meta_info["stage_id"]
 
-        # Pi0.5 Libero is not required
-        # TODO: prepare actions according to simulator type
-        # chunk_actions = prepare_actions(
-        #     simulator_type=self.simulator_type,
-        #     raw_chunk_actions=chunk_actions,
-        #     num_action_chunks=self.cfg.actor.model.num_action_chunks,
-        #     action_dim=self.cfg.actor.model.action_dim,
-        # )
-
         simulators = self._simulators(mode)
         step_output = simulators[stage_id].step(chunk_actions, chunk_values=chunk_values)
         if len(step_output) == 4:

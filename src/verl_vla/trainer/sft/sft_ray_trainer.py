@@ -28,7 +28,7 @@ from verl.utils.metric import reduce_metrics
 
 from verl_vla.train_cluster import TrainCluster
 from verl_vla.utils.data import dataloader_batch_to_dataproto
-from verl_vla.utils.dataloader import LeRobotDataLoaderConfig, build_lerobot_sft_dataloader
+from verl_vla.utils.dataloader import LeRobotDataLoaderConfig
 from verl_vla.utils.dataloader.state import load_dataloader_state
 from verl_vla.utils.early_stopping import TrendEarlyStopper
 
@@ -43,6 +43,9 @@ class RobRaySFTTrainer(RayPPOTrainer):
         cluster: TrainCluster,
         tracking_config: dict[str, Any],
     ):
+        # Lazy: build_lerobot_sft_dataloader imports the optional ``lerobot`` package.
+        from verl_vla.utils.dataloader import build_lerobot_sft_dataloader
+
         self.cluster = cluster
         self.tracking_config = tracking_config
         self.trainer_config: SFTTrainerConfig = instantiate(trainer_config)

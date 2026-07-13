@@ -9,7 +9,6 @@
 #   MAX_EPISODES     number of episodes to evaluate (Arena benchmark size is 1,
 #                    so this must be set explicitly to eval more than 1)
 #   MAX_INTERACTIONS env_loop interactions per rollout
-#   MAX_EPISODE_STEPS arena max steps per episode
 #
 set -euo pipefail
 set -x
@@ -25,9 +24,8 @@ MODEL_PATH="${MODEL_PATH:-/workspaces/models/torch_pi05_base}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_g1_eval}"
 MAX_EPISODES="${MAX_EPISODES:-10}"
 MAX_INTERACTIONS="${MAX_INTERACTIONS:-32}"
-MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-256}"
 
-"$PYTHON" -m verl_vla.trainer.main_recap \
+"$PYTHON" -m verl_vla.entrypoints.train.recap \
   "ray_kwargs.ray_init.runtime_env.env_vars.VERL_LOGGING_LEVEL=INFO" \
   "recap.policy_eval.enable=true" \
   "recap.collect_data.enable=false" \
@@ -46,7 +44,6 @@ MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-256}"
   "recap.policy_eval.cluster.env.env_worker.auto_reset=true" \
   "recap.policy_eval.cluster.env.env_worker.simulator_start_timeout_s=600" \
   "recap.policy_eval.cluster.env.env_worker.simulator.simulator_type=arena" \
-  "recap.policy_eval.cluster.env.env_worker.simulator.arena.max_episode_steps=$MAX_EPISODE_STEPS" \
   "recap.policy_eval.cluster.env.env_worker.modes=[eval]" \
   "recap.policy_eval.cluster.env.env_worker.teleop.enable=false" \
   "recap.policy_eval.cluster.env.env_worker.recorder.enable=true" \
