@@ -121,7 +121,7 @@ class PI0TrainableModel(
             self.action_norm_stats = config.action_norm_stats
             self.norm_stats_path = None
         self.pi05_enabled = config.pi05_enabled
-        self.embodiment = getattr(config, "embodiment", getattr(config, "policy_type", "libero"))
+        self.embodiment = config.embodiment
         self.action_chunk_size = int(getattr(config, "action_chunk_size", 10))
         self.critic_type = config.critic.type
         self.critic = None
@@ -169,10 +169,6 @@ class PI0TrainableModel(
 
     def _get_pi0_embodiment_classes(self):
         return get_pi0_embodiment_classes(self.embodiment)
-
-    def _get_pi0_policy_classes(self):
-        """Compatibility alias for downstream extensions using the old name."""
-        return self._get_pi0_embodiment_classes()
 
     def _to(self, device: torch.device | str):
         self.state_normalize_transform.to(device)
@@ -245,7 +241,7 @@ class PI0TrainableModel(
                     - "full_action": torch.Tensor of shape (B, action_steps, action_dim)
         """
 
-        pi0_input_cls, pi0_output_cls = self._get_pi0_policy_classes()
+        pi0_input_cls, pi0_output_cls = self._get_pi0_embodiment_classes()
         pi0_input = pi0_input_cls.from_env_obs(env_obs)
 
         # Input transforms
@@ -407,7 +403,7 @@ class PI0TrainableModel(
         """Override SupportSFTTraining.sft_loss for PI0 BC training."""
 
         del target_values
-        pi0_input_cls, _ = self._get_pi0_policy_classes()
+        pi0_input_cls, _ = self._get_pi0_embodiment_classes()
         action_tensor = actions["action"]
         action_horizon = self.policy.n_action_steps
         action_length = min(action_tensor.shape[1], action_horizon)
@@ -733,7 +729,7 @@ class PI0TrainableModel(
                 return_log_prob=False,
                 task_ids=task_ids,
             )
-        _, pi0_output_cls = self._get_pi0_policy_classes()
+        _, pi0_output_cls = self._get_pi0_embodiment_classes()
         pi0_output = pi0_output_cls.from_model_output(
             {
                 "full_action": self.action_unnormalize_transform(actions),
@@ -784,7 +780,7 @@ class PI0TrainableModel(
         obs: DataProto,
         tokenizer: torch.nn.Module,
     ) -> tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]:
-        pi0_input_cls, _ = self._get_pi0_policy_classes()
+        pi0_input_cls, _ = self._get_pi0_embodiment_classes()
         pi0_input = pi0_input_cls.from_env_obs(obs)
 
         with torch.no_grad():
