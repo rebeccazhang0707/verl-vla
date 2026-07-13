@@ -185,9 +185,13 @@ class GR00TN16Adapter:
             load_kwargs["modality_configs"] = dict(modality_configs)
             should_override = False
         elif should_override is None and tag is not None and tag != "gr1":
-            # LIBERO / other post-train tags usually need an explicit modality pack
-            # when starting from a base GR1 checkpoint.
-            should_override = True
+            # Auto-override only for official MODALITY_CONFIGS packs (e.g. libero_panda
+            # when fine-tuning from a base GR1 checkpoint). Custom / Arena tags such as
+            # ``new_embodiment`` are expected to already live in the checkpoint
+            # processor and must not be remapped via MODALITY_CONFIGS.
+            from gr00t.configs.data.embodiment_configs import MODALITY_CONFIGS
+
+            should_override = tag in MODALITY_CONFIGS
         if should_override:
             if not tag:
                 raise ValueError("override_modality_configs requires embodiment_tag")

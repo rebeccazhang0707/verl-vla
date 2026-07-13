@@ -3,6 +3,12 @@
 # Run PI0.5 policy EVALUATION on the Arena G1 task via the RECAP policy_eval
 # stage, saving rollout videos to disk. No teleop / no dataset recording.
 #
+# Runs inside the verl-vla-arena image (NOT the GR00T image). Launch from host:
+#
+#   BACKEND=pi05 examples/arena_sac/run_docker.sh
+#
+# See README.md for the full path / variable reference.
+#
 # Overridable via env vars:
 #   MODEL_PATH       policy checkpoint (HF-format dir)
 #   OUTPUT_ROOT      where videos + eval metrics are written

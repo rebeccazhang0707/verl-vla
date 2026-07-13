@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
 #
-# Run GR00T N1.6 SAC training on the Arena GR1 fridge task
-# (put_item_in_fridge_and_close_door) via verl_vla.entrypoints.train.sac.
+# Run GR00T N1.6 SAC training on an Arena task via verl_vla.entrypoints.train.sac.
 #
-# Counterpart of run_gr00t_arena_gr1_eval.sh (same docker / Hydra group overrides),
-# but launches the SAC trainer instead of RECAP policy_eval.
+# Counterpart of run_gr00t_arena_eval.sh (same docker / Hydra group overrides),
+# but launches the SAC trainer instead of RECAP policy_eval. Pick the task with
+# ARENA_TASK:
 #
-# Minimal SAC launch: uses gr00t.yaml defaults for critic / Flow-SDE / freeze knobs.
-# Extra Hydra overrides can still be passed via "$@".
+#   ARENA_TASK=gr1     (default)  GR1 fridge (put_item_in_fridge_and_close_door),
+#                                 gr1_joint 26-DOF, embodiment_tag=gr1.
+#   ARENA_TASK=libero             Franka Abs-IK LIBERO, eef_pose 7-DOF (rel_rotvec),
+#                                 embodiment_tag=new_embodiment; task via TASK_SUITE/TASK_ID.
+#
+# Minimal SAC launch: uses gr00t.yaml defaults for critic / Flow-SDE / freeze
+# knobs (single shared cross_attn critic — Arena launchers pin one task id, so
+# multitask multi_cross_attn is not required). Extra Hydra overrides via "$@".
+#
+# Must run inside the GR00T docker (isaaclab_arena:cuda_gr00t_gn16). Launch from
+# the host with:
+#
+#   ARENA_TASK=gr1 EVAL_SCRIPT=examples/arena_sac/run_gr00t_arena_sac.sh \
+#     OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
+#     examples/arena_sac/run_docker.sh
+#
+# See README.md for the full path / variable reference.
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# GR00T DOCKER (required — isaaclab_arena:cuda_gr00t_gn16)
-# ─────────────────────────────────────────────────────────────────────────────
-# From the host:
-#
-#   MODELS_HOST=~/iDataset/VLA/gr00t/ranch_finetune_newcam_wrist_out \
-#   GROOT_MODEL_PATH=/models/checkpoint-5000 \
-#   EVAL_SCRIPT=examples/arena_sac/run_gr00t_arena_gr1_sac.sh \
-#   OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
-#     examples/arena_sac/run_docker_gr00t_arena.sh
-#
-# Mount mapping (via run_docker_gr00t_arena.sh):
-#   /models                      <- checkpoint parent
-#   /eval                        <- this verl-vla repo
-#   /workspaces/isaaclab_arena   <- host IsaacLab-Arena checkout
-#
 # Overridable via env vars (see knobs below). Extra Hydra overrides: "$@"
-#
+# ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 set -x
 
@@ -36,17 +36,62 @@ cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-/isaac-sim/python.sh}"
 
-# ── Paths ────────────────────────────────────────────────────────────────────
+ARENA_TASK="${ARENA_TASK:-gr1}"
+
+# ── Common paths ─────────────────────────────────────────────────────────────
 GROOT_MODEL_PATH="${GROOT_MODEL_PATH:-/models/checkpoint-5000}"
-GROOT_EMBODIMENT_TAG="${GROOT_EMBODIMENT_TAG:-gr1}"
-GROOT_EMBODIMENT_ID="${GROOT_EMBODIMENT_ID:-20}"
-ACTION_DIM="${ACTION_DIM:-26}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_gr00t_gr1_sac}"
-export ARENA_GR1_JOINT_SPACE_DIR="${ARENA_GR1_JOINT_SPACE_DIR:-/workspaces/isaaclab_arena/isaaclab_arena_gr00t/embodiments/gr1}"
+NUM_ACTION_CHUNKS="${NUM_ACTION_CHUNKS:-16}"
+
+# ── Task-specific defaults ───────────────────────────────────────────────────
+# EXTRA_OVERRIDES holds hydra overrides that differ per task.
+EXTRA_OVERRIDES=()
+case "$ARENA_TASK" in
+  gr1)
+    GROOT_EMBODIMENT_TAG="${GROOT_EMBODIMENT_TAG:-gr1}"
+    GROOT_EMBODIMENT_ID="${GROOT_EMBODIMENT_ID:-20}"
+    ACTION_DIM="${ACTION_DIM:-26}"
+    ARENA_SIM="arena_gr1"
+    OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_gr00t_gr1_sac}"
+    PROJECT_NAME="${PROJECT_NAME:-gr00t-arena-gr1-sac}"
+    EXPERIMENT_NAME="${EXPERIMENT_NAME:-arena_gr00t_gr1_fridge}"
+    # 32 interactions × 16 action chunks = 512 env steps (episode_length_s≈10 @ 50 Hz).
+    MAX_INTERACTIONS="${MAX_INTERACTIONS:-32}"
+    export ARENA_GR1_JOINT_SPACE_DIR="${ARENA_GR1_JOINT_SPACE_DIR:-/workspaces/isaaclab_arena/isaaclab_arena_gr00t/embodiments/gr1}"
+    EXTRA_RAY_ENV=(
+      "+ray_kwargs.ray_init.runtime_env.env_vars.ARENA_GR1_JOINT_SPACE_DIR=$ARENA_GR1_JOINT_SPACE_DIR"
+    )
+    ;;
+  libero)
+    GROOT_EMBODIMENT_TAG="${GROOT_EMBODIMENT_TAG:-new_embodiment}"
+    GROOT_EMBODIMENT_ID="${GROOT_EMBODIMENT_ID:-10}"
+    ACTION_DIM="${ACTION_DIM:-7}"
+    ARENA_SIM="arena_libero"
+    TASK_SUITE="${TASK_SUITE:-libero_spatial}"
+    TASK_ID="${TASK_ID:-3}"
+    OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_gr00t_libero_sac}"
+    PROJECT_NAME="${PROJECT_NAME:-gr00t-arena-libero-sac}"
+    EXPERIMENT_NAME="${EXPERIMENT_NAME:-arena_gr00t_libero_${TASK_SUITE}_task${TASK_ID}}"
+    # 10 interactions × 16 action chunks = 160 env steps (matches LIBERO eval default).
+    MAX_INTERACTIONS="${MAX_INTERACTIONS:-10}"
+    export LIBERO_IN_LAB_ROOT="${LIBERO_IN_LAB_ROOT:-/libero_in_lab}"
+    if [[ ! -d "$LIBERO_IN_LAB_ROOT" ]]; then
+      echo "[warn] LIBERO_IN_LAB_ROOT='$LIBERO_IN_LAB_ROOT' missing — Arena LIBERO may fail to resolve USD/configs"
+    fi
+    EXTRA_RAY_ENV=(
+      "+ray_kwargs.ray_init.runtime_env.env_vars.LIBERO_IN_LAB_ROOT=$LIBERO_IN_LAB_ROOT"
+    )
+    EXTRA_OVERRIDES+=(
+      "cluster.env.env_worker.simulator.arena.libero_task_suite=$TASK_SUITE"
+      "cluster.env.env_worker.simulator.arena.libero_task_id=$TASK_ID"
+    )
+    ;;
+  *)
+    echo "Unknown ARENA_TASK='$ARENA_TASK' (expected: gr1 | libero)" >&2
+    exit 1
+    ;;
+esac
 
 # ── Experiment identity ──────────────────────────────────────────────────────
-PROJECT_NAME="${PROJECT_NAME:-gr00t-arena-gr1-sac}"
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-arena_gr00t_gr1_fridge}"
 REPLAY_POOL_DIR="${REPLAY_POOL_DIR:-$OUTPUT_ROOT/replay_pools}"
 
 # ── Topology (Ray resource pools under cluster.resource) ─────────────────────
@@ -57,11 +102,6 @@ NUM_ENV_GPUS="${NUM_ENV_GPUS:-1}"
 NUM_MODEL_GPUS="${NUM_MODEL_GPUS:-1}"
 NUM_ENV="${NUM_ENV:-8}"
 NUM_STAGE="${NUM_STAGE:-2}"
-
-# ── Rollout / episode horizon ────────────────────────────────────────────────
-# 32 interactions × 16 action chunks = 512 env steps (matches episode_length_s≈10 @ 50 Hz).
-NUM_ACTION_CHUNKS="${NUM_ACTION_CHUNKS:-16}"
-MAX_INTERACTIONS="${MAX_INTERACTIONS:-32}"
 
 # ── SAC batch / schedule ─────────────────────────────────────────────────────
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
@@ -86,7 +126,9 @@ TRAINER_LOGGER="${TRAINER_LOGGER:-[console]}"
 
 mkdir -p "$OUTPUT_ROOT/videos" "$OUTPUT_ROOT/checkpoints" "$REPLAY_POOL_DIR" 2>/dev/null || true
 
-# ── GR00T docker runtime env ─────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# GR00T docker runtime env.
+# ─────────────────────────────────────────────────────────────────────────────
 export VERL_LOGGING_LEVEL=INFO
 export TORCH_CUDNN_SDPA_ENABLED="${TORCH_CUDNN_SDPA_ENABLED:-0}"
 export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${PYTHONPATH:-}"
@@ -98,7 +140,7 @@ if [[ -d /opt/cuda128-compat ]]; then
   export LD_LIBRARY_PATH="/opt/cuda128-compat:${LD_LIBRARY_PATH:-}"
 fi
 
-# Same verl bootstrap as the GR1 eval (image has no verl; pin torch/transformers/numpy).
+# Same verl bootstrap as the eval script (image has no verl; pin torch/transformers/numpy).
 if ! "$PYTHON" -c "import verl, datasets, torchdata, codetiming" >/dev/null 2>&1; then
   echo "[deps] installing verl==0.7.1 (--no-deps) + missing deps; pin torch/transformers/numpy"
   CONSTRAINTS_FILE="$OUTPUT_ROOT/verl_constraints.txt"
@@ -125,15 +167,15 @@ fi
 # Hydra *group* overrides:
 #   * model/adapter@…=gr00t      -> GR00T SAC adapter (critic / Flow-SDE / policy_type)
 #   * model/override@…=gr00t     -> FSDP / processor compatibility fields
-#   * env/simulator@…=arena_gr1  -> GR1 fridge sim (gr1_joint, cameras, joint YAMLs)
+#   * env/simulator@…=$ARENA_SIM -> arena_gr1 (GR1 fridge) or arena_libero (Franka)
 # ─────────────────────────────────────────────────────────────────────────────
 "$PYTHON" -m verl_vla.entrypoints.train.sac \
   "ray_kwargs.ray_init.runtime_env.env_vars.VERL_LOGGING_LEVEL=INFO" \
   '+ray_kwargs.ray_init.runtime_env.env_vars.TORCH_CUDNN_SDPA_ENABLED="0"' \
-  "+ray_kwargs.ray_init.runtime_env.env_vars.ARENA_GR1_JOINT_SPACE_DIR=$ARENA_GR1_JOINT_SPACE_DIR" \
+  "${EXTRA_RAY_ENV[@]}" \
   "model/adapter@cluster.actor_rollout_ref.model.adapter=gr00t" \
   "model/override@cluster.actor_rollout_ref.model.override_config=gr00t" \
-  "env/simulator@cluster.env.env_worker.simulator.arena=arena_gr1" \
+  "env/simulator@cluster.env.env_worker.simulator.arena=$ARENA_SIM" \
   "cluster.actor_rollout_ref.model.path=$GROOT_MODEL_PATH" \
   "cluster.actor_rollout_ref.model.tokenizer_path=$GROOT_MODEL_PATH" \
   "cluster.actor_rollout_ref.model.trust_remote_code=True" \
@@ -167,6 +209,7 @@ fi
   "cluster.env.env_worker.num_envs=$NUM_ENV" \
   "cluster.env.env_worker.simulator_start_timeout_s=600" \
   "cluster.env.env_worker.simulator.simulator_type=arena" \
+  "${EXTRA_OVERRIDES[@]}" \
   "cluster.env.env_worker.modes=[train]" \
   "cluster.env.env_worker.teleop.enable=false" \
   "cluster.env.env_worker.recorder.enable=true" \

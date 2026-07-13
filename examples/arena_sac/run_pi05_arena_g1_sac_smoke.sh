@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+#
+# PI0.5 Arena G1 SAC *smoke* flow: teleop-driven data collection (RECAP
+# collect_data stage) that exercises the pi05 rollout + LeRobot/video recorder
+# end to end. Generates a local HTTPS cert for the WebXR teleop server, then
+# records a few short episodes. No SAC gradient step — this is a plumbing check.
+#
+# Runs inside the verl-vla-arena image (NOT the GR00T image). Launch from host:
+#
+#   BACKEND=pi05 EVAL_SCRIPT=examples/arena_sac/run_pi05_arena_g1_sac_smoke.sh \
+#     examples/arena_sac/run_docker.sh
+#
+# Overridable via env vars:
+#   MODEL_PATH   policy checkpoint (HF-format dir)
+#   OUTPUT_ROOT  where lerobot dataset + videos are written
+#   CERT_DIR     dir for the generated teleop TLS cert/key
+#
+# See README.md for the full path / variable reference.
+#
 set -euo pipefail
 set -x
 
