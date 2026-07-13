@@ -40,6 +40,8 @@ __all__ = [
     "KeyboardDeviceCfg",
     "XRControllerDevice",
     "XRControllerDeviceCfg",
+    "LerobotDevice",
+    "LerobotDeviceCfg",
 ]
 
 _LAZY_ATTRS = {
