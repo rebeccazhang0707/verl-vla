@@ -28,7 +28,7 @@ import torch
 from typing_extensions import override
 from verl import DataProto
 
-from .sac_io import Gr00tInput, Gr00tOutput
+from .base import Gr00tInput, Gr00tOutput
 
 
 def _image_batch_to_bhwc_uint8(images: torch.Tensor) -> torch.Tensor:

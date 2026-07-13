@@ -72,8 +72,8 @@ def test_full_action_survives_replay_plumbing():
 def test_bc_prefers_full_action_over_env_action():
     """BC / critic action-space selection: ``full_action`` wins over env ``action``.
 
-    Mirrors ``Gr00tN1d6ForSAC._action_from_dict`` / ``_demo_action_normalized`` so a
-    replay dict that carries both keys never silently trains BC on decoded joints.
+    Mirrors the critic / BC action-space selection (``full_action`` over env ``action``)
+    so a replay dict that carries both keys never silently trains BC on decoded joints.
     """
     full = torch.randn(2, 50, 128)
     env = torch.randn(2, 16, 26)
@@ -101,20 +101,24 @@ def test_gr00t_flow_matching_targets_noise_to_action():
 
 
 def test_critic_action_horizon_defaults_to_num_action_chunks():
-    """Modeling default: critic_action_horizon falls back to num_action_chunks.
+    """Critic action horizon falls back to num_action_chunks when unset.
 
-    Replicates the ``cfg_get`` resolution in ``Gr00tN1d6ForSAC.__init__`` without
-    importing gr00t (which the modeling module requires).
+    Replicates the adapter resolution without importing the trainable model
+    (which requires the gr00t package).
     """
-    from verl_vla.models.gr00t_n1d6.configuration_gr00t import cfg_get
+    from verl_vla.models.gr00t_n1d6.adapter_config import Gr00tAdapterConfig
 
     action_horizon = 50
     num_action_chunks = 16
-    cfg = type("C", (), {"critic_action_horizon": None, "num_action_chunks": num_action_chunks})()
-    # Old (broken) default used action_horizon; new default uses executed chunks.
-    resolved = int(cfg_get(cfg, "critic_action_horizon", num_action_chunks))
+    cfg = Gr00tAdapterConfig(
+        num_action_chunks=num_action_chunks,
+        critic={"action_horizon": None},
+    )
+    # Modeling resolves None critic.action_horizon -> num_action_chunks.
+    resolved = int(
+        cfg.critic.action_horizon if cfg.critic.action_horizon is not None else cfg.num_action_chunks
+    )
     assert resolved == 16
     assert resolved != action_horizon
-    # Explicit override still wins.
-    cfg.critic_action_horizon = 32
-    assert int(cfg_get(cfg, "critic_action_horizon", num_action_chunks)) == 32
+    cfg.critic.action_horizon = 32
+    assert int(cfg.critic.action_horizon) == 32

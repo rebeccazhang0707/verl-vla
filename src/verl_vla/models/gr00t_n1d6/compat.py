@@ -14,14 +14,25 @@
 
 """Process-wide compatibility shims for loading GR00T N1.6 under stock verl / transformers.
 
-Extracted from ``modeling_gr00t_sac`` so the model file stays focused on SAC / flow
-logic. All patches are idempotent and best-effort; call :func:`apply_gr00t_compat_patches`
-from :func:`register_gr00t_sac` before model instantiation.
+All patches are idempotent and best-effort; call :func:`apply_gr00t_compat_patches`
+from ``load_gr00t_n1d6_policy`` before model instantiation.
+
+Retained patches (and why):
+
+* :func:`patch_eagle_compat` — Eagle remote code vs transformers 4.51.3; required to load.
+* :func:`patch_fsdp2_interpolate_for_dtensor` — FSDP2 DTensor + SigLIP2 antialias upsample.
+* :func:`disable_cudnn_sdpa` — Hopper/H100 cuDNN SDPA ``CUDNN_STATUS_NOT_INITIALIZED``.
+
+Removed (not on the current VLA path):
+
+* ``patch_hf_tokenizer_for_processor_only_models`` — official GR00T scripts set
+  ``load_tokenizer=False``; tokenizer comes from the processor.
+* ``patch_verl_monkey_patch_for_custom_vla_configs`` — ``VLAFSDPEngine._build_module``
+  never calls stock verl ``apply_monkey_patch``.
 """
 
 from __future__ import annotations
 
-import contextlib
 import logging
 
 import torch
@@ -87,146 +98,34 @@ def disable_cudnn_sdpa() -> None:
         logger.warning("Could not disable cuDNN SDPA backend: %s", e)
 
 
-def patch_verl_monkey_patch_for_custom_vla_configs() -> None:
-    """Skip ``apply_monkey_patch`` when no Ulysses / padding / fused path is active.
+def patch_fsdp2_interpolate_for_dtensor() -> None:
+    """Materialize FSDP2 DTensors before antialiased bilinear upsample.
 
-    Stock ``verl==0.7.1`` always reads ``config.num_attention_heads`` (then
-    ``config.text_config.*``) inside ``apply_monkey_patch``. ``Gr00tN1d6Config``
-    has neither attribute, so FSDP ``_build_module`` crashes after a successful
-    weight load. The legacy verl fork early-returns when nothing needs patching;
-    mirror that here (idempotent).
+    Eagle/SigLIP2 ``resize_positional_embeddings`` calls
+    ``F.interpolate(..., mode="bilinear", antialias=True)``. Under FSDP2 the
+    positional embedding weight is a DTensor, and PyTorch 2.7 has no sharding
+    strategy for ``aten._upsample_bilinear2d_aa``, which aborts the first
+    training step. All-gathering the tiny embedding preserves numerics.
     """
-    try:
-        import verl.models.transformers.monkey_patch as mp
-    except ImportError:  # pragma: no cover
+    import torch.nn.functional as F
+
+    if getattr(F.interpolate, "_verl_vla_dtensor_patch", False):
         return
 
-    if getattr(mp, "_verl_vla_gr00t_monkey_patch", False):
-        return
+    _orig = F.interpolate
 
-    _orig = mp.apply_monkey_patch
+    def interpolate(input, *args, **kwargs):  # noqa: A001 - match torch API
+        if kwargs.get("antialias", False) and hasattr(input, "full_tensor"):
+            input = input.full_tensor()
+        return _orig(input, *args, **kwargs)
 
-    def apply_monkey_patch(
-        model,
-        ulysses_sp_size: int = 1,
-        use_remove_padding: bool = True,
-        use_fused_kernels: bool = False,
-        fused_kernels_backend: str = None,
-        use_prefix_grouper: bool = False,
-        use_tiled_mlp: bool = False,
-        tiled_mlp_shards: int = 4,
-        **kwargs,
-    ):
-        # Nothing to patch, or config lacks the LLM layout stock verl assumes
-        # (Gr00tN1d6Config has neither num_attention_heads nor text_config).
-        cfg = getattr(model, "config", None)
-        has_llm_heads = cfg is not None and (
-            hasattr(cfg, "num_attention_heads") or hasattr(cfg, "text_config")
-        )
-        if (
-            (
-                ulysses_sp_size <= 1
-                and not use_remove_padding
-                and not use_fused_kernels
-                and not use_prefix_grouper
-                and not use_tiled_mlp
-            )
-            or not has_llm_heads
-        ):
-            return None
-        return _orig(
-            model,
-            ulysses_sp_size=ulysses_sp_size,
-            use_remove_padding=use_remove_padding,
-            use_fused_kernels=use_fused_kernels,
-            fused_kernels_backend=fused_kernels_backend,
-            use_prefix_grouper=use_prefix_grouper,
-            use_tiled_mlp=use_tiled_mlp,
-            tiled_mlp_shards=tiled_mlp_shards,
-            **kwargs,
-        )
-
-    mp.apply_monkey_patch = apply_monkey_patch
-    # Rebind import-time aliases used by the FSDP engine.
-    import importlib
-
-    for mod_name in (
-        "verl.models.transformers.monkey_patch",
-        "verl.workers.engine.fsdp.transformer_impl",
-    ):
-        with contextlib.suppress(ImportError):
-            mod = importlib.import_module(mod_name)
-            if hasattr(mod, "apply_monkey_patch"):
-                setattr(mod, "apply_monkey_patch", apply_monkey_patch)
-
-    mp._verl_vla_gr00t_monkey_patch = True
-    logger.info("Patched verl apply_monkey_patch for custom VLA configs (GR00T)")
-
-
-def patch_hf_tokenizer_for_processor_only_models() -> None:
-    """Tolerate processor-only checkpoints in stock ``verl`` ``hf_tokenizer``.
-
-    ``verl==0.7.1`` has no ``AutoProcessor`` fallback; GR00T exports only
-    ``processor_config.json``. Recover the inner Qwen2 tokenizer, and rebind
-    import-time aliases (``HFModelConfig`` does ``from verl.utils import
-    hf_tokenizer``).
-    """
-    import importlib
-    import warnings
-
-    import verl.utils.tokenizer as tok_mod
-
-    if getattr(tok_mod, "_verl_vla_gr00t_tokenizer_patch", False):
-        return
-
-    _orig = tok_mod.hf_tokenizer
-
-    def _from_processor(name_or_path, **kwargs):
-        from transformers import AutoProcessor
-
-        kwargs.setdefault("trust_remote_code", True)
-        proc = AutoProcessor.from_pretrained(name_or_path, **kwargs)
-        return getattr(proc, "tokenizer", None) or getattr(
-            getattr(proc, "processor", None), "tokenizer", None
-        )
-
-    def hf_tokenizer(name_or_path, correct_pad_token=True, correct_gemma2=True, **kwargs):
-        try:
-            return _orig(
-                name_or_path,
-                correct_pad_token=correct_pad_token,
-                correct_gemma2=correct_gemma2,
-                **kwargs,
-            )
-        except (KeyError, ValueError, OSError) as e:
-            tok = None
-            with contextlib.suppress(Exception):
-                tok = _from_processor(name_or_path, **kwargs)
-            if tok is None:
-                warnings.warn(
-                    f"Could not load a tokenizer for {name_or_path!r} "
-                    f"({type(e).__name__}: {e}); returning None "
-                    "(expected for processor-only models such as GR00T).",
-                    stacklevel=1,
-                )
-                return None
-            if correct_pad_token:
-                tok_mod.set_pad_token_id(tok)
-            return tok
-
-    for mod_name in ("verl.utils.tokenizer", "verl.utils", "verl.workers.config.model"):
-        with contextlib.suppress(ImportError):
-            mod = importlib.import_module(mod_name)
-            if hasattr(mod, "hf_tokenizer"):
-                setattr(mod, "hf_tokenizer", hf_tokenizer)
-
-    tok_mod._verl_vla_gr00t_tokenizer_patch = True
-    logger.info("Patched verl hf_tokenizer for processor-only (GR00T) checkpoints")
+    interpolate._verl_vla_dtensor_patch = True
+    F.interpolate = interpolate
+    logger.info("Patched F.interpolate for FSDP2 DTensor antialias upsample (GR00T/SigLIP2)")
 
 
 def apply_gr00t_compat_patches() -> None:
     """Apply all GR00T load-time shims (idempotent). Call before model registration."""
     disable_cudnn_sdpa()
     patch_eagle_compat()
-    patch_hf_tokenizer_for_processor_only_models()
-    patch_verl_monkey_patch_for_custom_vla_configs()
+    patch_fsdp2_interpolate_for_dtensor()

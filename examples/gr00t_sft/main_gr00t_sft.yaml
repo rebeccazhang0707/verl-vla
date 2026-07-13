@@ -7,6 +7,10 @@ defaults:
   # Add GR00T compatibility fields to the shared native-model configuration.
   - /model/override@cluster.actor_rollout_ref.model.override_config: gr00t
 
+  # Base GR00T adapter (Arena defaults); LIBERO SFT overrides below.
+  # ``override`` is required because hf_model.yaml already selects adapter=pi0.
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: gr00t
+
   - _self_
 
 # LIBERO Spatial demonstrations consumed through the LeRobot dataloader.
@@ -31,6 +35,20 @@ data:
 cluster:
   actor_rollout_ref:
     model:
+      adapter:
+        # Native LIBERO policy IO (not Arena).
+        policy_type: libero
+        embodiment_tag: libero_panda
+        action_dim: 7
+        embodiment_id: 2
+        num_action_chunks: 8
+        critic:
+          enabled: False
+        # Inject MODALITY_CONFIGS[libero_panda] when loading from a base GR1 ckpt.
+        override_modality_configs: True
+        use_relative_action: True
+        freeze_vision_tower: False
+        freeze_action_io: False
       override_config:
         # Eagle requires BF16 initialization at this GR00T commit.
         load_bf16: true

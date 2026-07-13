@@ -116,7 +116,8 @@ fi
 #
 # Hydra *group* overrides (same pattern as the SAC smoke, but nested under
 # recap.policy_eval.cluster):
-#   * model/override@…=gr00t  -> GR00T SAC override (policy_type=arena, action_dim=26, …)
+#   * model/adapter@…=gr00t   -> GR00T Arena adapter (policy_type=arena, …)
+#   * model/override@…=gr00t  -> FSDP / processor compatibility fields
 #   * env/simulator@…=arena_gr1 -> GR1 fridge sim (gr1_joint, cameras, joint-space YAMLs)
 #
 # TrainCluster.eval() calls generate_sequences(..., eval=True), which sets
@@ -132,7 +133,8 @@ fi
   "recap.train_value_model.enable=false" \
   "recap.value_infer.enable=false" \
   "recap.train_policy.enable=false" \
-  "model/override@recap.policy_eval.cluster.actor_rollout_ref.model.override_config=gr00t" \
+  "model/adapter@recap.policy_eval.cluster.actor_rollout_ref.model.adapter=gr00t" \
+  "+model/override@recap.policy_eval.cluster.actor_rollout_ref.model.override_config=gr00t" \
   "env/simulator@recap.policy_eval.cluster.env.env_worker.simulator.arena=arena_gr1" \
   "recap.policy_eval.model_path=$GROOT_MODEL_PATH" \
   "recap.policy_eval.max_episodes=$MAX_EPISODES" \
@@ -141,8 +143,9 @@ fi
   "recap.policy_eval.cluster.actor_rollout_ref.model.tokenizer_path=$GROOT_MODEL_PATH" \
   "recap.policy_eval.cluster.actor_rollout_ref.model.trust_remote_code=True" \
   "+recap.policy_eval.cluster.actor_rollout_ref.model.load_tokenizer=False" \
-  "recap.policy_eval.cluster.actor_rollout_ref.model.override_config.embodiment_tag=$GROOT_EMBODIMENT_TAG" \
-  "recap.policy_eval.cluster.actor_rollout_ref.model.override_config.num_action_chunks=$NUM_ACTION_CHUNKS" \
+  "recap.policy_eval.cluster.actor_rollout_ref.model.adapter.embodiment_tag=$GROOT_EMBODIMENT_TAG" \
+  "recap.policy_eval.cluster.actor_rollout_ref.model.adapter.num_action_chunks=$NUM_ACTION_CHUNKS" \
+  "recap.policy_eval.cluster.actor_rollout_ref.model.adapter.critic.enabled=False" \
   "recap.policy_eval.cluster.actor_rollout_ref.rollout.name=hf" \
   "recap.policy_eval.cluster.actor_rollout_ref.rollout.output_critic_value=false" \
   "recap.policy_eval.cluster.actor_rollout_ref.rollout.tensor_model_parallel_size=1" \

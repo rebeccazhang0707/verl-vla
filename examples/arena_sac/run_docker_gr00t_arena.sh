@@ -22,9 +22,13 @@
 #   EVAL_SCRIPT=examples/arena_sac/run_gr00t_arena_gr1_sac.sh \
 #     MODELS_HOST=~/iDataset/VLA/gr00t/ranch_finetune_newcam_wrist_out \
 #     OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
-#     examples/arena_sac/run_docker_gr00t_eval.sh            # GR1 fridge SAC train
-#   examples/arena_sac/run_docker_gr00t_eval.sh --shell
-#   examples/arena_sac/run_docker_gr00t_eval.sh --no-run
+#     examples/arena_sac/run_docker_gr00t_arena.sh            # GR1 fridge SAC train
+#   EVAL_SCRIPT=examples/arena_sac/run_gr00t_arena_libero_sac.sh \
+#     MODELS_HOST=~/iDataset/VLA/gr00t/libero_all_suites_rel_rotvec \
+#     OUTPUT_ROOT=/eval/outputs/arena_gr00t_libero_sac \
+#     examples/arena_sac/run_docker_gr00t_arena.sh            # LIBERO SAC train
+#   examples/arena_sac/run_docker_gr00t_arena.sh --shell
+#   examples/arena_sac/run_docker_gr00t_arena.sh --no-run
 #
 # Common overrides (env vars):
 #   IMAGE              docker image (default: isaaclab_arena:cuda_gr00t_gn16)
@@ -75,7 +79,7 @@ case "${1:-}" in
   *) echo "Unknown option: $1" >&2; exit 1 ;;
 esac
 
-log() { echo -e "\033[1;35m[run_docker_gr00t_eval]\033[0m $*"; }
+log() { echo -e "\033[1;35m[run_docker_gr00t_arena]\033[0m $*"; }
 
 # ---------------------------------------------------------------------------
 # 1. Host-side dirs the container must write into / read from.

@@ -6,32 +6,54 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""LIBERO adapter for the external GR00T N1.6 policy."""
+"""LIBERO adapter for the external GR00T N1.6 policy.
+
+Embodiment-specific concerns live here (obs key mapping, gripper semantics,
+flat LeRobot stats conversion). Processor bridging and SAC encode/decode live
+in :class:`~verl_vla.models.gr00t_n1d6.gr00t_adapter.GR00TN16Adapter`.
+"""
 
 from __future__ import annotations
 
 import json
-from copy import deepcopy
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
+from typing_extensions import override
 from verl import DataProto
 
-from .base import Gr00tPolicyInput, Gr00tPolicyOutput
+from .arena_policy import _image_batch_to_bhwc_uint8
+from .base import Gr00tInput, Gr00tOutput
 
+# Flat LeRobot LIBERO statistics layout (dataset format, not processor keys).
+# Runtime group dims come from the checkpoint processor via GR00TN16Adapter.
 LIBERO_KEYS = ("x", "y", "z", "roll", "pitch", "yaw", "gripper")
-LIBERO_STATE_SLICES = {
-    "x": (0, 1),
-    "y": (1, 2),
-    "z": (2, 3),
-    "roll": (3, 4),
-    "pitch": (4, 5),
-    "yaw": (5, 6),
-    "gripper": (6, 8),
-}
-LIBERO_ACTION_SLICES = {key: (index, index + 1) for index, key in enumerate(LIBERO_KEYS)}
+LIBERO_STATE_GROUP_DIMS: OrderedDict[str, int] = OrderedDict(
+    x=1, y=1, z=1, roll=1, pitch=1, yaw=1, gripper=2
+)
+LIBERO_ACTION_GROUP_DIMS: OrderedDict[str, int] = OrderedDict(
+    x=1, y=1, z=1, roll=1, pitch=1, yaw=1, gripper=1
+)
+
+
+def _slices_from_group_dims(group_dims: OrderedDict[str, int]) -> dict[str, tuple[int, int]]:
+    slices: dict[str, tuple[int, int]] = {}
+    start = 0
+    for key, width in group_dims.items():
+        end = start + int(width)
+        slices[key] = (start, end)
+        start = end
+    return slices
+
+
+LIBERO_STATE_SLICES = _slices_from_group_dims(LIBERO_STATE_GROUP_DIMS)
+LIBERO_ACTION_SLICES = _slices_from_group_dims(LIBERO_ACTION_GROUP_DIMS)
+
+# Preferred DataProto camera order for LIBERO (adapter maps onto video_keys by position).
+LIBERO_IMAGE_KEYS = ("observation.images.image", "observation.images.wrist_image")
 
 
 def libero_gripper_to_gr00t(action: np.ndarray) -> np.ndarray:
@@ -142,183 +164,86 @@ def prepare_libero_gripper_action(action: np.ndarray) -> np.ndarray:
 
 
 def load_gr00t_processor(model_path: str, norm_stats_path: str | None, *, training: bool):
-    """Load the official processor without making GR00T a verl-vla dependency."""
-    from gr00t.configs.data.embodiment_configs import MODALITY_CONFIGS
-    from gr00t.data.types import ActionConfig, ActionFormat, ActionRepresentation, ActionType
-    from gr00t.model.gr00t_n1d6.processing_gr00t_n1d6 import Gr00tN1d6Processor
+    """Load the official LIBERO processor via the shared Adapter factory.
 
-    # Match the validated upstream LIBERO processor metadata. The action groups
-    # are simulator deltas (ABSOLUTE here means "do not subtract state").
-    modality_config = deepcopy(MODALITY_CONFIGS["libero_panda"])
-    action_config = modality_config["action"]
-    if action_config.action_configs is None:
-        action_config.action_configs = [
-            ActionConfig(
-                rep=ActionRepresentation.ABSOLUTE,
-                type=ActionType.NON_EEF,
-                format=ActionFormat.DEFAULT,
-            )
-            for _ in action_config.modality_keys
-        ]
-    processor = Gr00tN1d6Processor.from_pretrained(
+    Flat LeRobot statistics conversion is handled inside
+    :meth:`GR00TN16Adapter.load_processor` for ``libero_panda``.
+    """
+    from ..gr00t_adapter import GR00TN16Adapter
+
+    return GR00TN16Adapter.load_processor(
         model_path,
-        modality_configs={"libero_panda": modality_config},
+        embodiment_tag="libero_panda",
+        override_modality_configs=True,
         use_relative_action=True,
-    )
-    if norm_stats_path:
-        processor.set_statistics(load_libero_statistics(norm_stats_path), override=True)
-    processor.train() if training else processor.eval()
-    return processor
-
-
-def _numpy_float32(value: torch.Tensor | np.ndarray) -> np.ndarray:
-    if isinstance(value, torch.Tensor):
-        value = value.detach().to(device="cpu", dtype=torch.float32).numpy()
-    return np.asarray(value, dtype=np.float32)
-
-
-def _make_vla_step(
-    image: torch.Tensor | np.ndarray,
-    wrist_image: torch.Tensor | np.ndarray,
-    state: torch.Tensor | np.ndarray,
-    task: Any,
-    action: torch.Tensor | np.ndarray | None = None,
-):
-    from gr00t.data.embodiment_tags import EmbodimentTag
-    from gr00t.data.types import VLAStepData
-
-    state_array = _numpy_float32(state).reshape(-1)
-    expected_state_dim = max(end for _, end in LIBERO_STATE_SLICES.values())
-    if state_array.shape[0] != expected_state_dim:
-        raise ValueError(f"Expected {expected_state_dim} LIBERO state values, got {state_array.shape}.")
-    states = {key: state_array[start:end].reshape(1, end - start) for key, (start, end) in LIBERO_STATE_SLICES.items()}
-
-    actions: dict[str, np.ndarray] = {}
-    if action is not None:
-        action_array = _numpy_float32(action)
-        if action_array.ndim == 1:
-            action_array = action_array[None, :]
-        expected_action_dim = max(end for _, end in LIBERO_ACTION_SLICES.values())
-        if action_array.ndim != 2 or action_array.shape[-1] != expected_action_dim:
-            raise ValueError(f"Expected LIBERO actions shaped [T, 7], got {action_array.shape}.")
-        action_array = libero_gripper_to_gr00t(action_array)
-        actions = {key: action_array[:, start:end] for key, (start, end) in LIBERO_ACTION_SLICES.items()}
-
-    return VLAStepData(
-        images={
-            "image": [image_to_uint8_hwc(image)],
-            "wrist_image": [image_to_uint8_hwc(wrist_image)],
-        },
-        states=states,
-        actions=actions,
-        text=str(task),
-        embodiment=EmbodimentTag.LIBERO_PANDA,
+        norm_stats_path=norm_stats_path,
+        training=training,
     )
 
 
-def _process_vla_step(
-    processor,
-    step,
-    action_valid_mask: torch.Tensor | np.ndarray | None = None,
-) -> dict[str, Any]:
-    from gr00t.data.types import MessageType
+class LiberoGr00tInput(Gr00tInput):
+    """LIBERO obs → raw tensors for :class:`GR00TN16Adapter`.
 
-    processed = processor([{"type": MessageType.EPISODE_STEP.value, "content": step}])
-    if action_valid_mask is not None and "action_mask" in processed:
-        valid = torch.as_tensor(action_valid_mask, dtype=torch.bool).reshape(-1)
-        mask = torch.as_tensor(processed["action_mask"]).clone()
-        length = min(mask.shape[0], valid.shape[0])
-        invalid_indices = torch.nonzero(~valid[:length], as_tuple=False).flatten()
-        mask[invalid_indices] = 0
-        processed["action_mask"] = mask
-    return {
-        key: value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else value
-        for key, value in processed.items()
-    }
+    Cameras are exposed in ``LIBERO_IMAGE_KEYS`` order; the adapter maps them onto
+    checkpoint ``video_keys`` by position. Demo actions (if provided) are converted
+    to GR00T gripper space here; Adapter then normalises.
+    """
 
-
-class LiberoGr00tInput(Gr00tPolicyInput):
-    """Raw shared VLA input represented as official LIBERO ``VLAStepData`` objects."""
-
-    def __init__(self, steps: list[Any], raw_states: list[dict[str, np.ndarray]]):
-        self.steps = steps
-        self.raw_states = raw_states
+    @override
+    @classmethod
+    def from_env_obs(cls, env_obs: DataProto) -> "LiberoGr00tInput":
+        model_input = cls()
+        for key in LIBERO_IMAGE_KEYS:
+            if key not in env_obs.batch:
+                raise KeyError(f"LIBERO obs is missing required image key {key!r}")
+            model_input.images[key] = _image_batch_to_bhwc_uint8(env_obs.batch[key])
+        model_input.state = env_obs.batch["observation.state"].to(dtype=torch.float32)
+        model_input.task = list(env_obs.non_tensor_batch["task"])
+        return model_input
 
     @classmethod
-    def from_data_proto(
-        cls,
-        obs: DataProto,
-        actions: torch.Tensor | None = None,
-    ) -> LiberoGr00tInput:
-        images = obs.batch["observation.images.image"]
-        wrist_images = obs.batch["observation.images.wrist_image"]
-        states = obs.batch["observation.state"]
-        tasks = obs.non_tensor_batch["task"]
-
-        steps = []
-        raw_states = []
-        for index in range(len(obs)):
-            step = _make_vla_step(
-                images[index],
-                wrist_images[index],
-                states[index],
-                tasks[index],
-                None if actions is None else actions[index],
-            )
-            steps.append(step)
-            raw_states.append(step.states)
-        return cls(steps=steps, raw_states=raw_states)
-
-    def collate(
-        self,
-        processor: Any,
-        *,
-        action_valid_mask: torch.Tensor | None = None,
-    ) -> Any:
-        processed = [
-            _process_vla_step(
-                processor,
-                step,
-                None if action_valid_mask is None else action_valid_mask[index],
-            )
-            for index, step in enumerate(self.steps)
-        ]
-        return processor.collator(processed)
+    def actions_to_processor_space(cls, actions: torch.Tensor) -> torch.Tensor:
+        action_np = libero_gripper_to_gr00t(
+            actions.detach().to(device="cpu", dtype=torch.float32).numpy()
+        )
+        return torch.from_numpy(action_np)
 
 
-class LiberoGr00tOutput(Gr00tPolicyOutput):
+class LiberoGr00tOutput(Gr00tOutput):
     """Decode GR00T actions and apply the official LIBERO gripper semantics."""
 
+    @override
     @classmethod
-    def from_model_output(
-        cls,
-        model_output: dict[str, Any],
-        *,
-        processor: Any,
-        policy_input: LiberoGr00tInput,
-        action_chunk_size: int,
-        device: torch.device | str,
-    ) -> LiberoGr00tOutput:
-        from gr00t.data.embodiment_tags import EmbodimentTag
+    def from_model_output(cls, model_output: dict) -> "LiberoGr00tOutput":
+        output = cls()
 
-        normalized_action = model_output["action_pred"].float().cpu().numpy()
-        batched_states = {
-            key: np.stack([state[key] for state in policy_input.raw_states], axis=0) for key in LIBERO_KEYS
-        }
-        decoded = processor.decode_action(
-            normalized_action,
-            EmbodimentTag.LIBERO_PANDA,
-            batched_states,
-        )
-        full_action = np.concatenate([decoded[key] for key in LIBERO_KEYS], axis=-1)
-        full_action = prepare_libero_gripper_action(full_action)
-        action = torch.from_numpy(full_action[:, :action_chunk_size]).to(device=device)
-        return cls(action)
+        full_action = model_output.get("full_action")
+        decoded = model_output.get("decoded_action")
+        if decoded is None:
+            decoded = full_action
+        if decoded is None:
+            raise KeyError("LiberoGr00tOutput requires decoded_action or full_action")
+        if not torch.is_tensor(decoded):
+            decoded = torch.as_tensor(np.asarray(decoded, dtype=np.float32))
+
+        # Gripper: GR00T [0, 1] -> LIBERO inverted {-1, +1}.
+        decoded_np = prepare_libero_gripper_action(decoded.detach().float().cpu().numpy())
+        decoded = torch.from_numpy(decoded_np).to(device=decoded.device, dtype=torch.float32)
+
+        chunk = int(model_output.get("num_action_chunks", decoded.shape[1]))
+        chunk = min(chunk, decoded.shape[1])
+        output.action = decoded[:, :chunk]
+        output.full_action = full_action
+        output.log_prob = model_output.get("log_probs")
+        return output
 
 
 __all__ = [
+    "LIBERO_ACTION_GROUP_DIMS",
     "LIBERO_ACTION_SLICES",
+    "LIBERO_IMAGE_KEYS",
     "LIBERO_KEYS",
+    "LIBERO_STATE_GROUP_DIMS",
     "LIBERO_STATE_SLICES",
     "LiberoGr00tInput",
     "LiberoGr00tOutput",

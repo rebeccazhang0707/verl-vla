@@ -58,6 +58,14 @@ def test_registry_resolves_arena():
     assert output_cls is ArenaGr00tOutput
 
 
+def test_registry_resolves_libero():
+    from verl_vla.models.gr00t_n1d6.policy import LiberoGr00tInput, LiberoGr00tOutput
+
+    input_cls, output_cls = get_gr00t_policy_classes("libero")
+    assert input_cls is LiberoGr00tInput
+    assert output_cls is LiberoGr00tOutput
+
+
 def test_registry_unknown_raises():
     with pytest.raises(ValueError):
         get_gr00t_policy_classes("does_not_exist")

@@ -17,6 +17,7 @@ from verl import DataProto
 pytest.importorskip("gr00t", reason="GR00T N1.6 is an optional dependency")
 
 from verl_vla.models.gr00t_n1d6.policy.libero_policy import (
+    LIBERO_IMAGE_KEYS,
     LIBERO_KEYS,
     LiberoGr00tInput,
     LiberoGr00tOutput,
@@ -132,28 +133,29 @@ def _raw_libero_batch() -> tuple[DataProto, torch.Tensor, torch.Tensor]:
     return obs, actions, action_valid_mask
 
 
-def test_libero_input_consumes_raw_dataproto_and_applies_valid_mask():
-    obs, actions, action_valid_mask = _raw_libero_batch()
+def test_libero_input_from_env_obs_exposes_adapter_tensors():
+    obs, _, _ = _raw_libero_batch()
+
+    policy_input = LiberoGr00tInput.from_env_obs(obs)
+
+    assert list(policy_input.images) == list(LIBERO_IMAGE_KEYS)
+    assert policy_input.images[LIBERO_IMAGE_KEYS[0]].dtype == torch.uint8
+    assert policy_input.images[LIBERO_IMAGE_KEYS[0]].shape == (1, 8, 8, 3)
+    assert policy_input.state.shape == (1, 8)
+    assert policy_input.task == ["pick up the bowl"]
+    assert policy_input.actions is None
+
+
+def test_libero_input_from_data_proto_converts_gripper():
+    obs, actions, _ = _raw_libero_batch()
+    actions = actions.clone()
+    actions[..., -1] = -1.0
 
     policy_input = LiberoGr00tInput.from_data_proto(obs, actions=actions)
 
-    assert tuple(policy_input.raw_states[0]) == LIBERO_KEYS
-    assert policy_input.raw_states[0]["gripper"].shape == (1, 2)
-    np.testing.assert_array_equal(policy_input.steps[0].actions["gripper"], np.full((16, 1), 0.5))
-
-    class FakeProcessor:
-        def __call__(self, _messages):
-            return {"action_mask": torch.ones((50, 128), dtype=torch.float32)}
-
-        def collator(self, samples):
-            return samples
-
-    processed = policy_input.collate(
-        FakeProcessor(),
-        action_valid_mask=action_valid_mask,
-    )
-    assert processed[0]["action_mask"][14].all()
-    assert not processed[0]["action_mask"][15].any()
+    assert policy_input.actions is not None
+    assert policy_input.actions.shape == (1, 16, 7)
+    torch.testing.assert_close(policy_input.actions[..., -1], torch.ones(1, 16))
 
 
 def test_libero_input_accepts_bfloat16_dataproto():
@@ -164,27 +166,24 @@ def test_libero_input_accepts_bfloat16_dataproto():
 
     policy_input = LiberoGr00tInput.from_data_proto(obs, actions=actions.to(torch.bfloat16))
 
-    assert policy_input.raw_states[0]["x"].dtype == np.float32
-    assert policy_input.steps[0].actions["x"].dtype == np.float32
+    assert policy_input.state.dtype == torch.float32
+    assert policy_input.actions is not None
+    assert policy_input.actions.dtype == torch.float32
 
 
-def test_libero_output_decodes_and_prepares_gripper():
-    obs, _, _ = _raw_libero_batch()
-    policy_input = LiberoGr00tInput.from_data_proto(obs)
-
-    class FakeProcessor:
-        def decode_action(self, _normalized_action, _embodiment, _states):
-            decoded = {key: np.zeros((1, 2, 1), dtype=np.float32) for key in LIBERO_KEYS}
-            decoded["gripper"][0, :, 0] = np.array([0.2, 0.8], dtype=np.float32)
-            return decoded
+def test_libero_output_applies_gripper_and_chunks():
+    decoded = torch.zeros((1, 4, 7), dtype=torch.float32)
+    decoded[0, :, -1] = torch.tensor([0.2, 0.8, 0.1, 0.9])
+    full_action = torch.zeros((1, 4, 128), dtype=torch.float32)
 
     output = LiberoGr00tOutput.from_model_output(
-        {"action_pred": torch.zeros((1, 2, 128))},
-        processor=FakeProcessor(),
-        policy_input=policy_input,
-        action_chunk_size=2,
-        device="cpu",
+        {
+            "full_action": full_action,
+            "decoded_action": decoded,
+            "num_action_chunks": 2,
+        }
     )
 
     assert output.action.shape == (1, 2, 7)
     torch.testing.assert_close(output.action[0, :, -1], torch.tensor([1.0, -1.0]))
+    assert torch.equal(output.full_action, full_action)

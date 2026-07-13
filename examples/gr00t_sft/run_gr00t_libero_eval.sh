@@ -46,6 +46,7 @@ fi
 python scripts/install_checks/check_gr00t_n1d6.py
 
 python -m verl_vla.entrypoints.train.sac \
+  "model/adapter@cluster.actor_rollout_ref.model.adapter=gr00t" \
   +model/override@cluster.actor_rollout_ref.model.override_config=gr00t \
   hydra.run.dir="$HYDRA_RUN_DIR" \
   ray_kwargs.ray_init.runtime_env.env_vars.MUJOCO_GL="$MUJOCO_GL" \
@@ -59,6 +60,16 @@ python -m verl_vla.entrypoints.train.sac \
   cluster.actor_rollout_ref.model.override_config.num_attention_heads=32 \
   cluster.actor_rollout_ref.model.override_config.num_key_value_heads=32 \
   cluster.actor_rollout_ref.model.override_config.verl_processor_path="$MODEL_PATH" \
+  cluster.actor_rollout_ref.model.adapter.policy_type=libero \
+  cluster.actor_rollout_ref.model.adapter.embodiment_tag=libero_panda \
+  cluster.actor_rollout_ref.model.adapter.action_dim=7 \
+  cluster.actor_rollout_ref.model.adapter.embodiment_id=2 \
+  cluster.actor_rollout_ref.model.adapter.critic.enabled=False \
+  +cluster.actor_rollout_ref.model.adapter.override_modality_configs=True \
+  +cluster.actor_rollout_ref.model.adapter.use_relative_action=True \
+  cluster.actor_rollout_ref.model.adapter.freeze_vision_tower=False \
+  cluster.actor_rollout_ref.model.adapter.norm_stats_path="$NORM_STATS_PATH" \
+  cluster.actor_rollout_ref.model.adapter.num_action_chunks="$ACTION_CHUNK_SIZE" \
   cluster.actor_rollout_ref.model.override_config.norm_stats_path="$NORM_STATS_PATH" \
   cluster.actor_rollout_ref.model.override_config.verl_action_chunk_size="$ACTION_CHUNK_SIZE" \
   cluster.actor_rollout_ref.actor.strategy=fsdp2 \

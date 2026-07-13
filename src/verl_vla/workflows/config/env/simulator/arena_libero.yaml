@@ -4,10 +4,10 @@
 
 # Isaac Lab Arena simulator configuration for the LIBERO-in-Arena task (Franka, eef_pose).
 #
-# NOTE: this task requires the Isaac Sim / GR00T docker image and the external Arena
-# LIBERO environment (isaaclab_arena_examples.external_environments.libero). It is not
-# exercisable in the plain verl-vla environment and has not been runtime-validated
-# here; the values below mirror the legacy run_gr00t_arena_libero_sac* launchers.
+# NOTE: requires the Isaac Sim GR00T docker image (isaaclab_arena:cuda_gr00t_gn16)
+# and the external Arena LIBERO environment. Launch via
+# examples/arena_sac/run_gr00t_arena_libero_sac.sh (train) or
+# run_gr00t_arena_libero_spatial_task3_eval.sh (eval).
 
 _target_: verl_vla.envs.arena.config.ArenaLiberoSimulatorConfig
 

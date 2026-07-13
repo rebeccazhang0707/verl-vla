@@ -14,12 +14,9 @@
 
 """Unit tests for the gr00t-free SAC config surface (``configuration_gr00t``).
 
-``cfg_get`` is the single source of truth for merging ``model.override_config``
-onto the gr00t checkpoint config: every SAC / critic / Flow-SDE dim in
-``Gr00tN1d6ForSAC.__init__`` reads through it. Its "explicit None means unset"
-contract is load-bearing (a gr00t config that lacks a SAC field, or carries it as
-``None``, must fall through to the default), so it is validated here without the
-gr00t package.
+``cfg_get`` treats explicit ``None`` as unset so checkpoint configs without SAC
+fields fall through to defaults. Runtime SAC settings now live on
+``Gr00tAdapterConfig``; this module remains the gr00t-free helper/defaults table.
 """
 
 import types

@@ -47,10 +47,14 @@ def test_embodiments_registry():
     assert gr00t_utils.GR1.embodiment_id == 20
     assert gr00t_utils.GR1.action_dim == 26
     assert int(gr00t_utils.GR00TDim.MAX_STATE_DIM) == 128
+    assert gr00t_utils.EMBODIMENTS["libero_panda"] is gr00t_utils.LIBERO_PANDA
+    assert gr00t_utils.LIBERO_PANDA.embodiment_id == 2
+    assert sum(gr00t_utils.LIBERO_PANDA.state_group_dims.values()) == 8
 
 
 def test_load_embodiment_id_fallback_and_checkpoint(tmp_path):
     assert gr00t_utils.load_embodiment_id("gr1") == 20
+    assert gr00t_utils.load_embodiment_id("libero_panda") == 2
     (tmp_path / "embodiment_id.json").write_text(json.dumps({"gr1": 99}))
     assert gr00t_utils.load_embodiment_id("gr1", str(tmp_path)) == 99
     assert gr00t_utils.load_embodiment_id("gr1", str(tmp_path / "missing")) == 20

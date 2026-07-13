@@ -1,0 +1,71 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GR00T N1.6 Arena / SAC adapter configuration (verl-side; not the HF policy config).
+
+# Select the Arena policy IO adapter (Gr00tInput/Gr00tOutput).
+policy_type: arena
+
+# GR00T embodiment tag (drives projector index + processor modality config).
+embodiment_tag: gr1
+
+# Real (unpadded) env action width + projector index for GR1.
+action_dim: 26
+embodiment_id: 20
+
+# Env action chunk length executed per interaction (<= checkpoint action_horizon).
+num_action_chunks: 16
+
+# Optional critic owned by the GR00T adapter.
+# Single-task Arena GR1 / LIBERO SAC uses one shared cross_attn critic.
+# pi05-style multi_cross_attn + task_ids is only needed when one policy trains
+# many LIBERO task_ids with separate Q-heads; Arena launchers pin one task, so
+# it is intentionally not implemented here.
+critic:
+  enabled: True
+  type: cross_attn
+  head_num: 10
+  prefix_attn_heads: 8
+  # Critic scores only the executed chunk (not the full decoded horizon, often 50).
+  action_horizon: 16
+  layernorm: False
+
+# Freeze the Eagle vision tower for online RL (mirrors pi0.5).
+freeze_vision_tower: True
+
+# Freeze action-head I/O adapters (default off).
+freeze_action_io: False
+
+# --- Flow-SDE (stochastic flow sampler; arXiv:2510.25889) ---
+# When disabled the sampler reduces bit-identically to the deterministic Euler ODE.
+# Note: GR00T integrates noise→action (t: 0→1); do not reuse pi0 formulas.
+flow_sde_enable: False
+
+# Base Flow-SDE per-step noise level.
+flow_sde_noise_level: 0.065
+
+# Rollout-time Flow-SDE noise scale.
+flow_sde_rollout_noise_scale: 1.0
+
+# Train-time Flow-SDE noise scale.
+flow_sde_train_noise_scale: 1.0
+
+# Initial Flow-SDE beta.
+flow_sde_initial_beta: 1.0
+
+# Minimum Flow-SDE beta.
+flow_sde_beta_min: 0.02
+
+# Flow-SDE beta cosine-anneal horizon (optimiser steps).
+flow_sde_beta_schedule_T: 4000

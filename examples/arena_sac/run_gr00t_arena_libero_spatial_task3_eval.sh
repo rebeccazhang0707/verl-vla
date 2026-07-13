@@ -17,9 +17,9 @@
 #   MODELS_HOST=~/iDataset/VLA/gr00t/libero_all_suites_rel_rotvec \
 #   GROOT_MODEL_PATH=/models/checkpoint-5000 \
 #   EVAL_SCRIPT=examples/arena_sac/run_gr00t_arena_libero_spatial_task3_eval.sh \
-#     examples/arena_sac/run_docker_gr00t_eval.sh
+#     examples/arena_sac/run_docker_gr00t_arena.sh
 #
-# Mount mapping (via run_docker_gr00t_eval.sh):
+# Mount mapping (via run_docker_gr00t_arena.sh):
 #   /models                      <- checkpoint parent (libero_all_suites_rel_rotvec)
 #   /eval                        <- this verl-vla repo
 #   /workspaces/isaaclab_arena   <- host IsaacLab-Arena checkout
@@ -104,7 +104,8 @@ fi
   "recap.train_value_model.enable=false" \
   "recap.value_infer.enable=false" \
   "recap.train_policy.enable=false" \
-  "model/override@recap.policy_eval.cluster.actor_rollout_ref.model.override_config=gr00t" \
+  "model/adapter@recap.policy_eval.cluster.actor_rollout_ref.model.adapter=gr00t" \
+  "+model/override@recap.policy_eval.cluster.actor_rollout_ref.model.override_config=gr00t" \
   "env/simulator@recap.policy_eval.cluster.env.env_worker.simulator.arena=arena_libero" \
   "recap.policy_eval.model_path=$GROOT_MODEL_PATH" \
   "recap.policy_eval.max_episodes=$MAX_EPISODES" \
@@ -113,10 +114,11 @@ fi
   "recap.policy_eval.cluster.actor_rollout_ref.model.tokenizer_path=$GROOT_MODEL_PATH" \
   "recap.policy_eval.cluster.actor_rollout_ref.model.trust_remote_code=True" \
   "+recap.policy_eval.cluster.actor_rollout_ref.model.load_tokenizer=False" \
-  "recap.policy_eval.cluster.actor_rollout_ref.model.override_config.embodiment_tag=$GROOT_EMBODIMENT_TAG" \
-  "recap.policy_eval.cluster.actor_rollout_ref.model.override_config.embodiment_id=$GROOT_EMBODIMENT_ID" \
-  "recap.policy_eval.cluster.actor_rollout_ref.model.override_config.action_dim=$ACTION_DIM" \
-  "recap.policy_eval.cluster.actor_rollout_ref.model.override_config.num_action_chunks=$NUM_ACTION_CHUNKS" \
+  "recap.policy_eval.cluster.actor_rollout_ref.model.adapter.embodiment_tag=$GROOT_EMBODIMENT_TAG" \
+  "recap.policy_eval.cluster.actor_rollout_ref.model.adapter.embodiment_id=$GROOT_EMBODIMENT_ID" \
+  "recap.policy_eval.cluster.actor_rollout_ref.model.adapter.action_dim=$ACTION_DIM" \
+  "recap.policy_eval.cluster.actor_rollout_ref.model.adapter.num_action_chunks=$NUM_ACTION_CHUNKS" \
+  "recap.policy_eval.cluster.actor_rollout_ref.model.adapter.critic.enabled=False" \
   "recap.policy_eval.cluster.actor_rollout_ref.rollout.name=hf" \
   "recap.policy_eval.cluster.actor_rollout_ref.rollout.output_critic_value=false" \
   "recap.policy_eval.cluster.actor_rollout_ref.rollout.tensor_model_parallel_size=1" \
