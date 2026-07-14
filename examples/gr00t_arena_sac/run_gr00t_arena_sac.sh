@@ -106,7 +106,7 @@ NUM_STAGE="${NUM_STAGE:-2}"
 # ── SAC batch / schedule ─────────────────────────────────────────────────────
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-32}"
-TOTAL_EPOCHS="${TOTAL_EPOCHS:-1000}"
+TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1000}"
 ROLLOUT_INTERVAL="${ROLLOUT_INTERVAL:-20}"
 WARM_ROLLOUT_STEPS="${WARM_ROLLOUT_STEPS:-5}"
 CRITIC_WARMUP_STEPS="${CRITIC_WARMUP_STEPS:-200}"
@@ -170,7 +170,7 @@ fi
   '+ray_kwargs.ray_init.runtime_env.env_vars.TORCH_CUDNN_SDPA_ENABLED="0"' \
   "${EXTRA_RAY_ENV[@]}" \
   "model/adapter@cluster.actor_rollout_ref.model.adapter=gr00t" \
-  "model/override@cluster.actor_rollout_ref.model.override_config=gr00t" \
+  "+model/override@cluster.actor_rollout_ref.model.override_config=gr00t" \
   "env/simulator@cluster.env.env_worker.simulator.arena=$ARENA_SIM" \
   "cluster.actor_rollout_ref.model.path=$GROOT_MODEL_PATH" \
   "cluster.actor_rollout_ref.model.tokenizer_path=$GROOT_MODEL_PATH" \
@@ -223,7 +223,7 @@ fi
   "trainer.project_name=$PROJECT_NAME" \
   "trainer.experiment_name=$EXPERIMENT_NAME" \
   "trainer.logger=$TRAINER_LOGGER" \
-  "trainer.total_epochs=$TOTAL_EPOCHS" \
+  "trainer.total_training_steps=$TOTAL_TRAINING_STEPS" \
   "trainer.rollout_interval=$ROLLOUT_INTERVAL" \
   "trainer.warm_rollout_steps=$WARM_ROLLOUT_STEPS" \
   "trainer.save_freq=$SAVE_FREQ" \

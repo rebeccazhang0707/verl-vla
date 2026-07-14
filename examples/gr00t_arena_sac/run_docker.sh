@@ -105,6 +105,7 @@ DOCKER_ENV_ARGS+=(-e "ISAACLAB_PATH=$ARENA_WORKDIR/submodules/IsaacLab")
 LIBERO_IN_LAB_HOST="${LIBERO_IN_LAB_HOST:-$HOST_REPO/libero_in_lab}"
 LIBERO_IN_LAB_WORKDIR="${LIBERO_IN_LAB_WORKDIR:-/libero_in_lab}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$WORKDIR/outputs/arena_gr00t_gr1_eval}"
+RAY_TMPDIR="${RAY_TMPDIR:-$OUTPUT_ROOT/ray_tmp}"
 
 mkdir -p "$HOST_REPO/outputs"
 chmod 777 "$HOST_REPO/outputs" 2>/dev/null || true
@@ -260,7 +261,9 @@ case "$MODE" in
       -e GROOT_MODEL_PATH="$GROOT_MODEL_PATH" \
       -e MAX_EPISODES="$MAX_EPISODES" \
       -e OUTPUT_ROOT="$OUTPUT_ROOT" \
+      -e RAY_TMPDIR="$RAY_TMPDIR" \
       -e LIBERO_IN_LAB_ROOT="$LIBERO_IN_LAB_WORKDIR" \
+      -e GR00T_COMPAT_PATCHES="${GR00T_COMPAT_PATCHES-all}" \
       -e ARENA_TASK="${ARENA_TASK:-}" \
       -e TASK_SUITE="${TASK_SUITE:-}" \
       -e TASK_ID="${TASK_ID:-}" \
