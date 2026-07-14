@@ -4,7 +4,7 @@
 #
 # It (re)creates the GR00T container, mounts the right host dirs, then runs an
 # inner eval / sac script inside it. The inner script is selected with
-# EVAL_SCRIPT (relative to the repo root as seen inside the container).
+# INNER_SCRIPT (relative to the repo root as seen inside the container).
 #
 #   isaaclab_arena:cuda_gr00t_gn16  (non-root; host-matching user via the image
 #   entrypoint, same as the Arena docker/run_docker.sh)
@@ -24,12 +24,12 @@
 #   examples/gr00t_arena_sac/run_docker.sh
 #
 #   # GR00T LIBERO spatial task 3 eval:
-#   EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh ARENA_TASK=libero \
+#   INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh ARENA_TASK=libero \
 #     GROOT_MODEL_PATH=/models/checkpoint-10000 \
 #     examples/gr00t_arena_sac/run_docker.sh
 #
 #   # GR00T GR1 SAC train:
-#   EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh ARENA_TASK=gr1 \
+#   INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh ARENA_TASK=gr1 \
 #     GROOT_MODEL_PATH=/models/checkpoint-10000 \
 #     OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
 #     examples/gr00t_arena_sac/run_docker.sh
@@ -44,7 +44,8 @@
 #   IMAGE              docker image                (default: isaaclab_arena:cuda_gr00t_gn16)
 #   CONTAINER_NAME     container name              (default: isaaclab_arena-cuda_gr00t_gn16)
 #   RECREATE=1         force remove + recreate the container
-#   EVAL_SCRIPT        inner script (relative to the repo inside the container)
+#   INNER_SCRIPT       inner script (relative to the repo inside the container)
+#                      (EVAL_SCRIPT: deprecated alias, still honoured)
 #   MAX_EPISODES       episodes to evaluate        (default 10; ignored by train)
 #   ARENA_TASK         gr1 | libero                (forwarded to gr00t inner scripts)
 #   OUTPUT_ROOT        eval/train output root inside the container
@@ -89,7 +90,9 @@ RUN_USER="$(id -un)"; RUN_GROUP="$(id -gn)"
 IMAGE="${IMAGE:-isaaclab_arena:cuda_gr00t_gn16}"
 CONTAINER_NAME="${CONTAINER_NAME:-isaaclab_arena-cuda_gr00t_gn16}"
 WORKDIR="${WORKDIR:-/eval}"
-EVAL_SCRIPT="${EVAL_SCRIPT:-examples/gr00t_arena_sac/run_gr00t_arena_eval.sh}"
+# INNER_SCRIPT selects the eval / train script run inside the container.
+# EVAL_SCRIPT is still honoured as a deprecated alias for backward compatibility.
+INNER_SCRIPT="${INNER_SCRIPT:-${EVAL_SCRIPT:-examples/gr00t_arena_sac/run_gr00t_arena_eval.sh}}"
 
 # Checkpoint parent on the host -> /models. Put your GR00T HF-format export dir(s)
 # under <repo>/checkpoints/ (e.g. <repo>/checkpoints/checkpoint-10000), or override.
@@ -256,7 +259,7 @@ case "$MODE" in
   run)
     # Non-root user == host uid, so outputs under the bind-mounted repo are written
     # with correct host ownership (no post-hoc chmod needed).
-    log "Running $EVAL_SCRIPT (GROOT_MODEL_PATH=$GROOT_MODEL_PATH, MAX_EPISODES=$MAX_EPISODES, OUTPUT_ROOT=$OUTPUT_ROOT)"
+    log "Running $INNER_SCRIPT (GROOT_MODEL_PATH=$GROOT_MODEL_PATH, MAX_EPISODES=$MAX_EPISODES, OUTPUT_ROOT=$OUTPUT_ROOT)"
     docker exec -i "${DOCKER_TTY_ARGS[@]}" "${DOCKER_USER_ARGS[@]}" -w "$WORKDIR" \
       -e GROOT_MODEL_PATH="$GROOT_MODEL_PATH" \
       -e MAX_EPISODES="$MAX_EPISODES" \
@@ -268,7 +271,7 @@ case "$MODE" in
       -e TASK_SUITE="${TASK_SUITE:-}" \
       -e TASK_ID="${TASK_ID:-}" \
       "$CONTAINER_NAME" \
-      bash "$EVAL_SCRIPT"
+      bash "$INNER_SCRIPT"
     HOST_OUTPUT="${OUTPUT_ROOT/#$WORKDIR/$HOST_REPO}"
     log "Outputs on host: $HOST_OUTPUT"
     ;;

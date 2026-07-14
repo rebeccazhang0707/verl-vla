@@ -15,6 +15,38 @@ from torch import nn
 from .mlp import CriticMLP
 
 
+def _align_query_token(state_token: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    """Coerce the cross-attn query token to match ``ref``'s tensor type.
+
+    The learnable query lives in a size-1 ``nn.Embedding`` whose weight, under
+    FSDP2, stays a ``Shard(0)`` DTensor at critic-forward time -- it is *not*
+    materialized by FSDP2's all-gather the way the ``nn.Linear`` / attention
+    weights and backbone activations are (same quirk that motivates the SigLIP
+    positional-embedding ``full_tensor`` shim in ``compat.py``). That mismatch
+    breaks the cross-attention two ways:
+
+    * ``view(1, 1, -1).expand(batch, -1, -1)`` on a ``Shard(0)`` dim -> PyTorch
+      2.7 cannot propagate sharding (``KeyError`` in ``_rewrite_shard_dim``);
+    * feeding the sharded query into ``nn.MultiheadAttention`` whose
+      ``in_proj_weight`` is a plain, already-gathered tensor -> ``aten.mm got
+      mixed torch.Tensor and DTensor``.
+
+    ``ref`` is the VL feature tensor (the attention key/value), which shares the
+    "world" of the attention weights. Matching the query to it keeps query, key,
+    value and weights mutually consistent: materialize to a plain tensor when the
+    surrounding compute is plain, or replicate onto ``ref``'s mesh when it is a
+    DTensor. No-op for a plain query token (non-FSDP2 / rollout).
+    """
+    if getattr(state_token, "placements", None) is None:
+        return state_token
+    ref_mesh = getattr(ref, "device_mesh", None)
+    if ref_mesh is not None:
+        from torch.distributed.tensor import Replicate
+
+        return state_token.redistribute(device_mesh=ref_mesh, placements=[Replicate()] * ref_mesh.ndim)
+    return state_token.full_tensor()
+
+
 class Gr00tCriticGroup(nn.Module):
     """Ensemble critic heads over pooled VL features + state + normalised action."""
 
@@ -102,6 +134,7 @@ class Gr00tCriticGroup(nn.Module):
     ) -> torch.Tensor:
         cross_attn = self.target_prefix_cross_attn if use_target_network else self.critic_prefix_cross_attn
         state_token = (self.target_state_token if use_target_network else self.critic_state_token).weight
+        state_token = _align_query_token(state_token, vl_embeds)
         batch_size = vl_embeds.shape[0]
         mask_b = attn_mask.unsqueeze(-1).to(torch.bool)
         vl_safe = torch.where(mask_b, vl_embeds, torch.zeros_like(vl_embeds))

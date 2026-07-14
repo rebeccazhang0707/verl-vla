@@ -31,12 +31,12 @@ run_docker.sh   →   (re)creates the GR00T container + mounts   →   runs an i
 
 - **`run_docker.sh`** is the container launcher. It picks the GR00T image, mounts
   the right host dirs, and `docker exec`s an inner script.
-- The inner script (selected with `EVAL_SCRIPT`) builds the actual Hydra command
+- The inner script (selected with `INNER_SCRIPT`) builds the actual Hydra command
   and runs it with the in-container `python` (`/isaac-sim/python.sh`).
 
 | File | Role |
 | --- | --- |
-| `run_docker.sh` | GR00T container launcher. Mounts image/repo/Arena/models, runs the inner script named by `EVAL_SCRIPT`. |
+| `run_docker.sh` | GR00T container launcher. Mounts image/repo/Arena/models, runs the inner script named by `INNER_SCRIPT`. |
 | `run_gr00t_arena_eval.sh` | GR00T RECAP `policy_eval`. `ARENA_TASK=gr1\|libero`. |
 | `run_gr00t_arena_sac.sh` | GR00T SAC training. `ARENA_TASK=gr1\|libero`. |
 
@@ -185,7 +185,7 @@ examples/gr00t_arena_sac/run_docker.sh
 ### LIBERO spatial task 3 eval
 
 ```bash
-EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh \
+INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh \
 ARENA_TASK=libero \
 MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
   examples/gr00t_arena_sac/run_docker.sh
@@ -194,7 +194,7 @@ MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
 ### GR1 fridge task SAC training
 
 ```bash
-EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
+INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
 ARENA_TASK=gr1 \
 GROOT_MODEL_PATH=/models/checkpoint-10000 \
 OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
@@ -204,7 +204,7 @@ OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
 ### LIBERO SAC training (use a separate container)
 
 ```bash
-EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
+INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
 ARENA_TASK=libero \
 MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
 OUTPUT_ROOT=/eval/outputs/arena_gr00t_libero_sac \
@@ -328,7 +328,7 @@ Outputs land under `<repo>/outputs/…` on the host (the repo is bind-mounted).
 
 | Var | Default | Meaning |
 | --- | --- | --- |
-| `EVAL_SCRIPT` | `run_gr00t_arena_eval.sh` | Inner script (path relative to the repo inside the container). |
+| `INNER_SCRIPT` | `run_gr00t_arena_eval.sh` | Inner script (path relative to the repo inside the container). `EVAL_SCRIPT` is a deprecated alias. |
 | `IMAGE` | `isaaclab_arena:cuda_gr00t_gn16` | Override the docker image. |
 | `CONTAINER_NAME` | `isaaclab_arena-cuda_gr00t_gn16` | Override the container name. |
 | `RECREATE` | `0` | `1` forces remove + recreate of the container. |
