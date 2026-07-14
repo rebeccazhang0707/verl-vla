@@ -483,7 +483,8 @@ class ImageTransform:
                     imgs.append(sample)
                 img = torch.stack(imgs, dim=0)
 
-            img = img / 255.0 * 2.0 - 1.0  # pi05 libero
+            # Embodiment adapters provide floating point images in [0, 1].
+            img = img * 2.0 - 1.0
             images.append(img)
             img_masks.append(torch.ones((img.shape[0],), dtype=torch.bool, device=img.device))
 

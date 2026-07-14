@@ -16,6 +16,8 @@ import torch
 from typing_extensions import override
 from verl.protocol import DataProto
 
+from verl_vla.utils.image import image_to_float01
+
 from .base import Pi0Input, Pi0Output
 
 PI0_MAX_STATE_DIM = 32
@@ -44,8 +46,12 @@ class LiberoPi0Input(Pi0Input):
         device = images.device
 
         batch_size = images.shape[0]
-        cam_high = cls._to_bchw(images)
-        left_wrist = cls._to_bchw(wrist_images)
+        # LIBERO simulation emits uint8 [0, 255] images, while LeRobot decodes
+        # recorded images as floating point [0, 1]. Normalize both sources at
+        # the embodiment boundary so the shared image transform has one input
+        # contract.
+        cam_high = image_to_float01(cls._to_bchw(images)).to(device=device, dtype=torch.bfloat16)
+        left_wrist = image_to_float01(cls._to_bchw(wrist_images)).to(device=device, dtype=torch.bfloat16)
         empty_images = torch.zeros(
             (batch_size, 3, cam_high.shape[2], cam_high.shape[3]),
             device=device,
@@ -53,8 +59,8 @@ class LiberoPi0Input(Pi0Input):
         )
 
         input.images = {
-            "observation.images.cam_high": cam_high.to(torch.bfloat16),
-            "observation.images.cam_left_wrist": left_wrist.to(torch.bfloat16),
+            "observation.images.cam_high": cam_high,
+            "observation.images.cam_left_wrist": left_wrist,
             "observation.images.cam_right_wrist": empty_images,
         }
         input.img_masks = [

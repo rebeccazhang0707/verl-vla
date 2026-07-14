@@ -296,13 +296,18 @@ class PI0TrainableModel(
         del model_args
         config = kwargs.pop("config", None)
         adapter_config = kwargs.pop("adapter_config", None)
+        policy_config_overrides = dict(kwargs.pop("policy_config_overrides", {}) or {})
         policy_load_keys = {"cache_dir", "force_download", "local_files_only", "proxies", "revision", "token"}
         policy_load_kwargs = {key: kwargs.pop(key) for key in tuple(kwargs) if key in policy_load_keys}
         torch_dtype = kwargs.pop("torch_dtype", None)
         if torch_dtype is not None:
             policy_load_kwargs["torch_dtype"] = torch_dtype
 
-        policy = PI0Policy.from_pretrained(pretrained_model_name_or_path, **policy_load_kwargs)
+        policy = PI0Policy.from_pretrained(
+            pretrained_model_name_or_path,
+            **policy_load_kwargs,
+            **policy_config_overrides,
+        )
         policy_config = dict(policy.config)
         if config is None:
             overrides = dict(adapter_config or {})
