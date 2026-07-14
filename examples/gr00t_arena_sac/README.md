@@ -169,6 +169,111 @@ registry on the **first** run and cached in the container — no manual step. Th
 first eval therefore takes longer while assets download.
 
 ---
+## Typical commands
+
+Run all of these from the **verl-vla repo root** on the host.
+
+Defaults assume the checkpoint is at `./checkpoints/checkpoint-10000`. Override
+`GROOT_MODEL_PATH` (container path under `/models`) to pick a different one.
+
+### GR1 fridge task eval (verified default)
+
+```bash
+examples/gr00t_arena_sac/run_docker.sh
+```
+
+### LIBERO spatial task 3 eval
+
+```bash
+EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh \
+ARENA_TASK=libero \
+MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
+  examples/gr00t_arena_sac/run_docker.sh
+```
+
+### GR1 fridge task SAC training
+
+```bash
+EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
+ARENA_TASK=gr1 \
+GROOT_MODEL_PATH=/models/checkpoint-10000 \
+OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
+  examples/gr00t_arena_sac/run_docker.sh
+```
+
+### LIBERO SAC training (use a separate container)
+
+```bash
+EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
+ARENA_TASK=libero \
+MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
+OUTPUT_ROOT=/eval/outputs/arena_gr00t_libero_sac \
+CONTAINER_NAME=isaaclab_arena-cuda_gr00t_gn16_sac \
+  examples/gr00t_arena_sac/run_docker.sh
+```
+
+### Start a container / shell only
+
+```bash
+examples/gr00t_arena_sac/run_docker.sh --no-run   # (re)start GR00T container only
+examples/gr00t_arena_sac/run_docker.sh --shell    # GR00T interactive shell
+```
+
+Extra Hydra overrides append to any inner script and are forwarded via `"$@"`,
+e.g. inside `--shell`:
+
+```bash
+GROOT_MODEL_PATH=/models/checkpoint-10000 \
+  bash examples/gr00t_arena_sac/run_gr00t_arena_eval.sh recap.policy_eval.max_episodes=1
+```
+
+---
+
+## Code layout
+
+The GR00T policy and the Arena environment live in the verl-vla source tree.
+
+### `src/verl_vla/models/gr00t_n1d6/` — GR00T N1.6 model wrapper
+
+```
+gr00t_n1d6/
+├── __init__.py          # package doc; pins GR00T_N1D6_COMMIT (the Isaac-GR00T commit this wraps)
+├── trainable_model.py   # Gr00tN1d6TrainableModel: main trainable wrapper around the native
+│                        #   GR00T policy + optional SAC critic / Flow-SDE actor sampling;
+│                        #   load_gr00t_n1d6_policy() loader (entered from build_vla_model)
+├── gr00t_adapter.py     # GR00TN16Adapter: raw obs → checkpoint's Gr00tN1d6Processor → model
+│                        #   inputs, and action de-normalisation (canonical Gr00tPolicy path)
+├── adapter_config.py    # Gr00tAdapterConfig / Gr00tCriticConfig: framework-side settings
+│                        #   (policy IO, critic, Flow-SDE). NOT a HF PretrainedConfig
+├── compat.py            # process-wide load-time shims (Eagle/transformers 4.51.3, cuDNN SDPA,
+│                        #   FSDP2 interpolate); opt-in via GR00T_COMPAT_PATCHES (default off)
+├── utils.py             # shared helpers: fallback constants, flat-state→joint-group geometry,
+│                        #   checkpoint state-dict remap / critic extraction
+├── critic/              # SAC critic backends (used only when adapter.critic.enabled)
+│   ├── base.py          #   CriticBackend ABC (scores the normalised full_action)
+│   ├── group.py         #   shared critic module group (heads + optional cross-attn / pool proj)
+│   ├── critic_cross_attn.py  # cross-attention critic backend
+│   ├── critic_mean_pool.py   # mean-pool critic backend
+│   └── mlp.py           #   critic MLP (SiLU + optional LayerNorm)
+└── policy/              # per-embodiment IO adapters for the external GR00T policy
+    ├── base.py          #   policy IO contract (mirrors pi0_torch/policy/base.py)
+    ├── arena_policy.py  #   Arena / GR1 IO adapter (26-DOF joint space)
+    └── libero_policy.py #   LIBERO IO adapter (7-DOF eef-pose)
+```
+
+### `src/verl_vla/envs/arena/` — IsaacLab-Arena environment
+
+```
+arena/
+├── __init__.py     # exports IsaacLabArenaEnv
+├── arena_env.py    # IsaacLabArenaEnv: Arena env on the shared BaseEnv interface —
+│                   #   launches Isaac Sim (AppLauncher), reset/step, video recorders
+├── config.py       # ArenaSimulatorConfig: simulator selection + LIBERO task suite/id
+├── embodiment.py   # embodiment adapters: obs/action mapping per embodiment (GR1 / Franka),
+│                   #   joint-space YAMLs, LIBERO asset-root resolution
+└── utils.py        # helpers for IsaacLabArenaEnv
+```
+---
 
 ## Reference
 
@@ -258,108 +363,3 @@ Outputs land under `<repo>/outputs/…` on the host (the repo is bind-mounted).
 `PROJECT_NAME`, `EXPERIMENT_NAME`, `TRAINER_LOGGER` (`[console]`).
 
 ---
-
-## Typical commands
-
-Run all of these from the **verl-vla repo root** on the host.
-
-Defaults assume the checkpoint is at `./checkpoints/checkpoint-10000`. Override
-`GROOT_MODEL_PATH` (container path under `/models`) to pick a different one.
-
-### GR1 fridge eval (verified default)
-
-```bash
-examples/gr00t_arena_sac/run_docker.sh
-```
-
-### LIBERO spatial task 3 eval
-
-```bash
-EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh \
-ARENA_TASK=libero \
-MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
-  examples/gr00t_arena_sac/run_docker.sh
-```
-
-### GR1 SAC training
-
-```bash
-EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
-ARENA_TASK=gr1 \
-GROOT_MODEL_PATH=/models/checkpoint-10000 \
-OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
-  examples/gr00t_arena_sac/run_docker.sh
-```
-
-### LIBERO SAC training (use a separate container)
-
-```bash
-EVAL_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
-ARENA_TASK=libero \
-MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
-OUTPUT_ROOT=/eval/outputs/arena_gr00t_libero_sac \
-CONTAINER_NAME=isaaclab_arena-cuda_gr00t_gn16_sac \
-  examples/gr00t_arena_sac/run_docker.sh
-```
-
-### Start a container / shell only
-
-```bash
-examples/gr00t_arena_sac/run_docker.sh --no-run   # (re)start GR00T container only
-examples/gr00t_arena_sac/run_docker.sh --shell    # GR00T interactive shell
-```
-
-Extra Hydra overrides append to any inner script and are forwarded via `"$@"`,
-e.g. inside `--shell`:
-
-```bash
-GROOT_MODEL_PATH=/models/checkpoint-10000 \
-  bash examples/gr00t_arena_sac/run_gr00t_arena_eval.sh recap.policy_eval.max_episodes=1
-```
-
----
-
-## Code layout
-
-The GR00T policy and the Arena environment live in the verl-vla source tree.
-
-### `src/verl_vla/models/gr00t_n1d6/` — GR00T N1.6 model wrapper
-
-```
-gr00t_n1d6/
-├── __init__.py          # package doc; pins GR00T_N1D6_COMMIT (the Isaac-GR00T commit this wraps)
-├── trainable_model.py   # Gr00tN1d6TrainableModel: main trainable wrapper around the native
-│                        #   GR00T policy + optional SAC critic / Flow-SDE actor sampling;
-│                        #   load_gr00t_n1d6_policy() loader (entered from build_vla_model)
-├── gr00t_adapter.py     # GR00TN16Adapter: raw obs → checkpoint's Gr00tN1d6Processor → model
-│                        #   inputs, and action de-normalisation (canonical Gr00tPolicy path)
-├── adapter_config.py    # Gr00tAdapterConfig / Gr00tCriticConfig: framework-side settings
-│                        #   (policy IO, critic, Flow-SDE). NOT a HF PretrainedConfig
-├── compat.py            # process-wide load-time shims (Eagle/transformers 4.51.3, cuDNN SDPA,
-│                        #   FSDP2 interpolate); opt-in via GR00T_COMPAT_PATCHES (default off)
-├── utils.py             # shared helpers: fallback constants, flat-state→joint-group geometry,
-│                        #   checkpoint state-dict remap / critic extraction
-├── critic/              # SAC critic backends (used only when adapter.critic.enabled)
-│   ├── base.py          #   CriticBackend ABC (scores the normalised full_action)
-│   ├── group.py         #   shared critic module group (heads + optional cross-attn / pool proj)
-│   ├── critic_cross_attn.py  # cross-attention critic backend
-│   ├── critic_mean_pool.py   # mean-pool critic backend
-│   └── mlp.py           #   critic MLP (SiLU + optional LayerNorm)
-└── policy/              # per-embodiment IO adapters for the external GR00T policy
-    ├── base.py          #   policy IO contract (mirrors pi0_torch/policy/base.py)
-    ├── arena_policy.py  #   Arena / GR1 IO adapter (26-DOF joint space)
-    └── libero_policy.py #   LIBERO IO adapter (7-DOF eef-pose)
-```
-
-### `src/verl_vla/envs/arena/` — IsaacLab-Arena environment
-
-```
-arena/
-├── __init__.py     # exports IsaacLabArenaEnv
-├── arena_env.py    # IsaacLabArenaEnv: Arena env on the shared BaseEnv interface —
-│                   #   launches Isaac Sim (AppLauncher), reset/step, video recorders
-├── config.py       # ArenaSimulatorConfig: simulator selection + LIBERO task suite/id
-├── embodiment.py   # embodiment adapters: obs/action mapping per embodiment (GR1 / Franka),
-│                   #   joint-space YAMLs, LIBERO asset-root resolution
-└── utils.py        # helpers for IsaacLabArenaEnv
-```

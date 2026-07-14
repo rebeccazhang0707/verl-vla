@@ -134,7 +134,7 @@ def apply_gr00t_compat_patches() -> None:
     """
     import os
 
-    enable = {s.strip() for s in os.environ.get("GR00T_COMPAT_PATCHES", "").split(",") if s.strip()}
+    enable = {s.strip() for s in os.environ.get("GR00T_COMPAT_PATCHES", "all").split(",") if s.strip()}
     if not enable:
         return
     all_on = "all" in enable

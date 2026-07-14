@@ -199,6 +199,12 @@ docker exec -u 0 "$CONTAINER_NAME" bash -c "
   echo '$RUN_USER ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/99-runuser
   chmod 0440 /etc/sudoers.d/99-runuser
   chown '$RUN_UID:$RUN_GID' /models /libero_in_lab 2>/dev/null || true
+  # /isaac-sim is 0751 (drwxr-x--x isaac-sim). 'docker exec -u uid:gid' below drops
+  # supplementary groups, so the run user is NOT in the isaac-sim group at runtime and
+  # cannot read it as 'other' -> isaacsim fails to expose SimulationApp ('NoneType' is
+  # not callable in AppLauncher). Grant others read+traverse on the top dir (subdirs are
+  # already o+rx) so the host-uid user can load the isaacsim.simulation_app extension.
+  chmod o+rx /isaac-sim 2>/dev/null || true
 " >/dev/null 2>&1 || log "WARNING: non-root user bootstrap reported an error"
 
 # Run inside the container as the host-matching user.
