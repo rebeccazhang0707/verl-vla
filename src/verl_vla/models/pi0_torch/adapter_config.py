@@ -83,10 +83,6 @@ class PI0AdapterConfig:
                 critic_values[new_name] = overrides.pop(old_name)
 
         values = {**self.DEFAULTS, **dict(policy_config or {}), **overrides}
-        # Accept existing run configs during migration without writing the old
-        # terminology back to newly exported artifacts.
-        if "policy_type" in values and "embodiment" not in overrides:
-            values["embodiment"] = values.pop("policy_type")
         self.model_path = str(model_path) if model_path is not None else None
         self.critic = PI0CriticConfig(**critic_values)
         for name, value in values.items():

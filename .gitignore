@@ -133,3 +133,6 @@ log
 outputs
 .history
 certs/
+
+# documentation build artifacts
+docs/_build/

@@ -17,10 +17,7 @@ _PI0_EMBODIMENT_REGISTRY = {
 
 
 def get_pi0_embodiment_classes(embodiment: str) -> tuple[type[Pi0Input], type[Pi0Output]]:
-    """Resolve the I/O mapping used for a simulator or robot embodiment.
-
-    Older checkpoints using ``policy_type`` are normalized by ``PI0AdapterConfig``.
-    """
+    """Resolve the I/O mapping used for a simulator or robot embodiment."""
 
     try:
         return _PI0_EMBODIMENT_REGISTRY[embodiment]

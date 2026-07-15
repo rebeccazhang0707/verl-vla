@@ -43,6 +43,7 @@ def build_vla_model(model_config, *, torch_dtype: torch.dtype):
         return PI0TrainableModel.from_pretrained(
             path,
             adapter_config=dict(model_config.adapter),
+            policy_config_overrides=overrides,
             torch_dtype=torch_dtype,
         )
 

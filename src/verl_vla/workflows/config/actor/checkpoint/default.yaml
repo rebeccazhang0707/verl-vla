@@ -8,10 +8,10 @@
 _target_: verl.trainer.config.CheckpointConfig
 
 # Checkpoint payloads to save.
-save_contents: ["model", "optimizer", "extra"]
+save_contents: ["model", "optimizer", "extra", "hf_model"]
 
-# Checkpoint payloads to load. Defaults to the same payloads as save_contents.
-load_contents: ${.save_contents}
+# Training payloads to restore when resuming from a checkpoint.
+load_contents: ["model", "optimizer", "extra"]
 
 # Whether to save checkpoints asynchronously.
 async_save: False
