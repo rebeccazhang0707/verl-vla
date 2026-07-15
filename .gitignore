@@ -136,3 +136,4 @@ certs/
 
 # documentation build artifacts
 docs/_build/
+.docs
