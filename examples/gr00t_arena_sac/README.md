@@ -212,6 +212,14 @@ CONTAINER_NAME=isaaclab_arena-cuda_gr00t_gn16_sac \
   examples/gr00t_arena_sac/run_docker.sh
 ```
 
+> LIBERO SAC enables **episodic replay collection** by default
+> (`EPISODIC_REPLAY=True` → `trainer.episodic_replay`): a LIBERO episode runs up
+> to 512 env steps but a rollout window covers only `10 × 16 = 160`, so episodes
+> span 3–4 windows and the legacy per-window masking would drop their early/middle
+> transitions (near-termination bias). See
+> `docs/reinforcement-learning/episodic-replay.md` for details; set
+> `EPISODIC_REPLAY=False` to fall back to the legacy collection path.
+
 ### Start a container / shell only
 
 ```bash
@@ -353,13 +361,15 @@ Outputs land under `<repo>/outputs/…` on the host (the repo is bind-mounted).
 | `MAX_INTERACTIONS` | `32` | `10` | `env_loop` interactions per rollout. |
 | `TASK_SUITE` / `TASK_ID` | — | `libero_spatial` / `3` | LIBERO task (libero only). |
 | `MAX_EPISODES` (eval) | `10` | `10` | Episodes to evaluate. |
+| `EPISODIC_REPLAY` (SAC) | `False` | `True` | Streaming episodic replay collection: carries episodes across rollout windows so their early/middle transitions reach the replay pool (see `docs/reinforcement-learning/episodic-replay.md`). |
 
 `run_gr00t_arena_sac.sh` additionally exposes SAC knobs (all overridable):
 `NUM_ENV` (8), `NUM_ENV_GPUS`/`NUM_MODEL_GPUS` (1), `NUM_STAGE` (2),
 `MINI_BATCH_SIZE` (128), `MICRO_BATCH_SIZE` (32), `TOTAL_EPOCHS` (1000),
 `ROLLOUT_INTERVAL` (20), `WARM_ROLLOUT_STEPS` (5), `CRITIC_WARMUP_STEPS` (200),
 `SAVE_FREQ` (500), `INITIAL_ALPHA` (0.01), `ALPHA_TYPE` (softplus),
-`AUTO_ENTROPY` (False), `CRITIC_TAU` (0.01), `RESUME_MODE`/`RESUME_FROM_PATH`,
-`PROJECT_NAME`, `EXPERIMENT_NAME`, `TRAINER_LOGGER` (`[console]`).
+`AUTO_ENTROPY` (False), `CRITIC_TAU` (0.01), `EPISODIC_MAX_OPEN_LEN` (128),
+`RESUME_MODE`/`RESUME_FROM_PATH`, `PROJECT_NAME`, `EXPERIMENT_NAME`,
+`TRAINER_LOGGER` (`[console]`).
 
 ---
