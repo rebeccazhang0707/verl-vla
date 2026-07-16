@@ -213,10 +213,12 @@ CONTAINER_NAME=isaaclab_arena-cuda_gr00t_gn16_sac \
 ```
 
 > LIBERO SAC enables **episodic replay collection** by default
-> (`EPISODIC_REPLAY=True` → `trainer.episodic_replay`): a LIBERO episode runs up
-> to 512 env steps but a rollout window covers only `10 × 16 = 160`, so episodes
-> span 3–4 windows and the legacy per-window masking would drop their early/middle
-> transitions (near-termination bias). See
+> (`EPISODIC_REPLAY=True` → `trainer.episodic_replay`): the Arena LIBERO episode
+> horizon is the task's native `episode_length_s` (10 s default, 26 s for
+> `libero_10` — i.e. ~120–200 control steps at 20 Hz) while a rollout window
+> covers `10 × 16 = 160` steps, so most episodes straddle a window boundary
+> (`libero_10` spans 3–4 windows) and the legacy per-window masking would drop
+> their pre-boundary transitions (near-termination bias). See
 > `docs/reinforcement-learning/episodic-replay.md` for details; set
 > `EPISODIC_REPLAY=False` to fall back to the legacy collection path.
 

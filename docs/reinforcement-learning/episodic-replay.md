@@ -39,14 +39,37 @@ windows: `reset()` returns the cached observation of the previous step
 stream, and episodes freely straddle window boundaries. IsaacLab performs the
 per-episode auto reset internally whenever an episode terminates or times out.
 
-Whether episodes straddle windows is a matter of arithmetic. Two production
-examples from `examples/gr00t_arena_sac/run_gr00t_arena_sac.sh`:
+Where the episode horizon `L` comes from differs per simulator — a frequent
+source of confusion:
 
-- **Arena LIBERO**: `S·C = 10 × 16 = 160` steps per window, but
-  `max_episode_steps = 512`. An episode can span 3–4 windows.
-- **Arena GR1**: `S·C = 32 × 16 = 512` vs. an episode horizon of ≈500 steps
-  (10 s at 50 Hz). Window and episode have nearly equal length, so almost
-  every episode crosses a boundary.
+- the **native LIBERO** simulator (`simulator_type: libero`) reads
+  `simulator.max_episode_steps` from the verl-vla config
+  (`workflows/config/env/simulator/libero.yaml`);
+- the **Arena** simulators (`arena_gr1`, `arena_libero`) *ignore* that key:
+  IsaacLab owns the horizon via the Arena task's native `episode_length_s`
+  (sim `time_out`). For Arena LIBERO that is
+  `episode_length_s_for_suite` in
+  `IsaacLab-Arena/isaaclab_arena_examples/external_environments/libero/franka_libero_rl_env_cfg.py`
+  (10 s default, 26 s for `libero_10`) at 20 Hz control
+  (`sim.dt = 1/60`, `decimation = 3`).
+
+Whether episodes straddle windows is then a matter of arithmetic. Three
+production examples:
+
+- **Native LIBERO** (`examples/libero_recap/run_pi05_libero_recap.sh`,
+  `auto_reset=true`): window = `8` chunks ≈ 80 primitive steps (10-step
+  chunks) vs `max_episode_steps = 200` (script default; the yaml default is
+  512). An episode spans 2–3 windows.
+- **Arena GR1** (`examples/gr00t_arena_sac/run_gr00t_arena_sac.sh`):
+  `S·C = 32 × 16 = 512` vs an episode horizon of ≈500 steps (10 s at 50 Hz).
+  Window and episode have nearly equal length, so almost every episode
+  crosses a boundary and loses its pre-boundary prefix.
+- **Arena LIBERO** (same script, `ARENA_TASK=libero`):
+  `S·C = 10 × 16 = 160` vs an episode horizon of ~120–200 control steps for
+  the default suites (`episode_length_s = 10 s`; timeouts around ~120 steps
+  are typical in practice). `L ≈ S·C`, so most episodes straddle one window
+  boundary; for `libero_10` (26 s ≈ 520 steps) episodes span 3–4 windows and
+  lose their early/middle parts entirely.
 
 ## 2. The problem: near-termination bias
 
@@ -262,7 +285,7 @@ magnitude.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `trainer.episodic_replay` | `False` | Enable the streaming collector. Requires `cluster.env.env_worker.auto_reset=true` (validated at startup). |
-| `trainer.episodic_max_open_len` | `128` | Per-lane open-buffer cap in macro-steps before a forced truncation flush. Should comfortably exceed `max_episode_steps / action_chunk_steps`. |
+| `trainer.episodic_max_open_len` | `128` | Per-lane open-buffer cap in macro-steps before a forced truncation flush. Should comfortably exceed the episode horizon in chunks (`L / C`). |
 
 Legacy behavior is fully preserved when the flag is off, and
 `auto_reset=False` runs are unaffected (each window starts from a real reset,
@@ -281,7 +304,7 @@ training metrics:
 | `data/collector_forced_flushes` | Should stay near the eval count. Rapid growth means `episodic_max_open_len` is too small for the episode horizon. |
 | `data/collector_transitions_emitted` | Cumulative transitions entering the pool. |
 | `data/collector_slots_dropped` | Slots dropped at continuity breaks; grows by ≤ `B` per eval. |
-| `data/collector_open_len_max` / `_mean` | Should stay below one episode length in chunks (`max_episode_steps / action_chunk_steps`). |
+| `data/collector_open_len_max` / `_mean` | Should stay below one episode length in chunks (`L / C`). |
 
 ### 5.1 Relationship to the legacy `collect_*` diagnostics
 

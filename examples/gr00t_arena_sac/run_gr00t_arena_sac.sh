@@ -73,9 +73,12 @@ case "$ARENA_TASK" in
     EXPERIMENT_NAME="${EXPERIMENT_NAME:-arena_gr00t_libero_${TASK_SUITE}_task${TASK_ID}}"
     # 10 interactions × 16 action chunks = 160 env steps (matches LIBERO eval default).
     MAX_INTERACTIONS="${MAX_INTERACTIONS:-10}"
-    # Episodes run up to max_episode_steps=512 env steps but a rollout window is only
-    # 160, so episodes span 3-4 windows. Collect them episodically so the early/middle
-    # transitions are not dropped (docs/reinforcement-learning/episodic-replay.md).
+    # The episode horizon is the Arena task's native episode_length_s (10 s default,
+    # 26 s for libero_10 — episode_length_s_for_suite in franka_libero_rl_env_cfg.py),
+    # i.e. ~120-200 control steps vs a 160-step rollout window: most episodes straddle
+    # a window boundary (libero_10 spans 3-4 windows). Collect episodically so the
+    # pre-boundary transitions are not dropped
+    # (docs/reinforcement-learning/episodic-replay.md).
     EPISODIC_REPLAY="${EPISODIC_REPLAY:-True}"
     # LIBERO data resolution is split: the task-suite JSON configs come from Arena's
     # colocated copy (external_environments/libero/data/config, kept in sync with the env
