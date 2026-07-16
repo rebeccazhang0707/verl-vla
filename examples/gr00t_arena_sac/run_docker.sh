@@ -130,6 +130,7 @@ INNER_FORWARD_VARS=(
   MAX_INTERACTIONS TOTAL_TRAINING_STEPS ROLLOUT_INTERVAL WARM_ROLLOUT_STEPS
   SAVE_FREQ TEST_FREQ VAL_BEFORE_TRAIN RESUME_MODE RESUME_FROM_PATH
   TRAINER_LOGGER PROJECT_NAME EXPERIMENT_NAME REPLAY_POOL_DIR
+  EPISODIC_REPLAY EPISODIC_MAX_OPEN_LEN
   NUM_NODES NUM_ENV_GPUS NUM_MODEL_GPUS NUM_ENV NUM_STAGE
   NUM_ACTION_CHUNKS GROOT_EMBODIMENT_TAG GROOT_EMBODIMENT_ID ACTION_DIM
   WANDB_API_KEY WANDB_MODE WANDB_ENTITY WANDB_PROJECT WANDB_BASE_URL WANDB_DIR
@@ -322,11 +323,25 @@ case "$MODE" in
     # Non-root user == host uid, so outputs under the bind-mounted repo are written
     # with correct host ownership (no post-hoc chmod needed).
     log "Running $INNER_SCRIPT (GROOT_MODEL_PATH=$GROOT_MODEL_PATH, MAX_EPISODES=$MAX_EPISODES, OUTPUT_ROOT=$OUTPUT_ROOT)"
+    # Resolve the wandb API key for [console,wandb] runs: the container HOME is a fresh
+    # useradd -m dir (host ~/.netrc is not mounted), so wandb would prompt for a key and
+    # fail under no-tty. Prefer an already-exported WANDB_API_KEY, else pull it from the
+    # host ~/.netrc (api.wandb.ai entry). Read at runtime only; never written to a file.
+    if [[ -z "${WANDB_API_KEY:-}" && -f "$HOME/.netrc" ]]; then
+      WANDB_API_KEY="$(awk '{for(i=1;i<=NF;i++){if($i=="machine")m=($(i+1)=="api.wandb.ai");if(m&&$i=="password"){print $(i+1);exit}}}' "$HOME/.netrc")"
+    fi
+    if [[ -n "${WANDB_API_KEY:-}" ]]; then
+      log "Forwarding WANDB_API_KEY into the container (len=${#WANDB_API_KEY})"
+    else
+      log "WARNING: no WANDB_API_KEY found (env or ~/.netrc); wandb logging will fail if TRAINER_LOGGER includes wandb"
+    fi
     docker exec -i "${DOCKER_TTY_ARGS[@]}" "${DOCKER_USER_ARGS[@]}" -w "$WORKDIR" \
       -e GROOT_MODEL_PATH="$GROOT_MODEL_PATH" \
       -e MAX_EPISODES="$MAX_EPISODES" \
       -e OUTPUT_ROOT="$OUTPUT_ROOT" \
       -e RAY_TMPDIR="$RAY_TMPDIR" \
+      -e TRAINER_LOGGER="${TRAINER_LOGGER:-}" \
+      -e WANDB_API_KEY="${WANDB_API_KEY:-}" \
       -e LIBERO_IN_LAB_ROOT="$LIBERO_IN_LAB_WORKDIR" \
       -e GR00T_COMPAT_PATCHES="${GR00T_COMPAT_PATCHES-all}" \
       -e ARENA_TASK="${ARENA_TASK:-}" \

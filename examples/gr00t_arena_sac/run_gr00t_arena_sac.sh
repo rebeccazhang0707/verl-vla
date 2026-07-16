@@ -77,12 +77,21 @@ case "$ARENA_TASK" in
     # 160, so episodes span 3-4 windows. Collect them episodically so the early/middle
     # transitions are not dropped (docs/reinforcement-learning/episodic-replay.md).
     EPISODIC_REPLAY="${EPISODIC_REPLAY:-True}"
+    # LIBERO data resolution is split: the task-suite JSON configs come from Arena's
+    # colocated copy (external_environments/libero/data/config, kept in sync with the env
+    # code), while the heavy USD assets + assembled HDF5 demos come from the
+    # LIBERO_IN_LAB_ROOT mount. We pre-set LIBERO_CONFIG_DIR so Arena's
+    # _configure_libero_env_vars() setdefault does not override it with
+    # $LIBERO_IN_LAB_ROOT/.../config (USD/hdf5 still resolve under LIBERO_IN_LAB_ROOT).
     export LIBERO_IN_LAB_ROOT="${LIBERO_IN_LAB_ROOT:-/libero_in_lab}"
     if [[ ! -d "$LIBERO_IN_LAB_ROOT" ]]; then
-      echo "[warn] LIBERO_IN_LAB_ROOT='$LIBERO_IN_LAB_ROOT' missing — Arena LIBERO may fail to resolve USD/configs"
+      echo "[warn] LIBERO_IN_LAB_ROOT='$LIBERO_IN_LAB_ROOT' missing — Arena LIBERO may fail to resolve USD/hdf5"
     fi
+    ARENA_LIBERO_DATA_DIR="${ARENA_LIBERO_DATA_DIR:-/workspaces/isaaclab_arena/isaaclab_arena_examples/external_environments/libero/data}"
+    export LIBERO_CONFIG_DIR="${LIBERO_CONFIG_DIR:-$ARENA_LIBERO_DATA_DIR/config}"
     EXTRA_RAY_ENV=(
       "+ray_kwargs.ray_init.runtime_env.env_vars.LIBERO_IN_LAB_ROOT=$LIBERO_IN_LAB_ROOT"
+      "+ray_kwargs.ray_init.runtime_env.env_vars.LIBERO_CONFIG_DIR=$LIBERO_CONFIG_DIR"
     )
     EXTRA_OVERRIDES+=(
       "cluster.env.env_worker.simulator.arena.libero.libero_task_suite=$TASK_SUITE"
@@ -102,8 +111,8 @@ REPLAY_POOL_DIR="${REPLAY_POOL_DIR:-$OUTPUT_ROOT/replay_pools}"
 # Default: co-located 1 env worker + 1 model worker, 8 Isaac envs per env GPU.
 # Scale workers with NUM_ENV_GPUS / NUM_MODEL_GPUS; override NUM_ENV for denser sims.
 NUM_NODES="${NUM_NODES:-1}"
-NUM_ENV_GPUS="${NUM_ENV_GPUS:-1}"
-NUM_MODEL_GPUS="${NUM_MODEL_GPUS:-1}"
+NUM_ENV_GPUS="${NUM_ENV_GPUS:-4}"
+NUM_MODEL_GPUS="${NUM_MODEL_GPUS:-4}"
 NUM_ENV="${NUM_ENV:-8}"
 NUM_STAGE="${NUM_STAGE:-2}"
 
