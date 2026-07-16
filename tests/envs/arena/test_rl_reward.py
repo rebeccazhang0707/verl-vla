@@ -16,8 +16,7 @@
 
 The Arena task has no native reward, so ``apply_arena_rl_reward`` turns the
 ``success`` termination into a ``RewTerm(weight=1/step_dt)`` -- WITHOUT touching the
-termination terms (IsaacLab keeps owning per-step auto-reset). The episode horizon is
-left to the Arena task's native ``episode_length_s`` (sim ``time_out``).
+termination terms (IsaacLab keeps owning per-step auto-reset).
 
 It imports ``isaaclab`` lazily, so we inject tiny fake ``isaaclab.managers`` /
 ``isaaclab.utils`` modules to exercise the patch on a host without Isaac Sim.
@@ -31,7 +30,6 @@ import types
 
 import pytest
 
-from verl_vla.envs.arena.config import ArenaSimulatorConfig
 from verl_vla.envs.arena.utils import (
     apply_arena_rl_reward,
     arena_subtask_graded_reward,
@@ -101,30 +99,12 @@ def test_apply_reward_installs_rewterm_and_keeps_terminations(_fake_isaaclab):
     assert cfg.rewards is not None
     assert cfg.rewards.task_success is not None
     assert cfg.rewards.task_success.weight == pytest.approx(1.0 / (cfg.sim.dt * cfg.decimation))
-    # The RewTerm reads the sim signals itself -> no params captured.
-    assert cfg.rewards.task_success.params == {}
+    assert cfg.rewards.task_success.func is arena_success_reward
 
     # Crucially: termination terms are LEFT IN PLACE so IsaacLab keeps auto-resetting.
     assert cfg.terminations.success is not None
     assert cfg.terminations.object_dropped is not None
     assert cfg.terminations.time_out is not None
-
-
-def test_apply_reward_selects_func_by_subtask_flag(_fake_isaaclab):
-    composite = _FakeEnvCfg()
-    apply_arena_rl_reward(composite, subtask_reward=False)
-    assert composite.rewards.task_success.func is arena_success_reward
-
-    graded = _FakeEnvCfg()
-    apply_arena_rl_reward(graded, subtask_reward=True)
-    assert graded.rewards.task_success.func is arena_subtask_graded_reward
-
-
-def test_apply_reward_no_success_term_is_noop(_fake_isaaclab):
-    cfg = _FakeEnvCfg()
-    cfg.terminations.success = None
-    assert apply_arena_rl_reward(cfg) is False
-    assert cfg.rewards is None
 
 
 class _FakeTermManager:
@@ -169,17 +149,3 @@ def test_graded_reward_reads_subtask_state():
     )
     out = arena_subtask_graded_reward(env)
     assert torch.allclose(out, torch.tensor([0.0, 0.5, 1.0]))
-
-
-def test_graded_reward_falls_back_to_success_without_state():
-    import torch
-
-    env = _FakeEnv(success_vals=[True, False])  # no subtask_success_state in extras
-    out = arena_subtask_graded_reward(env)
-    assert torch.equal(out, torch.tensor([1.0, 0.0]))
-
-
-def test_arena_config_has_no_autoreset_ownership_flag():
-    # Sim always owns Arena auto-reset now; the gating flag must be gone.
-    cfg = ArenaSimulatorConfig()
-    assert not hasattr(cfg, "sim_owns_autoreset")

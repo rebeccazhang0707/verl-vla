@@ -44,6 +44,7 @@
 #   IMAGE              docker image                (default: isaaclab_arena:cuda_gr00t_gn16)
 #   CONTAINER_NAME     container name              (default: isaaclab_arena-cuda_gr00t_gn16)
 #   RECREATE=1         force remove + recreate the container
+#   DIRECT_RUN=1       run the inner script in a one-shot container (default for root)
 #   INNER_SCRIPT       inner script (relative to the repo inside the container)
 #                      (EVAL_SCRIPT: deprecated alias, still honoured)
 #   MAX_EPISODES       episodes to evaluate        (default 10; ignored by train)
@@ -71,6 +72,11 @@ log() { echo -e "\033[1;35m[run_docker:gr00t]\033[0m $*"; }
 
 RECREATE="${RECREATE:-0}"
 MAX_EPISODES="${MAX_EPISODES:-10}"
+if [[ "$(id -u)" == "0" ]]; then
+  DIRECT_RUN="${DIRECT_RUN:-1}"
+else
+  DIRECT_RUN="${DIRECT_RUN:-0}"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GR00T backend configuration.
@@ -108,7 +114,9 @@ DOCKER_ENV_ARGS+=(-e "ISAACLAB_PATH=$ARENA_WORKDIR/submodules/IsaacLab")
 LIBERO_IN_LAB_HOST="${LIBERO_IN_LAB_HOST:-$HOST_REPO/libero_in_lab}"
 LIBERO_IN_LAB_WORKDIR="${LIBERO_IN_LAB_WORKDIR:-/libero_in_lab}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$WORKDIR/outputs/arena_gr00t_gr1_eval}"
-RAY_TMPDIR="${RAY_TMPDIR:-$OUTPUT_ROOT/ray_tmp}"
+# Ray embeds the session name below this path in an AF_UNIX socket; keeping the
+# root short avoids Linux's 107-byte socket-path limit.
+RAY_TMPDIR="${RAY_TMPDIR:-/tmp/ray}"
 
 mkdir -p "$HOST_REPO/outputs"
 chmod 777 "$HOST_REPO/outputs" 2>/dev/null || true
@@ -139,6 +147,36 @@ fi
 
 # Do NOT bind-mount host /tmp -> /tmp: host files owned by another uid cause
 # "Permission denied" inside the container. Use the image's own /tmp.
+
+# Root environments (including many managed GPU jobs) can run the workload
+# directly. This avoids docker-exec/privileged-container restrictions imposed by
+# nested Docker services while preserving the long-lived non-root mode below.
+if [[ "$MODE" == "run" && "$DIRECT_RUN" == "1" ]]; then
+  docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  log "Running $INNER_SCRIPT in a one-shot container"
+  INNER_COMMAND="bash '$INNER_SCRIPT'"
+  docker run --name "$CONTAINER_NAME" \
+    --gpus all \
+    --ipc=host --network=host \
+    "${DOCKER_ENV_ARGS[@]}" \
+    "${DOCKER_MOUNT_ARGS[@]}" \
+    -e "GROOT_MODEL_PATH=$GROOT_MODEL_PATH" \
+    -e "MAX_EPISODES=$MAX_EPISODES" \
+    -e "OUTPUT_ROOT=$OUTPUT_ROOT" \
+    -e "RAY_TMPDIR=$RAY_TMPDIR" \
+    -e "LIBERO_IN_LAB_ROOT=$LIBERO_IN_LAB_WORKDIR" \
+    -e "GR00T_COMPAT_PATCHES=${GR00T_COMPAT_PATCHES-all}" \
+    -e "ARENA_TASK=${ARENA_TASK:-}" \
+    -e "TASK_SUITE=${TASK_SUITE:-}" \
+    -e "TASK_ID=${TASK_ID:-}" \
+    -w "$WORKDIR" \
+    --entrypoint bash \
+    "$IMAGE" \
+    -lc "$INNER_COMMAND"
+  HOST_OUTPUT="${OUTPUT_ROOT/#$WORKDIR/$HOST_REPO}"
+  log "Outputs on host: $HOST_OUTPUT"
+  exit 0
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # (Re)create the container with all GPUs.

@@ -12,19 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""RECAP workflow orchestration.
-
-Stage modules are imported lazily so policy-eval-only launches (e.g. Arena GR00T
-docker eval) do not require optional deps such as ``lerobot``.
-"""
-
-from __future__ import annotations
-
-from typing import Any
-
 from omegaconf import OmegaConf
 
+from verl_vla.workflows.train.recap.collect_data import collect_recap_env_data
+from verl_vla.workflows.train.recap.compute_return import (
+    CollectedDatasets,
+    ensure_recap_fields,
+    merge_recap_collected_dataset_into_sft_dataset,
+)
 from verl_vla.workflows.train.recap.config import MainReCapConfig
+from verl_vla.workflows.train.recap.policy_eval import eval_recap_policy
+from verl_vla.workflows.train.recap.train_policy import train_recap_policy
+from verl_vla.workflows.train.recap.train_value_model import train_recap_value_model
+from verl_vla.workflows.train.recap.value_infer import infer_recap_values
 
 
 def _configure_iteration_sft_stage(config, stage_name: str, iteration: int) -> None:
@@ -55,8 +55,6 @@ def run_recap(config):
 
         # Step 1: evaluate the configured or previous-iteration RECAP policy on the environment benchmark.
         if recap_config.should_run_stage(iteration, 1) and recap_config.stage_enabled("policy_eval", default=False):
-            from verl_vla.workflows.train.recap.policy_eval import eval_recap_policy
-
             policy_path = policy_path_from_previous_iteration or OmegaConf.select(
                 config,
                 "recap.policy_eval.model_path",
@@ -68,14 +66,11 @@ def run_recap(config):
             print(f"ReCap policy eval finished: {metrics}")
 
         # Step 2: collect rollout data into a LeRobot dataset.
-        collected_datasets: dict[str, Any] | None
         if recap_config.should_run_stage(iteration, 2) and recap_config.stage_enabled("collect_data", default=True):
-            from verl_vla.workflows.train.recap.collect_data import collect_recap_env_data
-
             collect_policy_path = (
                 None if policy_path_from_previous_iteration is None else str(policy_path_from_previous_iteration)
             )
-            collected_datasets = collect_recap_env_data(
+            collected_datasets: CollectedDatasets | None = collect_recap_env_data(
                 config,
                 collect_policy_path,
             )
@@ -84,11 +79,6 @@ def run_recap(config):
 
         # Step 3: add RECAP return fields to the collected or configured dataset.
         if recap_config.should_run_stage(iteration, 3) and recap_config.stage_enabled("compute_return", default=True):
-            from verl_vla.workflows.train.recap.compute_return import (
-                ensure_recap_fields,
-                merge_recap_collected_dataset_into_sft_dataset,
-            )
-
             if collected_datasets is None:
                 dataset_cfg = config.recap.compute_return.dataset
                 collected_datasets = {
@@ -106,8 +96,6 @@ def run_recap(config):
         if recap_config.should_run_stage(iteration, 4) and recap_config.stage_enabled(
             "train_value_model", default=True
         ):
-            from verl_vla.workflows.train.recap.train_value_model import train_recap_value_model
-
             if collected_datasets is None:
                 dataset_cfg = config.recap.train_value_model.data
                 collected_datasets = {
@@ -123,8 +111,6 @@ def run_recap(config):
 
         # Step 5: infer RECAP values and write them back to the LeRobot dataset.
         if recap_config.should_run_stage(iteration, 5) and recap_config.stage_enabled("value_infer", default=True):
-            from verl_vla.workflows.train.recap.value_infer import infer_recap_values
-
             if collected_datasets is None:
                 dataset_cfg = config.recap.value_infer.dataset
                 collected_datasets = {
@@ -142,8 +128,6 @@ def run_recap(config):
 
         # Step 6: train the final RECAP policy with the SFT trainer.
         if recap_config.should_run_stage(iteration, 6) and recap_config.stage_enabled("train_policy", default=True):
-            from verl_vla.workflows.train.recap.train_policy import train_recap_policy
-
             if collected_datasets is None:
                 dataset_cfg = config.recap.train_policy.dataset
                 collected_datasets = {
