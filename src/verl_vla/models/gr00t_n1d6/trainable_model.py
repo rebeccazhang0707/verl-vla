@@ -141,7 +141,7 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSFTTrain
         self.config.norm_stats_path = None
         self.config.architectures = ["Gr00tN1d6"]
         try:
-            self.policy.save_pretrained(output_dir, state_dict=policy_state, safe_serialization=True)
+            self.native_policy.save_pretrained(output_dir, state_dict=policy_state, safe_serialization=True)
             processor.save_pretrained(Path(output_dir))
         finally:
             self.config.verl_processor_path = original_processor_path
