@@ -283,6 +283,32 @@ training metrics:
 | `data/collector_slots_dropped` | Slots dropped at continuity breaks; grows by ≤ `B` per eval. |
 | `data/collector_open_len_max` / `_mean` | Should stay below one episode length in chunks (`max_episode_steps / action_chunk_steps`). |
 
+### 5.1 Relationship to the legacy `collect_*` diagnostics
+
+The legacy path emits `data/collect_valid_ratio`,
+`data/collect_dropped_ratio`, `data/collect_rows_without_done_ratio`, and
+`data/collect_{valid,total,dropped}_chunks` from `prepare_sac_actor_input`.
+These measure structural loss *within a single `[B, S]` window*: the residual
+after the last `done` and entire no-`done` rows are dropped, so the ratio is
+meaningfully below 1 and quantifies the near-termination bias.
+
+The collector deliberately does **not** expose analogous ratios, and this is
+not an omission. Its whole point is that these transitions are never
+dropped — the residual after the last `done` stays buffered and is emitted on
+a later ingest once its next observation arrives. A window-local "valid
+ratio" would therefore be ≈ 1 by construction and carry no signal. The
+collector's true, rare loss (one newest slot per lane at a continuity break)
+is already captured by `data/collector_slots_dropped`.
+
+So there is intentionally no forced metric alignment between the two paths.
+The conceptual correspondence is:
+
+| Legacy diagnostic | Collector equivalent |
+| --- | --- |
+| `collect_dropped_ratio` (structural, per-window) | `collector_slots_dropped` — only continuity-break drops (≤ `B` per eval), otherwise ~0 |
+| `collect_rows_without_done_ratio` | `collector_open_len_mean` / `_max` — no-`done` rows are *buffered*, not dropped, so they show up as buffer depth |
+| `collect_valid_chunks` / `collect_total_chunks` | `collector_transitions_emitted` (cumulative) |
+
 ## 6. Implementation map and tests
 
 | Piece | Location |

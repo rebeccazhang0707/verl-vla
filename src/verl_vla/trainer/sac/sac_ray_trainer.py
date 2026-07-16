@@ -68,6 +68,19 @@ def prepare_sac_actor_input(
     rollout_output.batch["info.success_mask"] = success_mask.float()
     rollout_output.meta_info["global_steps"] = global_steps
 
+    # Collection-side masking diagnostics: how much of the raw [B, S] rollout the
+    # legacy per-window mask keeps vs. drops. These expose the near-termination bias directly.
+    total_chunks = int(valid_mask.numel())
+    valid_chunks = int(valid_mask.sum().item())
+    collect_valid_ratio = (valid_chunks / total_chunks) if total_chunks else 1.0
+    rows_without_done_ratio = float((~done_steps.any(dim=1)).float().mean().item()) if done_steps.numel() else 0.0
+    rollout_output.meta_info["data/collect_valid_ratio"] = collect_valid_ratio
+    rollout_output.meta_info["data/collect_dropped_ratio"] = 1.0 - collect_valid_ratio
+    rollout_output.meta_info["data/collect_valid_chunks"] = float(valid_chunks)
+    rollout_output.meta_info["data/collect_total_chunks"] = float(total_chunks)
+    rollout_output.meta_info["data/collect_dropped_chunks"] = float(total_chunks - valid_chunks)
+    rollout_output.meta_info["data/collect_rows_without_done_ratio"] = rows_without_done_ratio
+
     rollout_output = add_transition_prefixes(rollout_output, transition_boundary_mask=done_steps)
     return flatten_trajectories(rollout_output)
 
