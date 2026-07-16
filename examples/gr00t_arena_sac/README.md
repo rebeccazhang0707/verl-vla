@@ -79,23 +79,24 @@ ls IsaacLab-Arena/submodules/Isaac-GR00T/gr00t   # → configs, model, policy, .
 
 ### 2. Build the GR00T image
 
-The Dockerfile lives in the Arena repo and its `COPY` paths are relative to the
-Arena repo root, so **build with the Arena checkout as the build context**. Pass
-`INSTALL_GROOT=true` to install the GR00T / Eagle / CUDA 12.8 stack into
-`/opt/groot_deps`, and tag it exactly as the launcher expects:
+The Dockerfile lives in **this repo** (`docker/Dockerfile.isaaclab_arena`), but its
+`COPY` paths (`submodules/…`, `isaaclab_arena*`, `docker/setup/…`) resolve against the
+**build context**, not against the Dockerfile's location — and Docker `COPY` cannot
+read host paths outside the context. So build from the verl-vla repo root, point `-f`
+at the in-repo Dockerfile, and pass your local Arena checkout (`ARENA_HOST`, the same
+one the launcher mounts) as the build context. Pass `INSTALL_GROOT=true` to install
+the GR00T / Eagle / CUDA 12.8 stack into `/opt/groot_deps`, and tag it exactly as the
+launcher expects:
 
 ```bash
-cd IsaacLab-Arena
+ARENA_HOST=/path/to/IsaacLab-Arena   # your local Arena checkout (submodules populated)
 DOCKER_BUILDKIT=1 docker build \
   -f docker/Dockerfile.isaaclab_arena \
   --build-arg INSTALL_GROOT=true \
-  -t isaaclab_arena:cuda_gr00t_gn16 .
-cd ..
+  -t isaaclab_arena:cuda_gr00t_gn16 \
+  "$ARENA_HOST"
 ```
 
-> A copy of this Dockerfile is mirrored at `docker/Dockerfile.isaaclab_arena` in
-> the verl-vla repo for reference, but always build from the Arena checkout so the
-> `submodules/…` and `isaaclab_arena*` sources resolve.
 
 ### 3. Prepare a GR00T N1.6 checkpoint
 

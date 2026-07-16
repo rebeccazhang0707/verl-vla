@@ -105,6 +105,49 @@ RUN if [ "$INSTALL_GROOT" = "true" ]; then \
     echo "Skipping GR00T installation" && rm -f /etc/profile.d/groot_deps.sh; \
   fi && rm -f /tmp/install_gr00t_deps.sh
 
+# The GR00T deps pull a stray CUDA-13 NCCL into /opt/groot_deps/nvidia/nccl
+# (transitive dep of deepspeed). Disable it at build time so `import nvidia.nccl`
+# falls through to Isaac Sim's cu12 NCCL.
+RUN if [ -e /opt/groot_deps/nvidia/nccl/lib/libnccl.so.2 ]; then \
+    mv /opt/groot_deps/nvidia/nccl /opt/groot_deps/nvidia/nccl.cu13-disabled; \
+  fi
+
+# LeRobot runtime for verl_vla (SFT dataloader, SO100 teleop devices, lerobot envs).
+# Installed with --no-deps: lerobot 0.4.4's dependency metadata pins torch==2.7.1 /
+# torchcodec==0.4.0 / rerun-sdk>=0.24 (NumPy 2), which would clobber Isaac Sim's
+# torch cu128 build. The curated deps below match verl-vla's requirements-lerobot.txt
+# minus anything Isaac Sim already ships (torch, numpy, av, opencv, gymnasium, ...).
+RUN if [ "$INSTALL_GROOT" = "true" ]; then \
+    /isaac-sim/python.sh -m pip install --no-deps lerobot==0.4.4 && \
+    /isaac-sim/python.sh -m pip install \
+      draccus==0.10.0 deepdiff==8.6.2 jsonlines==4.0.0 datasets==4.0.0 \
+      pyserial==3.5 pynput==1.8.2 feetech-servo-sdk==1.0.0; \
+  else \
+    echo "Skipping LeRobot installation"; \
+  fi
+
+# verl runtime for verl_vla's SAC / RECAP entrypoints (previously bootstrapped at
+# runtime by verl-vla's examples/gr00t_arena_sac launch scripts). verl 0.7.1
+# declares numpy<2.0, which conflicts with what this image ships — so install
+# verl with --no-deps and pull only its missing lightweight imports, with a
+# constraints file pinning torch / transformers / numpy to the versions already
+# in the image so pip cannot upgrade Isaac Sim's torch or the Eagle transformers.
+# codetiming is needed on EVERY node — including the L20 sim nodes that merely
+# run `ray start` (verl imports it at import time). The verl-vla launch scripts
+# do no runtime installs and rely on this block.
+RUN if [ "$INSTALL_GROOT" = "true" ]; then \
+    printf 'torch==%s\ntransformers==4.51.3\nnumpy==%s\n' \
+      "$(/isaac-sim/python.sh -c 'import torch;print(torch.__version__)')" \
+      "$(/isaac-sim/python.sh -c 'import numpy;print(numpy.__version__)')" \
+      > /tmp/verl_constraints.txt && \
+    /isaac-sim/python.sh -m pip install --no-deps verl==0.7.1 && \
+    /isaac-sim/python.sh -m pip install -c /tmp/verl_constraints.txt \
+      datasets torchdata codetiming dill pybind11 pylatexenc && \
+    rm -f /tmp/verl_constraints.txt; \
+  else \
+    echo "Skipping verl installation"; \
+  fi
+
 # Copy the rest of the files
 COPY *.* ${WORKDIR}/
 COPY isaaclab_arena ${WORKDIR}/isaaclab_arena

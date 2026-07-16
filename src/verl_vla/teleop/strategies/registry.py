@@ -17,6 +17,7 @@ from typing import Any
 from verl_vla.teleop.strategies.base import InterventionStrategyBase
 from verl_vla.teleop.strategies.gamepad_libero import LiberoGamepadStrategy
 from verl_vla.teleop.strategies.keyboard_libero import LiberoKeyboardStrategy
+from verl_vla.teleop.strategies.lerobot_libero import LiberoLerobotStrategy
 from verl_vla.teleop.strategies.xr_controller_arena import ArenaXRControllerStrategy
 from verl_vla.teleop.strategies.xr_controller_libero import LiberoXRControllerStrategy
 
@@ -24,20 +25,13 @@ from verl_vla.teleop.strategies.xr_controller_libero import LiberoXRControllerSt
 class InterventionStrategyRegistry:
     def __init__(self):
         self._strategies: dict[tuple[str, str], type[InterventionStrategyBase]] = {}
-        self._lazy_loaders: dict[tuple[str, str], Any] = {}
 
     def register(self, strategy_cls: type[InterventionStrategyBase]) -> None:
         key = (strategy_cls.env_type, strategy_cls.device_type)
         self._strategies[key] = strategy_cls
 
-    def register_lazy(self, env_type: str, device_type: str, loader) -> None:
-        """Defer importing optional device backends (e.g. lerobot) until first use."""
-        self._lazy_loaders[(env_type, device_type)] = loader
-
     def get(self, env_type: str, device_type: str, cfg: Any) -> InterventionStrategyBase:
         key = (env_type, device_type)
-        if key not in self._strategies and key in self._lazy_loaders:
-            self.register(self._lazy_loaders.pop(key)())
         if key not in self._strategies:
             raise NotImplementedError(
                 f"No teleop intervention strategy registered for env={env_type} device={device_type}"
@@ -50,15 +44,7 @@ _REGISTRY.register(LiberoKeyboardStrategy)
 _REGISTRY.register(LiberoXRControllerStrategy)
 _REGISTRY.register(ArenaXRControllerStrategy)
 _REGISTRY.register(LiberoGamepadStrategy)
-
-
-def _load_libero_lerobot_strategy():
-    from verl_vla.teleop.strategies.lerobot_libero import LiberoLerobotStrategy
-
-    return LiberoLerobotStrategy
-
-
-_REGISTRY.register_lazy("libero", "lerobot", _load_libero_lerobot_strategy)
+_REGISTRY.register(LiberoLerobotStrategy)
 
 
 def get_strategy(env_type: str, device_type: str, cfg: Any) -> InterventionStrategyBase:

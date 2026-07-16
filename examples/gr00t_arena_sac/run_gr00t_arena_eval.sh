@@ -109,32 +109,8 @@ export TORCH_CUDNN_SDPA_ENABLED="${TORCH_CUDNN_SDPA_ENABLED:-0}"
 # wins over Isaac Sim's newer bundled transformers.
 export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${PYTHONPATH:-}"
 
-# The Arena GR00T image has no verl / a few verl-only deps (unlike verl-vla-arena).
-# verl==0.7.1 declares numpy<2.0, but this image ships numpy 2.x for GR00T — so
-# install verl with --no-deps and pull only the missing lightweight deps. Pin
-# torch/transformers/numpy so pip cannot upgrade Eagle. lerobot is NOT required
-# for eval (teleop.devices imports it lazily).
-if ! "$PYTHON" -c "import verl, datasets, torchdata, codetiming" >/dev/null 2>&1; then
-  echo "[deps] installing verl==0.7.1 (--no-deps) + missing deps; pin torch/transformers/numpy"
-  CONSTRAINTS_FILE="$OUTPUT_ROOT/verl_constraints.txt"
-  printf 'torch==%s\ntransformers==4.51.3\nnumpy==%s\n' \
-    "$("$PYTHON" -c 'import torch;print(torch.__version__)')" \
-    "$("$PYTHON" -c 'import numpy;print(numpy.__version__)')" > "$CONSTRAINTS_FILE"
-  pip_install() {
-    sudo "$PYTHON" -m pip install -q "$@" || "$PYTHON" -m pip install -q "$@"
-  }
-  pip_install --no-deps "verl==0.7.1"
-  pip_install -c "$CONSTRAINTS_FILE" \
-    datasets torchdata codetiming dill pybind11 pylatexenc
-fi
-
-# Drop the stray CUDA-13 NCCL bundled in /opt/groot_deps so `import nvidia.nccl`
-# falls through to Isaac Sim's cu12 NCCL.
-if [[ -e /opt/groot_deps/nvidia/nccl/lib/libnccl.so.2 ]]; then
-  echo "[nccl] disabling stray cu13 NCCL in /opt/groot_deps (keep torch cu12)"
-  mv /opt/groot_deps/nvidia/nccl /opt/groot_deps/nvidia/nccl.cu13-disabled 2>/dev/null \
-    || sudo mv /opt/groot_deps/nvidia/nccl /opt/groot_deps/nvidia/nccl.cu13-disabled || true
-fi
+# verl / lerobot deps and the cu13 NCCL fix are baked into the image at build
+# time (Dockerfile.isaaclab_arena with INSTALL_GROOT=true) — no runtime installs.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # main_recap policy_eval launch.
