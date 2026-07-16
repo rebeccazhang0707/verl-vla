@@ -30,7 +30,8 @@ run_docker.sh   →   (re)creates the GR00T container + mounts   →   runs an i
 ```
 
 - **`run_docker.sh`** is the container launcher. It picks the GR00T image, mounts
-  the right host dirs, and `docker exec`s an inner script.
+  the right host dirs, and runs an inner script directly for root jobs or via
+  `docker exec` for non-root jobs.
 - The inner script (selected with `INNER_SCRIPT`) builds the actual Hydra command
   and runs it with the in-container `python` (`/isaac-sim/python.sh`).
 
@@ -332,6 +333,8 @@ Outputs land under `<repo>/outputs/…` on the host (the repo is bind-mounted).
 | `IMAGE` | `isaaclab_arena:cuda_gr00t_gn16` | Override the docker image. |
 | `CONTAINER_NAME` | `isaaclab_arena-cuda_gr00t_gn16` | Override the container name. |
 | `RECREATE` | `0` | `1` forces remove + recreate of the container. |
+| `DIRECT_RUN` | `1` for root, otherwise `0` | Use a one-shot container instead of the long-lived `docker exec` mode. |
+| `RAY_TMPDIR` | `/tmp/ray` | Short Ray session path; avoids the AF_UNIX 107-byte path limit. |
 | `MAX_EPISODES` | `10` | Episodes to evaluate (ignored by SAC training). |
 | `OUTPUT_ROOT` | inner-script default | Eval/train output root (container path). |
 | `ARENA_TASK` | `gr1` | Forwarded to GR00T inner scripts (`gr1`/`libero`). |
