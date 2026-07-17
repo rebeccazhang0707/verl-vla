@@ -7,7 +7,9 @@
 # |-- optim: optimizer, scheduler, and gradient clipping config.
 # `-- fsdp_config: FSDP engine, wrapping, offload, compile, and QAT config.
 
+# Hydra configuration composition order.
 defaults:
+
   # profiler config
   - /actor/profiler@profiler: default
 
@@ -33,7 +35,9 @@ fsdp_config:
 
   # Module wrapping policy for FSDP.
   wrap_policy:
+
     # Transformer layer classes wrapped as FSDP units for PI0.5 models.
     transformer_layer_cls_to_wrap:
+
       - SiglipEncoderLayer
       - GemmaDecoderLayerWithExpert

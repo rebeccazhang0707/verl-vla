@@ -15,6 +15,7 @@
 # Env-only TrainCluster config for data-recording / teleop flows that need only
 # environment workers.
 
+# Hydra configuration composition order.
 defaults:
 
   # Resource placement used by TrainCluster.

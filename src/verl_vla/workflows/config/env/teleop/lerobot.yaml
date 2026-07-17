@@ -14,6 +14,7 @@
 
 # Browser Lerobot leader-arm config.
 
+# Target class instantiated from this configuration.
 _target_: verl_vla.teleop.config.LerobotTeleopConfig
 
 # LeRobot teleoperator type. Currently this maps to the SO101 leader arm implementation.

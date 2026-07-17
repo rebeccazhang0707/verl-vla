@@ -19,14 +19,26 @@ enable: true
 
 # Dataset used when this stage runs without fresh collected datasets.
 dataset:
+
+  # Root directory used by this component.
   root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
+
+  # LeRobot dataset repository identifier.
   repo_id: local/verl_vla_libero_collected
 
 # LeRobot field names written by this stage and consumed by later RECAP stages.
 fields:
+
+  # Dataset field containing the computed return.
   return: recap.return
+
+  # Dataset field containing the inferred value.
   value: recap.value
+
+  # Dataset field containing the computed advantage.
   advantage: recap.advantage
+
+  # Dataset field identifying intervention samples.
   indicator: recap.indicator
 
 # Failure penalty coefficient used by normalized return computation.

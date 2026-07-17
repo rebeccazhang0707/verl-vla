@@ -14,6 +14,7 @@
 
 # Reusable actor-only SFT base composed by workflows and higher-level trainers.
 defaults:
+
   - /cluster@cluster: actor_cluster
   - /data@data: lerobot_dataloader
   - /trainer@trainer: sft_trainer

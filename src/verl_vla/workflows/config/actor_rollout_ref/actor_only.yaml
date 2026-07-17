@@ -14,6 +14,7 @@
 
 # Actor-only worker config.
 
+# Hydra configuration composition order.
 defaults:
 
   # SFT actor worker config.

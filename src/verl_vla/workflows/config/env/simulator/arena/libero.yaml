@@ -52,11 +52,13 @@ libero_task_id: 3
 
 # Camera observations exported to the policy and recorder.
 camera_names:
+
   - agentview_cam_rgb
   - eye_in_hand_cam_rgb
 
 # Expected height, width, and channel count for recorder metadata.
 image_shape:
+
   - 224
   - 224
   - 3

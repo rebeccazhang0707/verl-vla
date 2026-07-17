@@ -4,6 +4,7 @@
 
 # Simulator selection and per-simulator configs.
 
+# Hydra configuration composition order.
 defaults:
 
   # LIBERO simulator config.
@@ -16,6 +17,7 @@ defaults:
   - _self_
 
 
+# Target class instantiated from this configuration.
 _target_: verl_vla.workers.env.config.SimulatorConfig
 
 # Active simulator backend. The selected value chooses which nested simulator

@@ -12,10 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Hydra runtime configuration.
 hydra:
+
+  # Additional Hydra configuration search paths.
   searchpath:
+
     - pkg://verl_vla.workflows.config
 
+# Hydra configuration composition order.
 defaults:
 
   # Rollout-only model and environment cluster.
@@ -34,35 +39,79 @@ max_episodes: null
 output_dir: outputs/eval
 
 
+# Distributed cluster configuration.
 cluster:
+
+  # Shared actor, rollout, and reference-policy configuration.
   actor_rollout_ref:
+
+    # Policy model configuration.
     model:
+
+      # Model adapter configuration.
       adapter:
+
+        # Value-model critic configuration.
         critic:
+
+          # Whether this component is enabled.
           enabled: false
 
+    # Policy rollout configuration.
     rollout:
+
+      # Whether model forward returns critic values.
       output_critic_value: false
 
+  # Environment execution configuration.
   env:
+
+    # Environment interaction loop configuration.
     env_loop:
+
+      # Maximum policy/environment interactions in one rollout.
       max_interactions: 8
 
+    # Environment worker configuration.
     env_worker:
+
+      # Whether completed environments reset automatically.
       auto_reset: true
+
+      # Simulator modes initialized by the environment worker.
       modes:
+
         - eval
+      # Episode recorder configuration.
       recorder:
+
+        # Whether this component is enabled.
         enable: true
+
+        # Recorder backends enabled for each episode.
         recorders:
+
           - video
+        # Video recorder overrides.
         video:
+
+          # Root directory used by this component.
           root: ${output_dir}/videos
 
+  # Cluster resource allocation.
   resource:
+
+    # Environment execution configuration.
     env:
+
+      # Device used for this operation.
       device: cpu
+
+      # Number of workers launched on each node.
       workers_per_node: 1
 
+    # Policy model configuration.
     model:
+
+      # Number of GPUs allocated on each node.
       gpus_per_node: 1

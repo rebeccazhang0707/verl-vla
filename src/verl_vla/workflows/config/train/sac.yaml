@@ -12,12 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Hydra runtime configuration.
 hydra:
+
+  # Additional Hydra configuration search paths.
   searchpath:
+
     - pkg://verl_vla.workflows.config
 
 # Environment-loop SAC workflow.
 defaults:
+
   - /cluster@cluster: env_actor_rollout_cluster
   - /trainer@trainer: sac_trainer
   - /ray@ray_kwargs: default

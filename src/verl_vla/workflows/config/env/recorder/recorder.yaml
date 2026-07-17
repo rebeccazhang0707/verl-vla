@@ -14,6 +14,7 @@
 
 # Recorder configuration for TrainCluster rollout smoke tests.
 
+# Hydra configuration composition order.
 defaults:
 
   # LeRobot recorder config.
@@ -40,5 +41,6 @@ async_queue_size: 256
 
 # Recorder implementations to enable when recording is turned on.
 recorders:
+
   - lerobot
   - video

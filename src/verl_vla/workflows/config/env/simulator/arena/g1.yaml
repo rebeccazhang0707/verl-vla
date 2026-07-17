@@ -46,10 +46,12 @@ task_description: Pick and place the brown box.
 
 # Camera observations exported to the policy and recorder.
 camera_names:
+
   - robot_head_cam_rgb
 
 # Expected height, width, and channel count for recorder metadata.
 image_shape:
+
   - 480
   - 640
   - 3

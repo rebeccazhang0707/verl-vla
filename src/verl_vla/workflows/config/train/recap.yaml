@@ -12,10 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Hydra runtime configuration.
 hydra:
+
+  # Additional Hydra configuration search paths.
   searchpath:
+
     - pkg://verl_vla.workflows.config
 
+# Hydra configuration composition order.
 defaults:
 
   # Stage 1: evaluate the configured RECAP policy on the environment benchmark.
@@ -44,6 +49,8 @@ defaults:
 
 # RECAP loop settings.
 recap:
+
+  # Target class instantiated from this configuration.
   _target_: verl_vla.workflows.train.recap.config.MainReCapConfig
 
   # Number of full RECAP iterations to run.

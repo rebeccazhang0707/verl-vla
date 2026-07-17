@@ -14,6 +14,7 @@
 
 # Rollout-only actor/rollout worker config.
 
+# Hydra configuration composition order.
 defaults:
 
   # Rollout worker config.

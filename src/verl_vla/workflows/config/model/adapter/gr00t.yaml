@@ -55,6 +55,7 @@ use_relative_action: null
 # many LIBERO task_ids with separate Q-heads; Arena launchers pin one task, so
 # it is intentionally not implemented here.
 critic:
+
   # Whether to construct the critic for SAC training.
   enabled: true
 

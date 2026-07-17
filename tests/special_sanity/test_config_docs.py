@@ -16,30 +16,6 @@ import re
 from pathlib import Path
 
 CONFIG_ROOT = Path("src/verl_vla/workflows/config")
-CONFIGS_TO_INSPECT = (
-    "actor/checkpoint/default.yaml",
-    "actor/optim/fsdp.yaml",
-    "actor/profiler/default.yaml",
-    "actor_rollout_ref/data_keys.yaml",
-    "cluster/checkpoint/actor.yaml",
-    "cluster/resource/actor.yaml",
-    "cluster/resource/env.yaml",
-    "cluster/resource/env_rollout.yaml",
-    "data/lerobot_dataloader.yaml",
-    "env/recorder/lerobot.yaml",
-    "env/recorder/video.yaml",
-    "env/teleop/gamepad.yaml",
-    "env/teleop/keyboard.yaml",
-    "env/teleop/xr_controller.yaml",
-    "model/hf_model.yaml",
-    "model/lora/default.yaml",
-    "model/override/gr00t.yaml",
-    "model/override/recap_value_model.yaml",
-    "ray/default.yaml",
-    "rollout/rollout.yaml",
-    "trainer/early_stopping/early_stop.yaml",
-    "trainer/global_profiler/default.yaml",
-)
 
 
 def validate_yaml_format(yaml_lines: list[str]) -> list[str]:
@@ -72,8 +48,7 @@ def validate_yaml_format(yaml_lines: list[str]) -> list[str]:
 
 def check_config_docs() -> list[str]:
     errors = []
-    for relative_path in CONFIGS_TO_INSPECT:
-        config_path = CONFIG_ROOT / relative_path
+    for config_path in sorted(CONFIG_ROOT.rglob("*.yaml")):
         config_errors = validate_yaml_format(config_path.read_text().splitlines(keepends=True))
         errors.extend(f"{config_path}: {error}" for error in config_errors)
     return errors

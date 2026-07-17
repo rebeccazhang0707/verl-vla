@@ -19,6 +19,7 @@
 # |-- max_episodes: number of completed episodes to collect.
 # `-- ray_kwargs: Ray init kwargs used before the cluster is constructed.
 
+# Hydra configuration composition order.
 defaults:
 
   # Attach the env + rollout TrainCluster config under `cluster`.
@@ -39,31 +40,80 @@ max_episodes: 1
 resume: False
 
 
+# Distributed cluster configuration.
 cluster:
+
+  # Cluster resource allocation.
   resource:
+
+    # Environment execution configuration.
     env:
+
+      # Number of nodes allocated to this role.
       nnodes: 1
+
+      # Number of GPUs allocated on each node.
       gpus_per_node: 1
+
+      # Number of workers launched on each node.
       workers_per_node: 1
+
+  # Environment execution configuration.
   env:
+
+    # Environment interaction loop configuration.
     env_loop:
+
+      # Number of stages in the environment rollout pipeline.
       pipeline_stage_num: 1
+
+      # Maximum policy/environment interactions in one rollout.
       max_interactions: 16
+
+    # Environment worker configuration.
     env_worker:
+
+      # Whether completed environments reset automatically.
       auto_reset: True
+
+      # Whether recording waits for operator confirmation.
       confirm_before_record: True
+
+      # Number of simulator environments hosted by each worker.
       num_envs: 1
+
+      # Teleoperation configuration.
       teleop:
+
+        # Whether this component is enabled.
         enable: True
+
+        # Teleoperation devices enabled for the environment.
         devices:
+
           - keyboard
+      # Episode recorder configuration.
       recorder:
+
+        # Whether this component is enabled.
         enable: True
+
+        # Recorder backends enabled for each episode.
         recorders:
+
           - lerobot
           - video
+        # LeRobot dataset recorder overrides.
         lerobot:
+
+          # Root directory used by this component.
           root: outputs/dagger/lerobot
+
+          # LeRobot dataset repository identifier.
           repo_id: local/verl_vla_libero_dagger
+
+        # Video recorder overrides.
         video:
+
+          # Root directory used by this component.
           root: outputs/dagger/videos

@@ -14,6 +14,7 @@
 
 # ReCap rollout-collection stage.
 
+# Hydra configuration composition order.
 defaults:
 
   # TrainCluster config used by this rollout collection stage.
@@ -32,10 +33,21 @@ max_episodes: 1
 
 # Rollout collection records both LeRobot datasets and visualization videos.
 cluster:
+
+  # Environment execution configuration.
   env:
+
+    # Environment worker configuration.
     env_worker:
+
+      # Episode recorder configuration.
       recorder:
+
+        # Whether this component is enabled.
         enable: true
+
+        # Recorder backends enabled for each episode.
         recorders:
+
           - lerobot
           - video

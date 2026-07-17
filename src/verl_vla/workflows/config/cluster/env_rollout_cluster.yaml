@@ -14,6 +14,7 @@
 
 # Env rollout TrainCluster config.
 
+# Hydra configuration composition order.
 defaults:
 
   # Resource placement used by TrainCluster.

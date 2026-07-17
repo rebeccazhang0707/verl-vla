@@ -4,7 +4,9 @@
 # 3. Inline comments (after a field on the same line) are not allowed.
 # 4. Indentation level is respected for nested fields.
 
+# Hydra configuration composition order.
 defaults:
+
   # inherit shared actor configs
   - base_actor
 

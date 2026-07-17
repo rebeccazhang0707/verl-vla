@@ -14,6 +14,7 @@
 
 # ReCap policy-evaluation stage.
 
+# Hydra configuration composition order.
 defaults:
 
   # Env-loop cluster used for policy evaluation.
@@ -43,14 +44,30 @@ result_dir: outputs/recap/eval_results
 
 # Policy evaluation initializes only eval simulators and disables dataset/video recording.
 cluster:
+
+  # Environment execution configuration.
   env:
+
+    # Environment interaction loop configuration.
     env_loop:
+
+      # Maximum policy/environment interactions in one rollout.
       max_interactions: 8
 
+    # Environment worker configuration.
     env_worker:
+
+      # Simulator modes initialized by the environment worker.
       modes:
+
         - eval
+      # Episode recorder configuration.
       recorder:
+
+        # Whether this component is enabled.
         enable: true
+
+        # Recorder backends enabled for each episode.
         recorders:
+
           - video

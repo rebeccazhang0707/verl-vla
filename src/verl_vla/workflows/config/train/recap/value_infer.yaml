@@ -14,6 +14,7 @@
 
 # ReCap value-inference stage.
 
+# Hydra configuration composition order.
 defaults:
 
   # Attach the LeRobot dataloader config used for value inference.
@@ -28,7 +29,11 @@ enable: true
 
 # Dataset used when this stage runs without fresh collected datasets.
 dataset:
+
+  # Root directory used by this component.
   root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
+
+  # LeRobot dataset repository identifier.
   repo_id: local/verl_vla_libero_collected
 
 # Value model checkpoint used when this stage runs without fresh value-model training.
@@ -36,12 +41,20 @@ model_path: checkpoints/recap/value_model/global_step_2100/actor/huggingface
 
 # Inference runtime settings.
 device: cuda
+
+# Numerical precision used by this component.
 precision: bfloat16
+
+# Number of GPUs allocated to this worker.
 num_gpus: 1
 
 # ACP label settings written from inferred values.
 n_step: 50
+
+# Target fraction of positive samples in each batch.
 positive_ratio: 0.3
+
+# Whether all intervention samples receive a positive label.
 force_intervention_positive: true
 
 # Indicator score strategy:
@@ -49,11 +62,21 @@ force_intervention_positive: true
 # - future_smoothed_advantage: top positive_ratio by exponentially weighted
 #   future n-step advantages.
 indicator_strategy: future_smoothed_advantage
+
+# Window size used when smoothing advantages.
 advantage_smoothing_window: 50
+
+# Decay factor used when smoothing advantages.
 advantage_smoothing_decay: 0.95
 
 # Value inference reads one frame at a time and does not need future action chunks.
 data:
+
+  # Number of future action steps represented by each training sample.
   action_delta_steps: 0
+
+  # Whether samples are shuffled by the dataloader.
   shuffle: false
+
+  # Whether to discard the final incomplete batch.
   drop_last: false

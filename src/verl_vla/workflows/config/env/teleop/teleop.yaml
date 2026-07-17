@@ -14,6 +14,7 @@
 
 # Teleop configuration for TrainCluster rollout smoke tests.
 
+# Hydra configuration composition order.
 defaults:
 
   # Keyboard teleop device config.
@@ -71,5 +72,6 @@ server:
 
 # Human intervention input devices enabled in the browser and backend.
 devices:
+
   - keyboard
   - xr_controller

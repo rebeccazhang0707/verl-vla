@@ -19,6 +19,7 @@
 # |-- num_episodes: number of episodes to record.
 # `-- ray_kwargs: Ray init kwargs used before the cluster is constructed.
 
+# Hydra configuration composition order.
 defaults:
 
   # Attach the env-only TrainCluster config under `cluster`.
@@ -40,26 +41,65 @@ resume: False
 
 
 
+# Distributed cluster configuration.
 cluster:
+
+  # Cluster resource allocation.
   resource:
+
+    # Environment execution configuration.
     env:
+
+      # Number of nodes allocated to this role.
       nnodes: 1
+
+      # Number of GPUs allocated on each node.
       gpus_per_node: 1
+
+      # Number of workers launched on each node.
       workers_per_node: 1
+
+  # Environment execution configuration.
   env:
+
+    # Environment worker configuration.
     env_worker:
+
+      # Whether recording waits for operator confirmation.
       confirm_before_record: True
+
+      # Teleoperation configuration.
       teleop:
+
+        # Whether this component is enabled.
         enable: True
+
+        # Teleoperation devices enabled for the environment.
         devices:
+
           - keyboard
+      # Episode recorder configuration.
       recorder:
+
+        # Whether this component is enabled.
         enable: True
+
+        # Recorder backends enabled for each episode.
         recorders:
+
           - lerobot
           - video
+        # LeRobot dataset recorder overrides.
         lerobot:
+
+          # Root directory used by this component.
           root: outputs/record/lerobot
+
+          # LeRobot dataset repository identifier.
           repo_id: local/verl_vla_libero_record
+
+        # Video recorder overrides.
         video:
+
+          # Root directory used by this component.
           root: outputs/record/videos

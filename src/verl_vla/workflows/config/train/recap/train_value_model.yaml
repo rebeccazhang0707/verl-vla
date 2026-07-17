@@ -14,6 +14,7 @@
 
 # ReCap value-model training stage.
 
+# Hydra configuration composition order.
 defaults:
 
   # Base actor-only SFT trainer config.
@@ -31,40 +32,86 @@ enable: true
 
 # LeRobot dataset used when this stage runs without fresh collected datasets.
 data:
+
+  # Root directory used by this component.
   root: /tmp/verl_vla_lerobot_records/local/verl_vla_libero_collected
+
+  # LeRobot dataset repository identifier.
   repo_id: local/verl_vla_libero_collected
 
 
 # Value-model TrainCluster settings.
 cluster:
+
+  # Checkpoint lifecycle configuration.
   checkpoint:
+
+    # Default directory used for local checkpoints.
     default_local_dir: checkpoints/${recap.train_value_model.trainer.project_name}/${recap.train_value_model.trainer.experiment_name}
 
+  # Shared actor, rollout, and reference-policy configuration.
   actor_rollout_ref:
+
+    # Policy model configuration.
     model:
+
+      # Path to the model or artifact used by this component.
       path: /file_system/liujincheng/Projects/verl-vla/assets/hf_models/recap_value_critic
+
+      # Path to the tokenizer loaded with the policy.
       tokenizer_path: google/gemma-3-270m
+
+      # Whether Hugging Face may execute repository-provided model code.
       trust_remote_code: true
 
+    # Actor training configuration.
     actor:
+
+      # Checkpoint lifecycle configuration.
       checkpoint:
+
+        # Training-state components written to each checkpoint.
         save_contents: ["model", "optimizer", "extra", "hf_model"]
+
+        # Training-state components restored from a checkpoint.
         load_contents: ["model", "optimizer", "extra"]
 
+      # Optimizer configuration.
       optim:
+
+        # Optimizer learning rate.
         lr: 1e-4
 
+      # FSDP execution configuration.
       fsdp_config:
+
+        # FSDP module wrapping policy.
         wrap_policy:
+
+          # Transformer layer classes wrapped as individual FSDP units.
           transformer_layer_cls_to_wrap: ["ReCapValueDualStreamLayer"]
 
 
 # Value-model trainer settings.
 trainer:
+
+  # Tracking project name.
   project_name: recap
+
+  # Tracking name for this experiment.
   experiment_name: value_model
+
+  # Whether checkpoint resume restores dataloader progress.
   resume_dataloader_state: false
+
+  # Early-stopping criteria.
   early_stopping:
+
+    # Whether this component is enabled.
     enable: true
+
+    # Number of recent steps used by early stopping.
     window_size: 500
+
+    # Number of steps before early-stopping evaluation begins.
     warmup_steps: 800

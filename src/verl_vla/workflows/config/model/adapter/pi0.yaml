@@ -25,14 +25,32 @@ action_chunk_size: 10
 
 # Optional critic owned by the PI0 adapter.
 critic:
+
+  # Whether this component is enabled.
   enabled: True
+
+  # Backend or implementation type selected for this component.
   type: cross_attn
+
+  # Number of workers allocated to this role.
   num: 10
+
+  # Number of attention heads in the critic.
   head_num: 2
+
+  # Number of attention heads in the critic prefix encoder.
   prefix_attn_heads: 8
+
+  # Embedding dimension of the critic prefix encoder.
   prefix_embed_dim: 2048
+
+  # Input feature dimension for the critic.
   input_dim: 2150
+
+  # Hidden-layer dimensions for the critic.
   hidden_dims: [1024, 512, 256]
+
+  # Mapping from task identifiers to critic checkpoints.
   task_to_critic: null
 
 # Whether Flow-SDE is enabled.

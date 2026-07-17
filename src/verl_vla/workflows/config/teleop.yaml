@@ -18,6 +18,7 @@
 # |-- cluster: env-only TrainCluster settings.
 # `-- ray_kwargs: Ray init kwargs used before the cluster is constructed.
 
+# Hydra configuration composition order.
 defaults:
 
   # Attach the env-only TrainCluster config under `cluster`.
@@ -30,18 +31,45 @@ defaults:
   - _self_
 
 
+# Distributed cluster configuration.
 cluster:
+
+  # Cluster resource allocation.
   resource:
+
+    # Environment execution configuration.
     env:
+
+      # Number of nodes allocated to this role.
       nnodes: 1
+
+      # Number of GPUs allocated on each node.
       gpus_per_node: 1
+
+      # Number of workers launched on each node.
       workers_per_node: 1
+
+  # Environment execution configuration.
   env:
+
+    # Environment worker configuration.
     env_worker:
+
+      # Whether recording waits for operator confirmation.
       confirm_before_record: False
+
+      # Teleoperation configuration.
       teleop:
+
+        # Whether this component is enabled.
         enable: True
+
+        # Teleoperation devices enabled for the environment.
         devices:
+
           - keyboard
+      # Episode recorder configuration.
       recorder:
+
+        # Whether this component is enabled.
         enable: False
