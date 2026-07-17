@@ -70,7 +70,6 @@ python -m verl_vla.entrypoints.train.sac \
   cluster.actor_rollout_ref.model.adapter.freeze_vision_tower=False \
   cluster.actor_rollout_ref.model.adapter.norm_stats_path="$NORM_STATS_PATH" \
   cluster.actor_rollout_ref.model.adapter.num_action_chunks="$ACTION_CHUNK_SIZE" \
-  cluster.actor_rollout_ref.model.override_config.norm_stats_path="$NORM_STATS_PATH" \
   cluster.actor_rollout_ref.model.override_config.verl_action_chunk_size="$ACTION_CHUNK_SIZE" \
   cluster.actor_rollout_ref.actor.strategy=fsdp2 \
   cluster.actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \

@@ -16,20 +16,6 @@ def _apply_overrides(config, overrides: Mapping) -> None:
         setattr(config, name, value)
 
 
-def _split_gr00t_overrides(overrides: Mapping) -> tuple[dict, dict]:
-    """Split legacy override_config into native HF overrides vs adapter fields."""
-    from .gr00t_n1d6.adapter_config import GR00T_ADAPTER_OVERRIDE_KEYS
-
-    native: dict = {}
-    adapter: dict = {}
-    for key, value in overrides.items():
-        if key in GR00T_ADAPTER_OVERRIDE_KEYS:
-            adapter[key] = value
-        else:
-            native[key] = value
-    return native, adapter
-
-
 def build_vla_model(model_config, *, torch_dtype: torch.dtype):
     architecture = model_config.native_architecture
     path = model_config.local_path
@@ -54,24 +40,8 @@ def build_vla_model(model_config, *, torch_dtype: torch.dtype):
         from .gr00t_n1d6.trainable_model import Gr00tN1d6TrainableModel, load_gr00t_n1d6_policy
 
         config = Gr00tN1d6Config.from_pretrained(path)
-        native_overrides, legacy_adapter = _split_gr00t_overrides(overrides)
-        _apply_overrides(config, native_overrides)
-
-        # Dual-write migration: prefer ``model/adapter=gr00t``; fold leftover SAC
-        # keys from ``override_config``. Ignore the default pi0 adapter group when
-        # a GR00T run still only sets ``model/override=gr00t``.
-        adapter_raw = dict(model_config.adapter or {})
-        looks_like_default_pi0 = (
-            adapter_raw.get("embodiment") == "libero"
-            and "embodiment_tag" not in adapter_raw
-            and "policy_type" not in adapter_raw
-            and "action_dim" not in adapter_raw
-        )
-        if looks_like_default_pi0:
-            adapter_values = dict(legacy_adapter)
-        else:
-            adapter_values = {**legacy_adapter, **adapter_raw}
-        adapter_config = Gr00tAdapterConfig(model_path=path, **adapter_values)
+        _apply_overrides(config, overrides)
+        adapter_config = Gr00tAdapterConfig(model_path=path, **dict(model_config.adapter))
 
         policy = load_gr00t_n1d6_policy(path, config=config, torch_dtype=torch_dtype)
         return Gr00tN1d6TrainableModel(policy, adapter_config=adapter_config)
