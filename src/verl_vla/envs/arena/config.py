@@ -14,64 +14,34 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from hydra.utils import instantiate
 from verl.base_config import BaseConfig
 
 
 @dataclass
-class ArenaSimulatorConfig(BaseConfig):
-    """Simulator config for Isaac Lab Arena environments."""
+class ArenaEnvironmentConfig(BaseConfig):
+    """Configuration for one environment hosted by Isaac Lab Arena."""
 
-    simulator_type: str = "arena"
-    seed: int = 42
     action_dim: int = 50
     state_dim: int | None = None
-
     env_name: str = "galileo_g1_locomanip_pick_and_place"
-    # Task object USD id. None => each embodiment supplies its own default in
-    # ``add_cli_args`` (G1 WBC -> "brown_box", GR1 fridge -> "ranch_dressing_hope_robolab").
     object: str | None = None
     embodiment: str = "g1_wbc_joint"
     object_set: str | None = None
     kitchen_style: int = 2
     task_description: str = "Pick and place the brown box."
-    enable_cameras: bool = True
     camera_names: tuple[str, ...] = ("robot_head_cam_rgb",)
     image_shape: tuple[int, int, int] = (480, 640, 3)
-    rl_success_reward: bool = True
     subtask_reward: bool = False
-
     env_spacing: float = 30.0
-    disable_fabric: bool = False
-    solve_relations: bool = True
-    enable_pinocchio: bool = True
-    placement_seed: int | None = None
-    resolve_on_reset: bool | None = None
-    presets: str | None = None
-
-    # Embodiment adapter selector. Defaults to g1_wbc_joint so configs that predate
-    # the embodiment abstraction keep working unchanged. See embodiment.py.
     arena_state_mode: str = "g1_wbc_joint"
-
-    # External (non-built-in) Arena environment, registered by "module_path:ClassName"
-    # exactly like Arena's --external_environment_class_path (e.g. the LIBERO env).
     external_env_class_path: str | None = None
-
-    # Whether the wrapper steps the raw policy action (True) or routes through the
-    # stable-hold / teleop adapter (False). ``None`` => embodiment default
-    # (identity G1 WBC: False; mapped GR1 / Franka LIBERO: True). Host here to override.
     use_policy_action: bool | None = None
-
-    # Stable-hold overrides (G1 WBC teleop smoke). ``None`` => use the embodiment class
-    # default (G1: 43 / 46 / 0.75; other embodiments: disabled). Host here to override.
     stable_hold_joint_slice: int | None = None
     base_height_index: int | None = None
     base_height_command: float | None = None
-
-    # Joint-space mapping for mapped embodiments (e.g. GR1). ``None`` spec => identity
-    # joint-space (G1 WBC). ``arena_joint_space_dir`` is the directory with the three
-    # joint-space YAMLs; file names default to the GR1 layout when omitted.
     arena_joint_space_spec: str | None = None
     arena_joint_space_dir: str | None = None
     arena_joint_space_policy_yaml: str | None = None
@@ -80,16 +50,54 @@ class ArenaSimulatorConfig(BaseConfig):
 
 
 @dataclass
-class ArenaLiberoSimulatorConfig(ArenaSimulatorConfig):
-    """Arena simulator config for the Franka LIBERO external environment."""
+class ArenaLiberoEnvironmentConfig(ArenaEnvironmentConfig):
+    """Configuration for the Franka LIBERO environment hosted by Arena."""
 
-    # LIBERO task selection (task suite + id within the suite).
     libero_task_suite: str = "libero_10"
     libero_task_id: int = 0
     libero_randomize_object_pose: bool = False
     libero_robot_init_noise_std: float = 0.0
-    # None lets the env auto-resolve from the embedded/mounted LIBERO data dirs.
     arena_libero_in_lab_root: str | None = None
     arena_libero_config_dir: str | None = None
     arena_libero_assets_dir: str | None = None
     arena_libero_assembled_dataset_dir: str | None = None
+
+
+@dataclass
+class ArenaSimulatorConfig(BaseConfig):
+    """Arena backend config with one selected environment profile."""
+
+    simulator_type: str = "arena"
+    environment: str = "g1"
+
+    seed: int = 42
+    enable_cameras: bool = True
+    rl_success_reward: bool = True
+    disable_fabric: bool = False
+    solve_relations: bool = True
+    enable_pinocchio: bool = True
+    placement_seed: int | None = None
+    resolve_on_reset: bool | None = None
+    presets: str | None = None
+
+    g1: ArenaEnvironmentConfig = field(default_factory=ArenaEnvironmentConfig)
+    gr1: ArenaEnvironmentConfig = field(default_factory=ArenaEnvironmentConfig)
+    libero: ArenaLiberoEnvironmentConfig = field(default_factory=ArenaLiberoEnvironmentConfig)
+
+    def __post_init__(self) -> None:
+        for name, config_type in (
+            ("g1", ArenaEnvironmentConfig),
+            ("gr1", ArenaEnvironmentConfig),
+            ("libero", ArenaLiberoEnvironmentConfig),
+        ):
+            config = getattr(self, name)
+            if not isinstance(config, config_type):
+                object.__setattr__(self, name, instantiate(config))
+        if self.environment not in {"g1", "gr1", "libero"}:
+            raise ValueError(f"Unsupported Arena environment: {self.environment}")
+
+    @property
+    def environment_config(self) -> ArenaEnvironmentConfig:
+        """Return the typed config for the selected Arena environment."""
+
+        return getattr(self, self.environment)

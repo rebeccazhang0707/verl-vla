@@ -1,76 +1,66 @@
 # Copyright 2026 Bytedance Ltd. and/or its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-# Isaac Lab Arena simulator configuration.
+# Isaac Lab Arena simulator backend configuration.
 
+defaults:
+
+  # Unitree G1 whole-body-control environment.
+  - /env/simulator/arena@g1: g1
+
+  # Fourier GR1 joint-space environment.
+  - /env/simulator/arena@gr1: gr1
+
+  # Franka LIBERO task-space environment.
+  - /env/simulator/arena@libero: libero
+
+  # Apply shared Arena settings and the environment selector last.
+  - _self_
+
+
+# Typed Arena backend configuration constructed by Hydra.
 _target_: verl_vla.envs.arena.config.ArenaSimulatorConfig
 
-# Simulator backend selected by EnvWorker.
+# Environment profile selected within the Arena backend: g1, gr1, or libero.
+environment: g1
+
+# Backend identifier retained for the nested simulator contract.
 simulator_type: arena
 
 # Random seed for Arena placement and simulator initialization.
 seed: 42
 
-# Arena G1 WBC joint action dimension.
-action_dim: 50
-
-# Joint-space embodiment mode (see envs/arena/embodiment.py). All joint-space modes
-# are backed by the single config-driven JointSpaceEmbodiment; this string is just the
-# descriptive label. Omitting it also falls back to g1_wbc_joint.
-arena_state_mode: g1_wbc_joint
-
-# Registered Arena example environment name.
-env_name: galileo_g1_locomanip_pick_and_place
-
-# Object and robot embodiment passed to Arena's environment builder.
-object: brown_box
-embodiment: g1_wbc_joint
-
-# Kitchen/background style for Arena tasks that support it.
-kitchen_style: 2
-
-# Fallback language task description when the Arena task does not provide one.
-task_description: Pick and place the brown box.
-
-# Whether to enable Isaac/Arena camera sensors.
+# Whether the selected Arena environment enables camera sensors.
 enable_cameras: true
 
-# Camera observation names exported to the policy/recorder.
-camera_names:
-  - robot_head_cam_rgb
-
-# Expected image shape for recorder metadata.
-image_shape:
-  - 480
-  - 640
-  - 3
-
-# Replace the (absent) Arena task reward with a sparse RL success reward.
+# Whether to install the Arena task-success reward.
 rl_success_reward: true
 
-# Whether the success reward should be computed from Arena subtask progress.
-subtask_reward: false
-
-# Spacing between vectorized Arena environments (Isaac Lab default-scale).
-# Keep 30 for G1; denser packing for GR1 belongs in arena_gr1.yaml (env_spacing: 5).
-env_spacing: 30.0
-
-# Isaac Lab fabric toggle forwarded to the Arena builder.
+# Whether to disable Isaac Lab Fabric in the simulator.
 disable_fabric: false
 
 # Whether Arena should solve scene relation constraints during construction.
 solve_relations: true
 
-# Whether to enable Pinocchio for G1 whole-body control.
+# Whether to enable Pinocchio support in Arena environments.
 enable_pinocchio: true
 
-# G1 WBC smoke drives the arm via teleop + stable-hold, not the raw policy action.
-use_policy_action: false
+# Optional placement seed forwarded to the Arena builder.
+placement_seed: null
 
-# Stable-hold layout for the G1 WBC 50-DOF action (teleop smoke): hold the first 43
-# joint targets to the observed joint state and pin the base-height command (column 46)
-# to 0.75 m. This is the single source of truth (no per-robot class).
-stable_hold_joint_slice: 43
-base_height_index: 46
-base_height_command: 0.75
+# Optional override for resolving scene relations again on reset.
+resolve_on_reset: null
+
+# Optional Arena placement preset.
+presets: null

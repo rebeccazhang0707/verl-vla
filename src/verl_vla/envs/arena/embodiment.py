@@ -32,7 +32,7 @@ just two classes, one per control space:
       state = ``robot_joint_pos``; camera ``robot_head_cam_rgb`` (see ``arena.yaml``).
     * ``gr1_joint``: Fourier GR1 humanoid (``arena_joint_space_spec: gr1``): 54-DOF sim
       state gathered to 26 GR00T joints; 26 GR00T action scattered to a 36-DOF sim action
-      via :class:`ArenaJointMapping`; cameras from ``arena_gr1.yaml``.
+      via :class:`ArenaJointMapping`; cameras from the ``arena.gr1`` config.
     * ``joint_space``: generic alias for a brand-new joint-space robot configured purely
       from yaml.
 * :class:`TaskSpaceEmbodiment` — Franka LIBERO Abs-IK (``eef_pose``). Policy uses
@@ -319,10 +319,10 @@ class ArenaEmbodiment(abc.ABC):
     #:   * ``DEFAULT_CAMERA_NAMES`` — camera(s) to use when the cfg omits them.
     DEFAULT_CAMERA_NAMES: tuple[str, ...] = ()
 
-    def __init__(self, cfg: Any, num_envs: int = 1):
+    def __init__(self, cfg: Any, num_envs: int = 1, *, enable_cameras: bool = True):
         self.cfg = cfg
         self.num_envs = int(num_envs)
-        self.enable_cameras = bool(_cfg_get(cfg, "enable_cameras", True))
+        self.enable_cameras = enable_cameras
         # A single flat camera list for every embodiment (no head/wrist split).
         self.camera_names = self._resolve_camera_config(cfg)
         # Every knob below has a class-attribute default that a yaml can override (cfg
@@ -359,7 +359,7 @@ class ArenaEmbodiment(abc.ABC):
     def add_cli_args(self, args: argparse.Namespace, cfg: Any) -> None:
         """Add embodiment/task-specific attributes to the ArenaEnvBuilder args (in place)."""
 
-    def patch_env_cfg(self, env_cfg, cfg: Any) -> None:
+    def patch_env_cfg(self, env_cfg, *, rl_success_reward: bool, subtask_reward: bool) -> None:
         """Patch the built (pre-instantiation) env cfg for RL.
 
         The Arena task defines no reward, so (gated on ``rl_success_reward``, default
@@ -370,8 +370,8 @@ class ArenaEmbodiment(abc.ABC):
         """
         from verl_vla.envs.arena.utils import apply_arena_rl_reward
 
-        if bool(_cfg_get(cfg, "rl_success_reward", True)):
-            apply_arena_rl_reward(env_cfg, subtask_reward=bool(_cfg_get(cfg, "subtask_reward", False)))
+        if rl_success_reward:
+            apply_arena_rl_reward(env_cfg, subtask_reward=subtask_reward)
 
     @abc.abstractmethod
     def policy_to_sim_action(self, actions, device) -> torch.Tensor:
@@ -424,7 +424,8 @@ class JointSpaceEmbodiment(ArenaEmbodiment):
 
     The class attributes below are only neutral fallbacks; the actual per-robot values
     (cameras, ``object``, ``use_policy_action``, stable-hold, joint-space spec/dir/yamls)
-    live *only* in the simulator yaml (``arena.yaml`` for G1, ``arena_gr1.yaml`` for GR1).
+    live *only* in the selected Arena environment config (``arena.g1`` or
+    ``arena.gr1``).
     The mapping is built lazily + cached (import-safe: the Arena YAMLs / ``gr00t`` package
     are only touched then, never at construction).
     """
@@ -439,9 +440,9 @@ class JointSpaceEmbodiment(ArenaEmbodiment):
     use_policy_action = True
     default_object: Optional[str] = None
 
-    def __init__(self, cfg: Any, num_envs: int = 1):
+    def __init__(self, cfg: Any, num_envs: int = 1, *, enable_cameras: bool = True):
         self._joint_map: Optional[ArenaJointMapping] = None
-        super().__init__(cfg, num_envs=num_envs)
+        super().__init__(cfg, num_envs=num_envs, enable_cameras=enable_cameras)
         # Descriptive label for logging/recorder: mirror ``arena_state_mode`` (e.g.
         # ``g1_wbc_joint`` / ``gr1_joint``) since one class now backs several modes.
         self.state_mode = str(_cfg_get(cfg, "arena_state_mode", DEFAULT_ARENA_STATE_MODE))
@@ -578,8 +579,8 @@ class TaskSpaceEmbodiment(ArenaEmbodiment):
     state_mode = "task_space"
     use_policy_action = True
 
-    def __init__(self, cfg: Any, num_envs: int = 1):
-        super().__init__(cfg, num_envs=num_envs)
+    def __init__(self, cfg: Any, num_envs: int = 1, *, enable_cameras: bool = True):
+        super().__init__(cfg, num_envs=num_envs, enable_cameras=enable_cameras)
         self.state_mode = str(_cfg_get(cfg, "arena_state_mode", None) or type(self).state_mode)
         self.action_dim = int(_cfg_get(cfg, "action_dim", 7))
         self.state_dim = int(_cfg_get(cfg, "state_dim", None) or self.action_dim)
@@ -650,7 +651,12 @@ _ARENA_EMBODIMENTS: dict[str, type[ArenaEmbodiment]] = {
 }
 
 
-def make_arena_embodiment(cfg: Any, num_envs: int = 1) -> ArenaEmbodiment:
+def make_arena_embodiment(
+    cfg: Any,
+    num_envs: int = 1,
+    *,
+    enable_cameras: bool = True,
+) -> ArenaEmbodiment:
     """Build the embodiment adapter selected by ``cfg.arena_state_mode``.
 
     Defaults to :data:`DEFAULT_ARENA_STATE_MODE` (``g1_wbc_joint``) so configs that
@@ -661,4 +667,4 @@ def make_arena_embodiment(cfg: Any, num_envs: int = 1) -> ArenaEmbodiment:
         adapter_cls = _ARENA_EMBODIMENTS[state_mode]
     except KeyError as exc:
         raise ValueError(f"Unknown arena_state_mode {state_mode!r}; known: {sorted(_ARENA_EMBODIMENTS)}") from exc
-    return adapter_cls(cfg, num_envs=num_envs)
+    return adapter_cls(cfg, num_envs=num_envs, enable_cameras=enable_cameras)

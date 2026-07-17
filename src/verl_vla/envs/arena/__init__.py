@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from verl_vla.envs.arena.config import ArenaLiberoSimulatorConfig, ArenaSimulatorConfig
+from verl_vla.envs.arena.config import (
+    ArenaEnvironmentConfig,
+    ArenaLiberoEnvironmentConfig,
+    ArenaSimulatorConfig,
+)
 from verl_vla.envs.arena.embodiment import (
     ArenaEmbodiment,
     ArenaJointMapping,
@@ -22,7 +26,8 @@ from verl_vla.envs.arena.embodiment import (
 )
 
 __all__ = [
-    "ArenaLiberoSimulatorConfig",
+    "ArenaEnvironmentConfig",
+    "ArenaLiberoEnvironmentConfig",
     "ArenaSimulatorConfig",
     "ArenaEmbodiment",
     "ArenaJointMapping",

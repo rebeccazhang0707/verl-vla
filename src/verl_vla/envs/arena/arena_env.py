@@ -69,21 +69,26 @@ class IsaacLabArenaEnv(BaseEnv):
         disable_lightwheel_ssl_verify()
 
         self.arena_cfg = OmegaConf.to_object(cfg.simulator.arena)
+        self.environment_cfg = self.arena_cfg.environment_config
         self.seed = int(self.arena_cfg.seed) + int(rank)
         self.device = getattr(cfg, "device", None) or "cuda:0"
         self.enable_cameras = self.arena_cfg.enable_cameras
-        self.camera_names = list(self.arena_cfg.camera_names)
-        self.task_description = self.arena_cfg.task_description
+        self.camera_names = list(self.environment_cfg.camera_names)
+        self.task_description = self.environment_cfg.task_description
 
-        self.action_dim = int(self.arena_cfg.action_dim)
-        self.state_dim = int(self.arena_cfg.state_dim or self.action_dim)
+        self.action_dim = int(self.environment_cfg.action_dim)
+        self.state_dim = int(self.environment_cfg.state_dim or self.action_dim)
         self.env = None
         self.app = None
 
         # Embodiment adapter: owns joint maps, action conversion, state/image
         # extraction, CLI args, env-cfg patching, camera names and the stable-hold
         # indices. The wrapper delegates to it so it stays embodiment-agnostic.
-        self.embodiment = make_arena_embodiment(self.arena_cfg, num_envs=int(cfg.num_envs))
+        self.embodiment = make_arena_embodiment(
+            self.environment_cfg,
+            num_envs=int(cfg.num_envs),
+            enable_cameras=self.enable_cameras,
+        )
         # Whether to step the raw policy action or route through the stable-hold /
         # teleop adapter. Embodiment-driven: G1 WBC -> False (unchanged smoke path),
         # GR1 joint / Franka LIBERO -> True (execute real policy actions).
@@ -110,7 +115,7 @@ class IsaacLabArenaEnv(BaseEnv):
         # this method stays embodiment-agnostic.
         args = argparse.Namespace(
             num_envs=self.num_envs,
-            env_spacing=self.arena_cfg.env_spacing,
+            env_spacing=self.environment_cfg.env_spacing,
             disable_fabric=self.arena_cfg.disable_fabric,
             device=self.device,
             seed=self.seed,
@@ -120,11 +125,11 @@ class IsaacLabArenaEnv(BaseEnv):
             placement_seed=self.arena_cfg.placement_seed,
             resolve_on_reset=self.arena_cfg.resolve_on_reset,
             presets=self.arena_cfg.presets,
-            embodiment=self.arena_cfg.embodiment,
+            embodiment=self.environment_cfg.embodiment,
             enable_cameras=self.enable_cameras,
             teleop_device=None,
         )
-        self.embodiment.add_cli_args(args, self.arena_cfg)
+        self.embodiment.add_cli_args(args, self.environment_cfg)
         return args
 
     def _init_env(self) -> None:
@@ -145,13 +150,14 @@ class IsaacLabArenaEnv(BaseEnv):
         args = self._build_args()
 
         # External (non-built-in) Arena env registration
-        register_external_arena_env(self.arena_cfg.env_name, self.arena_cfg.external_env_class_path)
-        if self.arena_cfg.env_name not in ExampleEnvironments:
+        register_external_arena_env(self.environment_cfg.env_name, self.environment_cfg.external_env_class_path)
+        if self.environment_cfg.env_name not in ExampleEnvironments:
             raise ValueError(
-                f"Arena env '{self.arena_cfg.env_name}' not found. Available: {sorted(ExampleEnvironments.keys())}"
+                f"Arena env '{self.environment_cfg.env_name}' not found. "
+                f"Available: {sorted(ExampleEnvironments.keys())}"
             )
 
-        arena_env = ExampleEnvironments[self.arena_cfg.env_name]().get_env(args)
+        arena_env = ExampleEnvironments[self.environment_cfg.env_name]().get_env(args)
         task = getattr(arena_env, "task", None)
         if task is not None and hasattr(task, "get_task_description"):
             desc = task.get_task_description()
@@ -164,7 +170,11 @@ class IsaacLabArenaEnv(BaseEnv):
         # sparse RL reward (gated on rl_success_reward) -- WITHOUT touching the
         # termination terms, so IsaacLab keeps owning auto-reset (episode horizon stays
         # the Arena task's native episode_length_s).
-        self.embodiment.patch_env_cfg(env_cfg, self.arena_cfg)
+        self.embodiment.patch_env_cfg(
+            env_cfg,
+            rl_success_reward=self.arena_cfg.rl_success_reward,
+            subtask_reward=self.environment_cfg.subtask_reward,
+        )
         self.env = env_builder.make_registered(env_cfg=env_cfg)
 
         self.action_space = self.env.action_space
@@ -322,7 +332,7 @@ class IsaacLabArenaEnv(BaseEnv):
             "state_dim": self.state_dim,
             "action_dim": recorder_action_dim,
             "fps": int(self.cfg.recorder.video.fps),
-            "robot_type": self.arena_cfg.embodiment,
+            "robot_type": self.environment_cfg.embodiment,
         }
 
     ### Observation formatting ###
@@ -351,5 +361,5 @@ class IsaacLabArenaEnv(BaseEnv):
 
     def _image_shape(self) -> tuple[int, int, int]:
         if self.enable_cameras:
-            return self.arena_cfg.image_shape
+            return self.environment_cfg.image_shape
         return (1, 1, 3)

@@ -62,7 +62,7 @@ case "$ARENA_TASK" in
     GROOT_EMBODIMENT_TAG="${GROOT_EMBODIMENT_TAG:-gr1}"
     GROOT_EMBODIMENT_ID="${GROOT_EMBODIMENT_ID:-20}"
     ACTION_DIM="${ACTION_DIM:-26}"
-    ARENA_SIM="arena_gr1"
+    ARENA_ENVIRONMENT="gr1"
     OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_gr00t_gr1_eval}"
     # 32 interactions × 16 action chunks = 512 env steps (episode_length_s≈10 @ 50 Hz).
     MAX_INTERACTIONS="${MAX_INTERACTIONS:-32}"
@@ -76,7 +76,7 @@ case "$ARENA_TASK" in
     GROOT_EMBODIMENT_TAG="${GROOT_EMBODIMENT_TAG:-new_embodiment}"
     GROOT_EMBODIMENT_ID="${GROOT_EMBODIMENT_ID:-10}"
     ACTION_DIM="${ACTION_DIM:-7}"
-    ARENA_SIM="arena_libero"
+    ARENA_ENVIRONMENT="libero"
     TASK_SUITE="${TASK_SUITE:-libero_spatial}"
     TASK_ID="${TASK_ID:-3}"
     OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_gr00t_${TASK_SUITE}_task${TASK_ID}_eval}"
@@ -88,8 +88,8 @@ case "$ARENA_TASK" in
     fi
     EXTRA_OVERRIDES+=(
       "+ray_kwargs.ray_init.runtime_env.env_vars.LIBERO_IN_LAB_ROOT=$LIBERO_IN_LAB_ROOT"
-      "recap.policy_eval.cluster.env.env_worker.simulator.arena.libero_task_suite=$TASK_SUITE"
-      "recap.policy_eval.cluster.env.env_worker.simulator.arena.libero_task_id=$TASK_ID"
+      "recap.policy_eval.cluster.env.env_worker.simulator.arena.libero.libero_task_suite=$TASK_SUITE"
+      "recap.policy_eval.cluster.env.env_worker.simulator.arena.libero.libero_task_id=$TASK_ID"
     )
     ;;
   *)
@@ -115,10 +115,10 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
 # ─────────────────────────────────────────────────────────────────────────────
 # main_recap policy_eval launch.
 #
-# Hydra *group* overrides (nested under recap.policy_eval.cluster):
+# Hydra overrides (nested under recap.policy_eval.cluster):
 #   * model/adapter@…=gr00t    -> GR00T Arena adapter (policy_type=arena, …)
 #   * model/override@…=gr00t   -> FSDP / processor compatibility fields
-#   * env/simulator@…=$ARENA_SIM -> arena_gr1 (GR1 fridge) or arena_libero (Franka)
+#   * simulator.arena.environment -> gr1 (GR1 fridge) or libero (Franka)
 #
 # TrainCluster.eval() calls generate_sequences(..., eval=True), which sets
 # Flow-SDE noise_scale=0 for deterministic ODE sampling.
@@ -135,7 +135,7 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "recap.train_policy.enable=false" \
   "model/adapter@recap.policy_eval.cluster.actor_rollout_ref.model.adapter=gr00t" \
   "+model/override@recap.policy_eval.cluster.actor_rollout_ref.model.override_config=gr00t" \
-  "env/simulator@recap.policy_eval.cluster.env.env_worker.simulator.arena=$ARENA_SIM" \
+  "recap.policy_eval.cluster.env.env_worker.simulator.arena.environment=$ARENA_ENVIRONMENT" \
   "recap.policy_eval.model_path=$GROOT_MODEL_PATH" \
   "recap.policy_eval.max_episodes=$MAX_EPISODES" \
   "recap.policy_eval.result_dir=$OUTPUT_ROOT/eval_metrics" \

@@ -110,7 +110,7 @@ ARENA_HOST="${ARENA_HOST:-$HOST_REPO/IsaacLab-Arena}"
 ARENA_WORKDIR="${ARENA_WORKDIR:-/workspaces/isaaclab_arena}"
 # The bind-mounted Arena provides the editable isaaclab install; point the image at it.
 DOCKER_ENV_ARGS+=(-e "ISAACLAB_PATH=$ARENA_WORKDIR/submodules/IsaacLab")
-# LIBERO USD assets (required for arena_libero evals; harmless for GR1).
+# LIBERO USD assets (required for the Arena LIBERO environment; harmless for GR1).
 LIBERO_IN_LAB_HOST="${LIBERO_IN_LAB_HOST:-$HOST_REPO/libero_in_lab}"
 LIBERO_IN_LAB_WORKDIR="${LIBERO_IN_LAB_WORKDIR:-/libero_in_lab}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$WORKDIR/outputs/arena_gr00t_gr1_eval}"

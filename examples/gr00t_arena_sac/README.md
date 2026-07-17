@@ -270,7 +270,7 @@ arena/
 ├── __init__.py     # exports IsaacLabArenaEnv
 ├── arena_env.py    # IsaacLabArenaEnv: Arena env on the shared BaseEnv interface —
 │                   #   launches Isaac Sim (AppLauncher), reset/step, video recorders
-├── config.py       # ArenaSimulatorConfig: simulator selection + LIBERO task suite/id
+├── config.py       # Arena backend config with G1, GR1, and LIBERO environment subconfigs
 ├── embodiment.py   # embodiment adapters: obs/action mapping per embodiment (GR1 / Franka),
 │                   #   joint-space YAMLs, LIBERO asset-root resolution
 └── utils.py        # helpers for IsaacLabArenaEnv

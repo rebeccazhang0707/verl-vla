@@ -1,0 +1,77 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Unitree G1 whole-body-control Arena environment.
+
+# Typed environment configuration constructed by Hydra.
+_target_: verl_vla.envs.arena.config.ArenaEnvironmentConfig
+
+# Control space ----------------------------------------------------------------
+
+# Identity joint-space adapter for G1 whole-body control.
+arena_state_mode: g1_wbc_joint
+
+# Width of the WBC policy action and state.
+action_dim: 50
+
+# Environment and assets -------------------------------------------------------
+
+# Registered Arena environment name.
+env_name: galileo_g1_locomanip_pick_and_place
+
+# Object asset placed in the scene.
+object: brown_box
+
+# Robot embodiment passed to the Arena environment builder.
+embodiment: g1_wbc_joint
+
+# Kitchen/background variant used by the Arena task.
+kitchen_style: 2
+
+# Fallback language instruction when the task supplies none.
+task_description: Pick and place the brown box.
+
+# Observations -----------------------------------------------------------------
+
+# Camera observations exported to the policy and recorder.
+camera_names:
+  - robot_head_cam_rgb
+
+# Expected height, width, and channel count for recorder metadata.
+image_shape:
+  - 480
+  - 640
+  - 3
+
+# Reward -----------------------------------------------------------------------
+
+# Use final task success rather than graded subtask progress.
+subtask_reward: false
+
+# Runtime behavior -------------------------------------------------------------
+
+# G1 scenes require the default wide environment spacing.
+env_spacing: 30.0
+
+# Route actions through teleop stable-hold instead of executing policy actions.
+use_policy_action: false
+
+# Number of leading joint targets copied from the observed G1 state.
+stable_hold_joint_slice: 43
+
+# WBC action column containing the held base-height command.
+base_height_index: 46
+
+# Base height, in meters, maintained by stable-hold.
+base_height_command: 0.75

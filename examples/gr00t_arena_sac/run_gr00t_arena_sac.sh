@@ -50,7 +50,7 @@ case "$ARENA_TASK" in
     GROOT_EMBODIMENT_TAG="${GROOT_EMBODIMENT_TAG:-gr1}"
     GROOT_EMBODIMENT_ID="${GROOT_EMBODIMENT_ID:-20}"
     ACTION_DIM="${ACTION_DIM:-26}"
-    ARENA_SIM="arena_gr1"
+    ARENA_ENVIRONMENT="gr1"
     OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_gr00t_gr1_sac}"
     PROJECT_NAME="${PROJECT_NAME:-gr00t-arena-gr1-sac}"
     EXPERIMENT_NAME="${EXPERIMENT_NAME:-arena_gr00t_gr1_fridge}"
@@ -65,7 +65,7 @@ case "$ARENA_TASK" in
     GROOT_EMBODIMENT_TAG="${GROOT_EMBODIMENT_TAG:-new_embodiment}"
     GROOT_EMBODIMENT_ID="${GROOT_EMBODIMENT_ID:-10}"
     ACTION_DIM="${ACTION_DIM:-7}"
-    ARENA_SIM="arena_libero"
+    ARENA_ENVIRONMENT="libero"
     TASK_SUITE="${TASK_SUITE:-libero_spatial}"
     TASK_ID="${TASK_ID:-3}"
     OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_gr00t_libero_sac}"
@@ -81,8 +81,8 @@ case "$ARENA_TASK" in
       "+ray_kwargs.ray_init.runtime_env.env_vars.LIBERO_IN_LAB_ROOT=$LIBERO_IN_LAB_ROOT"
     )
     EXTRA_OVERRIDES+=(
-      "cluster.env.env_worker.simulator.arena.libero_task_suite=$TASK_SUITE"
-      "cluster.env.env_worker.simulator.arena.libero_task_id=$TASK_ID"
+      "cluster.env.env_worker.simulator.arena.libero.libero_task_suite=$TASK_SUITE"
+      "cluster.env.env_worker.simulator.arena.libero.libero_task_id=$TASK_ID"
     )
     ;;
   *)
@@ -142,10 +142,10 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
 # ─────────────────────────────────────────────────────────────────────────────
 # main_sac launch.
 #
-# Hydra *group* overrides:
+# Hydra overrides:
 #   * model/adapter@…=gr00t      -> GR00T SAC adapter (critic / Flow-SDE / policy_type)
 #   * model/override@…=gr00t     -> FSDP / processor compatibility fields
-#   * env/simulator@…=$ARENA_SIM -> arena_gr1 (GR1 fridge) or arena_libero (Franka)
+#   * simulator.arena.environment -> gr1 (GR1 fridge) or libero (Franka)
 # ─────────────────────────────────────────────────────────────────────────────
 "$PYTHON" -m verl_vla.entrypoints.train.sac \
   "ray_kwargs.ray_init.runtime_env.env_vars.VERL_LOGGING_LEVEL=INFO" \
@@ -153,7 +153,7 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "${EXTRA_RAY_ENV[@]}" \
   "model/adapter@cluster.actor_rollout_ref.model.adapter=gr00t" \
   "+model/override@cluster.actor_rollout_ref.model.override_config=gr00t" \
-  "env/simulator@cluster.env.env_worker.simulator.arena=$ARENA_SIM" \
+  "cluster.env.env_worker.simulator.arena.environment=$ARENA_ENVIRONMENT" \
   "cluster.actor_rollout_ref.model.path=$GROOT_MODEL_PATH" \
   "cluster.actor_rollout_ref.model.tokenizer_path=$GROOT_MODEL_PATH" \
   "cluster.actor_rollout_ref.model.trust_remote_code=True" \
