@@ -18,6 +18,7 @@ import logging
 import os
 import queue
 import subprocess
+import time
 from typing import Optional
 
 import torch
@@ -203,18 +204,31 @@ class EnvManager:
         )
         self.process.start()
 
-        # Wait for initialization
-        try:
-            result = self.result_queue.get(timeout=self.start_timeout_s)
-        except queue.Empty as exc:
-            exitcode = self.process.exitcode if self.process is not None else None
-            alive = self.process.is_alive() if self.process is not None else False
-            raise RuntimeError(
-                "Simulator initialization timed out "
-                f"after {self.start_timeout_s}s "
-                f"(rank={self.rank}, stage_id={self.stage_id}, env_cls={self.env_cls.__name__}, "
-                f"process_alive={alive}, exitcode={exitcode})."
-            ) from exc
+        # Wait for initialization, but fail fast if the subprocess dies before it
+        # can report either "ready" or "error".
+        deadline = time.monotonic() + self.start_timeout_s
+        while True:
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                exitcode = self.process.exitcode if self.process is not None else None
+                alive = self.process.is_alive() if self.process is not None else False
+                raise RuntimeError(
+                    "Simulator initialization timed out "
+                    f"after {self.start_timeout_s}s "
+                    f"(rank={self.rank}, stage_id={self.stage_id}, env_cls={self.env_cls.__name__}, "
+                    f"process_alive={alive}, exitcode={exitcode})."
+                )
+
+            try:
+                result = self.result_queue.get(timeout=min(1.0, remaining_s))
+                break
+            except queue.Empty:
+                if self.process is not None and not self.process.is_alive():
+                    raise RuntimeError(
+                        "Simulator initialization process exited before reporting ready "
+                        f"(rank={self.rank}, stage_id={self.stage_id}, env_cls={self.env_cls.__name__}, "
+                        f"pid={self.process.pid}, exitcode={self.process.exitcode})."
+                    ) from None
         if result["status"] != "ready":
             raise RuntimeError(f"Simulator initialization failed: {result}")
 

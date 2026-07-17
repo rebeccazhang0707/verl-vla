@@ -163,9 +163,15 @@ class EnvWorker(Worker, DistProfilerExtension):
 
     def _simulators(self, mode: str):
         if mode == "eval":
-            if not self.eval_simulator_list:
-                raise RuntimeError("Eval simulator is not initialized. Add 'eval' to env.env_worker.modes.")
-            return self.eval_simulator_list
+            if self.eval_simulator_list:
+                return self.eval_simulator_list
+            # Arena / Isaac / LeRobot run a single simulator instance that serves
+            # both train and eval (eval is selected via the reset_eval option at
+            # reset time), so reuse the shared simulator list instead of a
+            # dedicated eval one.
+            if self.simulator_type in ("arena", "isaac", "lerobot") and self.simulator_list:
+                return self.simulator_list
+            raise RuntimeError("Eval simulator is not initialized. Add 'eval' to env.env_worker.modes.")
         return self.simulator_list
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
@@ -281,15 +287,6 @@ class EnvWorker(Worker, DistProfilerExtension):
                 else None
             )
         stage_id: int = data.meta_info["stage_id"]
-
-        # Pi0.5 Libero is not required
-        # TODO: prepare actions according to simulator type
-        # chunk_actions = prepare_actions(
-        #     simulator_type=self.simulator_type,
-        #     raw_chunk_actions=chunk_actions,
-        #     num_action_chunks=self.cfg.actor.model.num_action_chunks,
-        #     action_dim=self.cfg.actor.model.action_dim,
-        # )
 
         simulators = self._simulators(mode)
         step_output = simulators[stage_id].step(chunk_actions, chunk_values=chunk_values)

@@ -36,12 +36,15 @@ def build_vla_model(model_config, *, torch_dtype: torch.dtype):
     if architecture == "gr00t_n1d6":
         from gr00t.configs.model.gr00t_n1d6 import Gr00tN1d6Config
 
+        from .gr00t_n1d6.adapter_config import Gr00tAdapterConfig
         from .gr00t_n1d6.trainable_model import Gr00tN1d6TrainableModel, load_gr00t_n1d6_policy
 
         config = Gr00tN1d6Config.from_pretrained(path)
         _apply_overrides(config, overrides)
+        adapter_config = Gr00tAdapterConfig(model_path=path, **dict(model_config.adapter))
+
         policy = load_gr00t_n1d6_policy(path, config=config, torch_dtype=torch_dtype)
-        return Gr00tN1d6TrainableModel(policy)
+        return Gr00tN1d6TrainableModel(policy, adapter_config=adapter_config)
 
     if architecture == "openvla_oft":
         from .openvla_oft.configuration_prismatic import OpenVLAConfig

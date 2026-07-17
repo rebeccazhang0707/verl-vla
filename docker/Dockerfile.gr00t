@@ -90,14 +90,16 @@ RUN python -m pip install libero==0.1.1 \
 # PyPI's LIBERO wheel omits its simulation assets and otherwise downloads the
 # latest copy at first use. Pin and materialize them in the image instead.
 ARG LIBERO_ASSETS_REVISION=90001343cb134b7e26e18fde0fa2416f3ed6e6a3
-ARG LIBERO_ASSETS_ARCHIVE_URL
-ARG LIBERO_ASSETS_ARCHIVE_SHA256
+# Empty defaults so `set -u` does not fail when these optional build-args are unset.
+ARG LIBERO_ASSETS_ARCHIVE_URL=
+ARG LIBERO_ASSETS_ARCHIVE_SHA256=
 RUN set -eux; \
     assets_dir="$(python -c 'from importlib.metadata import distribution; print(distribution("libero").locate_file("libero/libero/assets"))')"; \
     rm -rf "${assets_dir}"; \
     mkdir -p "${assets_dir}"; \
-    if [[ -n "${LIBERO_ASSETS_ARCHIVE_URL}" ]]; then \
-      test -n "${LIBERO_ASSETS_ARCHIVE_SHA256}"; \
+    # BuildKit may leave optional empty ARGs unset in RUN; use :- defaults under set -u.
+    if [[ -n "${LIBERO_ASSETS_ARCHIVE_URL:-}" ]]; then \
+      test -n "${LIBERO_ASSETS_ARCHIVE_SHA256:-}"; \
       assets_archive="$(mktemp)"; \
       curl --fail --location --retry 5 --retry-all-errors \
         "${LIBERO_ASSETS_ARCHIVE_URL}" --output "${assets_archive}"; \

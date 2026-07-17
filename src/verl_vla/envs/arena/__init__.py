@@ -12,8 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from verl_vla.envs.arena.config import ArenaSimulatorConfig
+from verl_vla.envs.arena.config import (
+    ArenaEnvironmentConfig,
+    ArenaLiberoEnvironmentConfig,
+    ArenaSimulatorConfig,
+)
+from verl_vla.envs.arena.embodiment import (
+    ArenaEmbodiment,
+    ArenaJointMapping,
+    JointSpaceEmbodiment,
+    TaskSpaceEmbodiment,
+    make_arena_embodiment,
+)
 
 __all__ = [
+    "ArenaEnvironmentConfig",
+    "ArenaLiberoEnvironmentConfig",
     "ArenaSimulatorConfig",
+    "ArenaEmbodiment",
+    "ArenaJointMapping",
+    "JointSpaceEmbodiment",
+    "TaskSpaceEmbodiment",
+    "make_arena_embodiment",
 ]
