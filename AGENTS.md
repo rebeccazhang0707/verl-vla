@@ -22,9 +22,6 @@ cannot be inferred reliably from the code alone.
   experiments. Each maintained workflow should provide a reproducible Docker
   environment and a minimal launcher that takes the user from required inputs
   to a useful result.
-- The project is still evolving. Prefer a clean, coherent architecture over
-  compatibility with unused internal APIs, aliases, or configuration fields.
-  Add a compatibility path only for a concrete, identified consumer.
 - Do not turn verl-vla into an owner of upstream policies, simulators, robot
   runtimes, or datasets. Integrate their public contracts and pin a verified
   environment where needed; upstream-specific implementation remains upstream.
@@ -93,6 +90,11 @@ cannot be inferred reliably from the code alone.
 
 ## Coding Conventions
 
+- During refactors, do not preserve legacy APIs, data formats, aliases, or
+  configuration fields by default; remove the old path instead of accumulating
+  compatibility branches and redundant code. Add compatibility only for a
+  concrete, identified consumer. Prefer deterministic behavior and optimize
+  implementation choices for clarity and simplicity.
 - Treat tensors, `DataProto` objects, configuration objects, and similar
   structured data as explicit contracts. Use one canonical access and parsing
   path; do not add defensive fallback chains, repeated shape/type guesses,
