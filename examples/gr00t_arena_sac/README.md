@@ -253,9 +253,8 @@ gr00t_n1d6/
 │                        #   checkpoint state-dict remap / critic extraction
 ├── critic/              # SAC critic backends (used only when adapter.critic.enabled)
 │   ├── base.py          #   CriticBackend ABC (scores the normalised full_action)
+│   ├── backends.py      #   cross-attention and mean-pool backend adapters
 │   ├── group.py         #   shared critic module group (heads + optional cross-attn / pool proj)
-│   ├── critic_cross_attn.py  # cross-attention critic backend
-│   ├── critic_mean_pool.py   # mean-pool critic backend
 │   └── mlp.py           #   critic MLP (SiLU + optional LayerNorm)
 └── policy/              # per-embodiment IO adapters for the external GR00T policy
     ├── base.py          #   policy IO contract (mirrors pi0_torch/policy/base.py)
