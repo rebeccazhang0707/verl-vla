@@ -1,54 +1,106 @@
 # Copyright 2026 Bytedance Ltd. and/or its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
-
-# Isaac Lab Arena simulator configuration for the LIBERO-in-Arena task (Franka, eef_pose).
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# NOTE: requires the Isaac Sim GR00T docker image (isaaclab_arena:cuda_gr00t_gn16)
-# and the external Arena LIBERO environment. Launch via
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Isaac Lab Arena simulator configuration for LIBERO tasks using Franka EEF control.
+#
+# This configuration requires the Isaac Sim GR00T image
+# (isaaclab_arena:cuda_gr00t_gn16) and the external Arena LIBERO environment.
+# Launch it through
 # examples/arena_sac/run_gr00t_arena_libero_sac.sh (train) or
 # run_gr00t_arena_libero_spatial_task3_eval.sh (eval).
 
+# Typed configuration constructed by Hydra.
 _target_: verl_vla.envs.arena.config.ArenaLiberoSimulatorConfig
 
+# Simulator backend -----------------------------------------------------------
+
+# Simulator backend selected by EnvWorker.
 simulator_type: arena
 
-# Embodiment adapter: Franka end-effector Abs-IK (sim: pos+quat+gripper).
-arena_state_mode: eef_pose
-
+# Random seed for Arena placement and simulator initialization.
 seed: 42
 
-# GR00T rel_rotvec LIBERO: policy pos(3)+rotvec(3)+gripper(1)=7.
-# Sim Abs-IK action is pos(3)+quat_xyzw(4)+gripper(1)=8 (rotvec<->quat in embodiment).
+# Policy and embodiment -------------------------------------------------------
+
+# Franka end-effector absolute-IK adapter. Simulator actions contain position,
+# quaternion, and gripper commands.
+arena_state_mode: eef_pose
+
+# GR00T LIBERO action width: position (3), relative rotation vector (3), and
+# gripper (1). The embodiment adapter converts this to the simulator's 8-D
+# absolute-IK action containing an XYZW quaternion.
 action_dim: 7
+
+# Policy state width exposed by the Franka embodiment adapter.
 state_dim: 7
 
-# LIBERO benchmark migrated into Arena as an external environment.
+# External environment --------------------------------------------------------
+
+# Arena environment name used for the migrated LIBERO benchmark.
 env_name: libero
+
+# Import path for the external Arena LIBERO environment implementation.
 external_env_class_path: isaaclab_arena_examples.external_environments.libero:LiberoEnvironment
-# Nominal robot type for recorder metadata (LIBERO uses NoEmbodiment + ported Abs-IK cfg).
+
+# Robot name stored in recorder metadata. Arena itself uses NoEmbodiment with
+# the ported absolute-IK configuration.
 embodiment: franka
+
+# Fallback language instruction when the external task provides none.
 task_description: Complete the LIBERO manipulation task.
 
-# LIBERO task selection (task suite + id within the suite).
+# LIBERO task suite to load through the external environment.
 libero_task_suite: libero_spatial
+
+# Zero-based task index within the selected LIBERO suite.
 libero_task_id: 3
 
+# Observations and recording --------------------------------------------------
+
+# Enable camera sensors in the Arena environment.
 enable_cameras: true
-# Franka cameras (agentview + eye-in-hand) in one flat list, read from camera_obs
-# with Arena ``{sensor}_{dtype}`` naming (same as G1/GR1).
+
+# Camera observations exported to the policy and recorder. Arena reads these
+# from camera_obs using its {sensor}_{dtype} naming convention.
 camera_names:
   - agentview_cam_rgb
   - eye_in_hand_cam_rgb
+
+# Expected height, width, and channel count for recorder metadata.
 image_shape:
   - 224
   - 224
   - 3
 
+# Reward ----------------------------------------------------------------------
+
+# Replace the absent native task reward with a sparse success reward.
 rl_success_reward: true
+
+# Use final task success rather than graded subtask progress.
 subtask_reward: false
 
+# Arena runtime ---------------------------------------------------------------
+
+# Spacing between vectorized Arena environments.
 env_spacing: 3.0
+
+# Whether to disable Isaac Lab Fabric in the simulator.
 disable_fabric: false
+
+# Whether Arena should solve scene relation constraints during construction.
 solve_relations: true
+
+# Enable Pinocchio support in the Arena environment.
 enable_pinocchio: true

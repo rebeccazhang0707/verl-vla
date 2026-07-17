@@ -13,7 +13,6 @@
 # limitations under the License.
 
 # GR00T N1.6 compatibility fields for verl/FSDP and deterministic rollout.
-# SAC / critic / Flow-SDE defaults live in model/adapter/gr00t.yaml.
 
 # Compatibility metadata used by verl's sequence-parallel config patch.
 num_attention_heads: 32

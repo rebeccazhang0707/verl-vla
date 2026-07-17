@@ -12,45 +12,67 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# GR00T N1.6 Arena / SAC adapter configuration (verl-side; not the HF policy config).
+# GR00T N1.6 Arena/SAC adapter configuration.
+# These settings belong to the verl-vla adapter, not the native Hugging Face policy.
 
-# Select the Arena policy IO adapter (Gr00tInput/Gr00tOutput).
+# Policy and embodiment -------------------------------------------------------
+
+# Policy I/O adapter registered under verl_vla.models.gr00t_n1d6.policy.
 policy_type: arena
 
-# GR00T embodiment tag (drives projector index + processor modality config).
+# Embodiment tag used to select the processor modality configuration.
 embodiment_tag: gr1
 
-# Real (unpadded) env action width + projector index for GR1.
+# Number of real environment action dimensions before GR00T padding.
 action_dim: 26
+
+# GR00T embodiment projector index for GR1.
 embodiment_id: 20
 
-# Env action chunk length executed per interaction (<= checkpoint action_horizon).
+# Number of decoded action steps executed per environment interaction.
+# This must not exceed the checkpoint action horizon.
 num_action_chunks: 16
 
-# Optional critic owned by the GR00T adapter.
+# Critic ----------------------------------------------------------------------
+
+# Optional critic owned by the adapter rather than the native GR00T policy.
 # Single-task Arena GR1 / LIBERO SAC uses one shared cross_attn critic.
 # pi05-style multi_cross_attn + task_ids is only needed when one policy trains
 # many LIBERO task_ids with separate Q-heads; Arena launchers pin one task, so
 # it is intentionally not implemented here.
 critic:
-  enabled: True
+  # Whether to construct the critic for SAC training.
+  enabled: true
+
+  # Critic architecture. cross_attn pools action tokens with learned queries.
   type: cross_attn
+
+  # Number of Q-value heads produced by the critic.
   head_num: 10
+
+  # Number of attention heads used to pool the GR00T prefix representation.
   prefix_attn_heads: 8
+
   # Critic scores only the executed chunk (not the full decoded horizon, often 50).
   action_horizon: 16
-  layernorm: False
 
-# Freeze the Eagle vision tower for online RL (mirrors pi0.5).
-freeze_vision_tower: True
+  # Whether to apply layer normalization in the critic head.
+  layernorm: false
 
-# Freeze action-head I/O adapters (default off).
-freeze_action_io: False
+# Trainable policy components -------------------------------------------------
 
-# --- Flow-SDE (stochastic flow sampler; arXiv:2510.25889) ---
+# Freeze the Eagle vision tower during online RL.
+freeze_vision_tower: true
+
+# Keep the action-head input/output adapters trainable.
+freeze_action_io: false
+
+# Flow-SDE --------------------------------------------------------------------
+
+# Stochastic flow sampler described in arXiv:2510.25889.
 # When disabled the sampler reduces bit-identically to the deterministic Euler ODE.
 # Note: GR00T integrates noise→action (t: 0→1); do not reuse pi0 formulas.
-flow_sde_enable: False
+flow_sde_enable: false
 
 # Base Flow-SDE per-step noise level.
 flow_sde_noise_level: 0.065

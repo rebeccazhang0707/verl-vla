@@ -51,7 +51,7 @@ if HAS_GROOT:
         prepare_libero_gripper_action,
     )
 
-PACKAGE_DIR = Path(__file__).parents[2] / "src/verl_vla/models/gr00t_n1d6"
+PACKAGE_DIR = Path(__file__).parents[3] / "src/verl_vla/models/gr00t_n1d6"
 
 
 # ---------------------------------------------------------------------------
