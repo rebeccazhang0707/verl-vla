@@ -104,6 +104,12 @@ cannot be inferred reliably from the code alone.
   producer and establish the correct shape at the source instead of accepting
   both shapes at the consumer. Conditional parsing is allowed only when the
   supported data sources and their distinct schemas are explicitly identified.
+- Follow existing abstract interfaces and route behavior and data through their
+  established contracts. Do not add hooks, methods, parallel interfaces, or
+  direct cross-layer access for one implementation when the existing
+  abstraction can express the requirement. Extend an abstract interface only
+  when the capability belongs to that abstraction and is shared by its
+  implementations, not merely to simplify one caller or backend.
 - Treat the `workflows/config/` YAML tree as the public configuration
   architecture and make its composition mirror runtime ownership. Each file
   should define one reusable component, workflow stage, or selectable variant;
