@@ -81,7 +81,7 @@ class ArenaXRControllerStrategy(InterventionStrategyBase):
         self._controller_refs: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self._ee_refs: dict[str, np.ndarray] = {}
         self._base_height = self._BASE_HEIGHT_INITIAL
-        self._last_command = np.zeros(50, dtype=np.float32)
+        self._last_command = self._default_command()
 
     @override
     def reset(self) -> None:
@@ -89,7 +89,7 @@ class ArenaXRControllerStrategy(InterventionStrategyBase):
         self._controller_refs.clear()
         self._ee_refs.clear()
         self._base_height = self._BASE_HEIGHT_INITIAL
-        self._last_command = np.zeros(50, dtype=np.float32)
+        self._last_command = self._default_command()
         if self._adapter is not None:
             self._adapter.reset()
 
@@ -112,8 +112,19 @@ class ArenaXRControllerStrategy(InterventionStrategyBase):
         if not self.is_intervening(device):
             return action
 
+        return self._apply_active_action(action_array, device)
+
+    @override
+    def get_action(self, device: DeviceBase) -> Any:
+        if not self.is_intervening(device):
+            self._last_command[43:46] = 0.0
+            return self._last_command.copy()
+
+        return self._apply_active_action(self._last_command, device)
+
+    def _apply_active_action(self, action_array: np.ndarray, device: DeviceBase) -> np.ndarray:
         if self._adapter is None:
-            return action
+            return action_array
 
         frame = cast(XRControllerDevice, device).latest_frame()
         self._base_height = self._base_height_from_action(action_array)
@@ -132,6 +143,11 @@ class ArenaXRControllerStrategy(InterventionStrategyBase):
         )
         self._last_command = command.astype(np.float32, copy=False)
         return self._last_command.astype(action_array.dtype, copy=False)
+
+    def _default_command(self) -> np.ndarray:
+        command = np.zeros(50, dtype=np.float32)
+        command[46] = self._BASE_HEIGHT_INITIAL
+        return command
 
     @override
     def snapshot(self, device: DeviceBase) -> dict[str, Any]:
