@@ -61,7 +61,7 @@ server:
   jpeg_quality: 100
 
   # Maximum observation stream rate; control input remains unthrottled.
-  max_fps: 25.0
+  max_fps: 30.0
 
   # Uvicorn log level for each observation server.
   log_level: warning

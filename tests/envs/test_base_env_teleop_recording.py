@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+import verl_vla.utils.envs.rate_limiter as rate_limiter_module
 from verl_vla.envs.base import BaseEnv
 
 
@@ -102,6 +103,50 @@ class FakeBaseEnv(BaseEnv):
             "task": [f"{prefix}-task-{int(env_id)}" for env_id in env_ids],
             "task_id": env_ids.astype(np.int64, copy=False),
         }
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, duration: float) -> None:
+        self.sleeps.append(duration)
+        self.now += duration
+
+    def advance(self, duration: float) -> None:
+        self.now += duration
+
+
+def test_mask_step_pacing_includes_time_between_calls(monkeypatch, caplog) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(rate_limiter_module.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(rate_limiter_module.time, "sleep", clock.sleep)
+    monkeypatch.setattr(rate_limiter_module, "_RATE_WARNING_INTERVAL_S", 0.0)
+
+    env = FakeBaseEnv(num_envs=1)
+    env.target_step_hz = 30.0
+    step_kwargs = {
+        "action": np.zeros((1, 1), dtype=np.float32),
+        "execute_mask": np.ones(1, dtype=bool),
+        "is_intervention": np.zeros(1, dtype=bool),
+        "critic_value": np.zeros(1, dtype=np.float32),
+    }
+
+    env.mask_step(**step_kwargs)
+    clock.advance(0.01)
+    env.mask_step(**step_kwargs)
+
+    assert clock.sleeps == [pytest.approx(1.0 / 30.0 - 0.01)]
+    assert "cannot sustain target rate" not in caplog.text
+
+    clock.advance(0.05)
+    env.mask_step(**step_kwargs)
+
+    assert "target=30.00Hz actual=20.00Hz" in caplog.text
 
 
 @pytest.mark.parametrize(

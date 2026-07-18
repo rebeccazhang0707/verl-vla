@@ -52,6 +52,7 @@ class EnvWorkerConfig(BaseConfig):
     auto_reset: bool = False
     confirm_before_record: bool = False
     log_step_latency: bool = False
+    target_step_hz: float | None = None
     modes: list[str] = field(default_factory=lambda: ["train"])
     num_envs: int = 1
     simulator: SimulatorConfig = field(default_factory=SimulatorConfig)
@@ -73,6 +74,8 @@ class EnvWorkerConfig(BaseConfig):
             object.__setattr__(self, "recorder", instantiate(self.recorder))
         if self.num_envs <= 0:
             raise ValueError(f"num_envs must be positive, got {self.num_envs}")
+        if self.target_step_hz is not None and self.target_step_hz <= 0:
+            raise ValueError(f"target_step_hz must be positive when set, got {self.target_step_hz}")
         if self.simulator_start_timeout_s <= 0:
             raise ValueError(f"simulator_start_timeout_s must be positive, got {self.simulator_start_timeout_s}")
         if not set(self.modes).issubset({"train", "eval"}):

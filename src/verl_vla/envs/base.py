@@ -26,6 +26,7 @@ from typing_extensions import override
 
 from verl_vla.recorder import MultiRecorder
 from verl_vla.teleop import TeleopController
+from verl_vla.utils.envs.rate_limiter import pace_calls
 
 
 class BaseEnv(gym.Env):
@@ -68,6 +69,7 @@ class BaseEnv(gym.Env):
         self.num_envs = int(cfg.num_envs)
         self.auto_reset_enabled = bool(cfg.get("auto_reset", False))
         self.log_step_latency = bool(cfg.log_step_latency)
+        self.target_step_hz = None if cfg.target_step_hz is None else float(cfg.target_step_hz)
         self._step_latency_count = 0
         self._latest_obs = None
 
@@ -274,6 +276,7 @@ class BaseEnv(gym.Env):
             "reset_eval": reset_eval,
         }
 
+    @pace_calls("target_step_hz")
     def mask_step(self, action, execute_mask, is_intervention, critic_value, manual_reward=None, force_truncated=None):
         """Step selected envs and apply optional manual record overrides.
 
