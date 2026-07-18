@@ -229,7 +229,7 @@ limitations under the License.
       }
     }
 
-    function renderImage(name, dataUrl) {
+    function renderImage(name, blob) {
       const imageGrid = document.getElementById("image-grid");
       let card = imageCards.get(name);
       let created = false;
@@ -250,7 +250,14 @@ limitations under the License.
         imageCards.set(name, card);
         created = true;
       }
-      card.querySelector("img").src = dataUrl;
+      const image = card.querySelector("img");
+      const previousUrl = image.dataset.objectUrl;
+      const objectUrl = URL.createObjectURL(blob);
+      image.src = objectUrl;
+      image.dataset.objectUrl = objectUrl;
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
       return created;
     }
 
@@ -305,7 +312,7 @@ limitations under the License.
       document.getElementById("theme-toggle").textContent = `Theme: ${normalized}`;
     }
 
-    function renderObs(obs) {
+    function renderObs(obs, images) {
       document.getElementById("env-id").textContent = obs.env_id ?? "-";
       document.getElementById("step").textContent = obs.step ?? "-";
       renderDataInto(document.getElementById("state"), {
@@ -314,22 +321,26 @@ limitations under the License.
         extra: obs.extra,
         timestamp: obs.timestamp
       });
-      if (obs.teleop) {
-        renderInput(obs.teleop);
+      frames += 1;
+      const now = performance.now();
+      if (now - lastFpsAt > 1000) {
+        document.getElementById("fps").textContent = frames.toString();
+        frames = 0;
+        lastFpsAt = now;
       }
-      const images = obs.images || {};
-      const imageNames = new Set(Object.keys(images));
-      let firstImageDataUrl = null;
+      const imageNames = new Set(images.keys());
       let shouldSyncImageLayout = false;
-      for (const [name, data] of Object.entries(images)) {
-        const dataUrl = "data:image/jpeg;base64," + data;
-        shouldSyncImageLayout = renderImage(name, dataUrl) || shouldSyncImageLayout;
-        if (!firstImageDataUrl) {
-          firstImageDataUrl = dataUrl;
+      let firstImage = true;
+      for (const [name, blob] of images.entries()) {
+        shouldSyncImageLayout = renderImage(name, blob) || shouldSyncImageLayout;
+        if (firstImage) {
+          xrRenderer.setImage(imageCards.get(name).querySelector("img"));
+          firstImage = false;
         }
       }
       for (const [name, card] of imageCards.entries()) {
         if (!imageNames.has(name)) {
+          URL.revokeObjectURL(card.querySelector("img").dataset.objectUrl);
           card.remove();
           imageCards.delete(name);
           shouldSyncImageLayout = true;
@@ -342,28 +353,49 @@ limitations under the License.
       if (shouldSyncImageLayout) {
         updateImageSelection({animate: false});
       }
-      if (firstImageDataUrl) {
-        updateXRObsImage(firstImageDataUrl);
+    }
+
+    function parseBinaryObservation(buffer) {
+      if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 4) {
+        throw new Error("invalid binary observation prefix");
       }
-      frames += 1;
-      const now = performance.now();
-      if (now - lastFpsAt > 1000) {
-        document.getElementById("fps").textContent = frames.toString();
-        frames = 0;
-        lastFpsAt = now;
+      const view = new DataView(buffer);
+      const headerLength = view.getUint32(0, false);
+      const headerStart = 4;
+      const headerEnd = headerStart + headerLength;
+      if (headerEnd > buffer.byteLength) {
+        throw new Error("invalid binary observation header length");
       }
+      const headerBytes = new Uint8Array(buffer, headerStart, headerLength);
+      const obs = JSON.parse(new TextDecoder().decode(headerBytes));
+
+      const images = new Map();
+      let imageStart = headerEnd;
+      for (const {name, length} of obs.images) {
+        const bytes = new Uint8Array(buffer, imageStart, length);
+        images.set(name, new Blob([bytes], {type: "image/jpeg"}));
+        imageStart += length;
+      }
+      return {obs, images};
     }
 
     function connectObsStream() {
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
       const socket = new WebSocket(`${protocol}://${window.location.host}/ws/obs`);
+      socket.binaryType = "arraybuffer";
       const status = document.getElementById("ws-status");
 
       socket.onopen = () => {
         status.textContent = "connected";
       };
       socket.onmessage = (event) => {
-        renderObs(JSON.parse(event.data));
+        try {
+          const {obs, images} = parseBinaryObservation(event.data);
+          renderObs(obs, images);
+        } catch (error) {
+          console.error(error);
+          status.textContent = "error";
+        }
       };
       socket.onerror = () => {
         status.textContent = "error";
@@ -372,10 +404,6 @@ limitations under the License.
         status.textContent = "reconnecting";
         setTimeout(connectObsStream, 1000);
       };
-    }
-
-    function updateXRObsImage(dataUrl) {
-      xrRenderer.setImage(dataUrl);
     }
 
     function connectInputStream() {

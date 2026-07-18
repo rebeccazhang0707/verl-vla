@@ -26,16 +26,15 @@ class TeleopXRRenderer {
     this.texCoordBuffer = null;
   }
 
-  setImage(dataUrl) {
-    if (!this.obsImage) {
-      this.obsImage = new Image();
-      this.obsImage.onload = () => {
-        this.obsTextureDirty = true;
-      };
+  setImage(image) {
+    if (this.obsImage === image) {
+      return;
     }
-    if (this.obsImage.src !== dataUrl) {
-      this.obsImage.src = dataUrl;
-    }
+    this.obsImage = image;
+    this.obsImage.addEventListener("load", () => {
+      this.obsTextureDirty = true;
+    });
+    this.obsTextureDirty = this.obsImage.complete;
   }
 
   async prepareSession(session) {

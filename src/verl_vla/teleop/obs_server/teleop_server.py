@@ -12,11 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import base64
+import json
 import logging
 import queue
+import struct
 import time
-from threading import Lock
+from dataclasses import dataclass
+from threading import Event, Lock, Thread
 from typing import Any, Callable
 
 import cv2
@@ -47,7 +49,7 @@ def _as_jsonable(value: Any) -> Any:
     return value
 
 
-def encode_jpeg_base64(image: np.ndarray, quality: int = 80) -> str:
+def _encode_jpeg(image: np.ndarray, quality: int) -> bytes:
     if image.ndim != 3 or image.shape[-1] != 3:
         raise ValueError(f"Expected an HWC RGB image, got shape {image.shape}")
 
@@ -62,7 +64,27 @@ def encode_jpeg_base64(image: np.ndarray, quality: int = 80) -> str:
     )
     if not success:
         raise RuntimeError("Failed to encode observation image as JPEG")
-    return base64.b64encode(encoded.tobytes()).decode("ascii")
+    return encoded.tobytes()
+
+
+def _pack_frame(metadata: dict[str, Any], images: dict[str, bytes]) -> bytes:
+    header = {
+        **metadata,
+        "images": [{"name": name, "length": len(jpeg)} for name, jpeg in images.items()],
+    }
+    header_bytes = json.dumps(header, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return struct.pack("!I", len(header_bytes)) + header_bytes + b"".join(images.values())
+
+
+def _put_latest(target: queue.Queue, item: Any) -> None:
+    try:
+        target.get_nowait()
+    except queue.Empty:
+        pass
+    try:
+        target.put_nowait(item)
+    except queue.Full:
+        pass
 
 
 class ObsStore:
@@ -71,8 +93,8 @@ class ObsStore:
         self.port = port
         self.jpeg_quality = jpeg_quality
         self._lock = Lock()
-        self._latest: dict[str, Any] | None = None
-        self._subscribers: set[queue.Queue] = set()
+        self._latest: bytes | None = None
+        self._subscribers: set[queue.Queue[bytes]] = set()
 
     def update(
         self,
@@ -83,69 +105,45 @@ class ObsStore:
         extra: dict[str, Any] | None = None,
         task_description: str | None = None,
     ) -> None:
-        encoded_images = {
-            str(name): encode_jpeg_base64(image, quality=self.jpeg_quality) for name, image in images.items()
-        }
-        payload = {
-            "env_id": self.env_id,
-            "port": self.port,
-            "step": int(step),
-            "timestamp": time.time(),
-            "task_description": task_description,
-            "images": encoded_images,
-            "state": _as_jsonable(state) if state is not None else None,
-            "extra": _as_jsonable(extra or {}),
-        }
+        frame = _pack_frame(
+            {
+                "env_id": self.env_id,
+                "port": self.port,
+                "step": int(step),
+                "timestamp": time.time(),
+                "task_description": task_description,
+                "state": state,
+                "extra": extra or {},
+            },
+            {str(name): _encode_jpeg(image, self.jpeg_quality) for name, image in images.items()},
+        )
         with self._lock:
-            self._latest = payload
-            subscribers = list(self._subscribers)
+            self._latest = frame
+            subscribers = tuple(self._subscribers)
         for subscriber in subscribers:
-            self._put_latest(subscriber, payload)
+            _put_latest(subscriber, frame)
 
-    def latest(self) -> dict[str, Any]:
-        with self._lock:
-            if self._latest is None:
-                return {
-                    "env_id": self.env_id,
-                    "port": self.port,
-                    "step": None,
-                    "timestamp": None,
-                    "task_description": None,
-                    "images": {},
-                    "state": None,
-                    "extra": {},
-                }
-            return dict(self._latest)
-
-    def subscribe(self) -> queue.Queue:
-        subscriber = queue.Queue(maxsize=1)
+    def subscribe(self) -> queue.Queue[bytes]:
+        subscriber: queue.Queue[bytes] = queue.Queue(maxsize=1)
         with self._lock:
             self._subscribers.add(subscriber)
             latest = self._latest
         if latest is not None:
-            self._put_latest(subscriber, latest)
+            _put_latest(subscriber, latest)
         return subscriber
 
-    def unsubscribe(self, subscriber: queue.Queue) -> None:
+    def unsubscribe(self, subscriber: queue.Queue[bytes]) -> None:
         with self._lock:
             self._subscribers.discard(subscriber)
 
-    @staticmethod
-    def _put_latest(subscriber: queue.Queue, payload: dict[str, Any]) -> None:
-        try:
-            subscriber.put_nowait(payload)
-            return
-        except queue.Full:
-            pass
 
-        try:
-            subscriber.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            subscriber.put_nowait(payload)
-        except queue.Full:
-            pass
+@dataclass(frozen=True)
+class _ObservationFrame:
+    step: int
+    images: dict[str, np.ndarray]
+    state: Any | None
+    extra: dict[str, Any]
+    task_description: str | None
 
 
 class TeleopServer:
@@ -168,6 +166,9 @@ class TeleopServer:
         self._step = 0
         self._store: ObsStore | None = None
         self._server: TeleopObsServer | None = None
+        self._pending_frames: queue.Queue[_ObservationFrame] = queue.Queue(maxsize=1)
+        self._publisher_stop = Event()
+        self._publisher_thread: Thread | None = None
 
     @classmethod
     def from_cfg(
@@ -214,6 +215,13 @@ class TeleopServer:
         server.start()
         self._store = store
         self._server = server
+        self._publisher_stop.clear()
+        self._publisher_thread = Thread(
+            target=self._publish_loop,
+            name=f"teleop-publisher-{self.rank}-{self.stage_id}-{self.env_id}",
+            daemon=True,
+        )
+        self._publisher_thread.start()
         print(
             f"[teleop] rank={self.rank} stage={self.stage_id} env={self.env_id} obs_url={server.url}",
             flush=True,
@@ -237,19 +245,58 @@ class TeleopServer:
         if self._store is None:
             return
         self._step += 1
-        self._store.update(
+        frame = _ObservationFrame(
             step=self._step,
-            images=images,
-            state=state,
-            extra=extra,
+            images={str(name): np.array(image, copy=True, order="C") for name, image in images.items()},
+            state=_as_jsonable(state) if state is not None else None,
+            extra=_as_jsonable(extra or {}),
             task_description=task_description,
         )
+        _put_latest(self._pending_frames, frame)
+
+    def _publish_loop(self) -> None:
+        min_interval_s = 1.0 / self.cfg.max_fps
+        last_publish_at = 0.0
+        while not self._publisher_stop.is_set():
+            try:
+                frame = self._pending_frames.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            wait_s = last_publish_at + min_interval_s - time.monotonic()
+            if wait_s > 0 and self._publisher_stop.wait(wait_s):
+                return
+
+            try:
+                while True:
+                    frame = self._pending_frames.get_nowait()
+            except queue.Empty:
+                pass
+
+            store = self._store
+            if store is None:
+                return
+            try:
+                store.update(
+                    step=frame.step,
+                    images=frame.images,
+                    state=frame.state,
+                    extra=frame.extra,
+                    task_description=frame.task_description,
+                )
+            except Exception:
+                logger.exception("Failed to encode teleop observation frame")
+            last_publish_at = time.monotonic()
 
     def write_console(self, text: str) -> None:
         if self._server is not None:
             self._server.console.write_backend(text)
 
     def close(self) -> None:
+        self._publisher_stop.set()
+        if self._publisher_thread is not None:
+            self._publisher_thread.join()
+        self._publisher_thread = None
         if self._server is not None:
             self._server.stop()
         self._server = None

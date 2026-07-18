@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from verl_vla.teleop.obs_server.teleop_server import ObsStore
 
-
 _HTML_DIR = Path(__file__).with_name("html")
 _INDEX_HTML_PATH = _HTML_DIR / "index.html"
 
@@ -119,13 +118,6 @@ def create_app(
             .replace("__TELEOP_DEVICE_CONFIGS__", json.dumps(device_configs))
         )
 
-    @app.get("/api/obs/latest")
-    def latest_obs():
-        payload = store.latest()
-        if latest_input_fn is not None:
-            payload["teleop"] = latest_input_fn()
-        return payload
-
     @app.get("/api/health")
     def health():
         return {"status": "ok", "env_id": store.env_id, "port": store.port}
@@ -160,12 +152,13 @@ def create_app(
         subscriber = store.subscribe()
         try:
             while True:
-                payload = await asyncio.to_thread(subscriber.get)
-                if latest_input_fn is not None:
-                    payload = dict(payload)
-                    payload["teleop"] = latest_input_fn()
-                await websocket.send_json(payload)
-        except WebSocketDisconnect:
+                try:
+                    frame = await asyncio.to_thread(subscriber.get, timeout=0.2)
+                except queue.Empty:
+                    continue
+
+                await websocket.send_bytes(frame)
+        except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
             pass
         finally:
             store.unsubscribe(subscriber)

@@ -21,7 +21,8 @@ class TeleopServerConfig:
     base_port: int = 18000
     rank_stride: int = 10000
     stage_stride: int = 1000
-    jpeg_quality: int = 80
+    jpeg_quality: int = 100
+    max_fps: float = 25.0
     log_level: str = "warning"
     ssl_certfile: str | None = None
     ssl_keyfile: str | None = None
