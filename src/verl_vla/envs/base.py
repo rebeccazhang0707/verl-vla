@@ -67,6 +67,8 @@ class BaseEnv(gym.Env):
         self.stage_id = stage_id
         self.num_envs = int(cfg.num_envs)
         self.auto_reset_enabled = bool(cfg.get("auto_reset", False))
+        self.log_step_latency = bool(cfg.log_step_latency)
+        self._step_latency_count = 0
         self._latest_obs = None
 
         self.env_init()
@@ -292,11 +294,14 @@ class BaseEnv(gym.Env):
             ``local_id`` position ``i`` corresponds to global env id
             ``env_ids[i]``.
         """
+        total_start = time.perf_counter() if self.log_step_latency else None
         is_intervention = np.asarray(is_intervention, dtype=bool)
         env_ids = np.flatnonzero(execute_mask)
         action = action[env_ids]
 
+        env_step_start = time.perf_counter() if self.log_step_latency else None
         result = self.env_step(action, env_ids=env_ids)
+        env_step_ms = (time.perf_counter() - env_step_start) * 1000 if env_step_start is not None else 0.0
         result = self._apply_manual_step_overrides(
             result,
             env_ids=env_ids,
@@ -305,7 +310,12 @@ class BaseEnv(gym.Env):
         )
 
         critic_value = critic_value[env_ids]
+        teleop_publish_start = time.perf_counter() if self.log_step_latency else None
         self.publish_to_teleop(result, env_ids=env_ids, critic_value=critic_value)
+        teleop_publish_ms = (
+            (time.perf_counter() - teleop_publish_start) * 1000 if teleop_publish_start is not None else 0.0
+        )
+        record_start = time.perf_counter() if self.log_step_latency else None
         self.record_step_result(
             result,
             action,
@@ -313,7 +323,18 @@ class BaseEnv(gym.Env):
             is_intervention=is_intervention,
             critic_value=critic_value,
         )
+        record_ms = (time.perf_counter() - record_start) * 1000 if record_start is not None else 0.0
         self._update_latest_obs(env_ids, result)
+        if total_start is not None:
+            total_ms = (time.perf_counter() - total_start) * 1000
+            self._step_latency_count += 1
+            print(
+                f"[step-latency] rank={self.rank} stage={self.stage_id} env={self.env_type} "
+                f"step={self._step_latency_count} num_envs={len(env_ids)} "
+                f"env_step_ms={env_step_ms:.2f} teleop_publish_ms={teleop_publish_ms:.2f} "
+                f"record_ms={record_ms:.2f} total_ms={total_ms:.2f}",
+                flush=True,
+            )
         return result
 
     def _apply_manual_step_overrides(self, result, *, env_ids, manual_reward=None, force_truncated=None):

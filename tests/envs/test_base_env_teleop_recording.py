@@ -40,6 +40,8 @@ class FakeBaseEnv(BaseEnv):
     ) -> None:
         self.num_envs = num_envs
         self.auto_reset_enabled = auto_reset
+        self.log_step_latency = False
+        self._step_latency_count = 0
         self._latest_obs = self._make_obs("initial", np.arange(num_envs))
         self.teleops = []
         self.recorder = None
