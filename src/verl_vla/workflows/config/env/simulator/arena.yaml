@@ -45,6 +45,15 @@ seed: 42
 # Whether the selected Arena environment enables camera sensors.
 enable_cameras: true
 
+# Optional physics integration period override; null preserves the selected Arena environment default.
+sim_dt: null
+
+# Optional physics substeps per control step override; null preserves the selected Arena environment default.
+decimation: null
+
+# Optional physics steps per render override; null preserves the selected Arena environment default.
+render_interval: null
+
 # Whether to install the Arena task-success reward.
 rl_success_reward: true
 

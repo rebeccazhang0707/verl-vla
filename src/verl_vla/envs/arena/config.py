@@ -72,6 +72,9 @@ class ArenaSimulatorConfig(BaseConfig):
 
     seed: int = 42
     enable_cameras: bool = True
+    sim_dt: float | None = None
+    decimation: int | None = None
+    render_interval: int | None = None
     rl_success_reward: bool = True
     disable_fabric: bool = False
     solve_relations: bool = True

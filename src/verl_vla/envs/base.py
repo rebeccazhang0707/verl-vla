@@ -242,6 +242,9 @@ class BaseEnv(gym.Env):
                 eval_episode_id: Optional array with shape ``[B]`` containing
                     eval benchmark ids for fixed-case deduplication and repeat
                     quotas.
+                teleop_images: Optional sequence of per-env image dictionaries
+                    appended to the normalized observation images for teleop
+                    publishing only.
                 next.reward: Array or tensor with shape ``[B]`` containing the
                     reward after stepping.
                 next.terminated: Boolean array or tensor with shape ``[B]``
@@ -587,12 +590,15 @@ class BaseEnv(gym.Env):
         terminations = step_result["next.terminated"]
         truncations = step_result["next.truncated"]
         successes = step_result["next.success"]
+        additional_images = step_result.get("teleop_images")
 
         for local_id, env_id in enumerate(env_ids):
             teleop = self.teleops[env_id]
 
             observation = observations[local_id]
             images = {key: value for key, value in observation.items() if key.startswith("observation.images.")}
+            if additional_images is not None:
+                images.update(additional_images[local_id])
             state = observation.get("observation.state")
             extra = {
                 "rank": self.rank,

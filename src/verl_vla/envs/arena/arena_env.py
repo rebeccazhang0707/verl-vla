@@ -73,6 +73,7 @@ class IsaacLabArenaEnv(BaseEnv):
         self.seed = int(self.arena_cfg.seed) + int(rank)
         self.device = getattr(cfg, "device", None) or "cuda:0"
         self.enable_cameras = self.arena_cfg.enable_cameras
+        self.enable_teleop_viewer_camera = bool(self.arena_cfg.environment == "g1" and cfg.teleop.enable)
         self.camera_names = list(self.environment_cfg.camera_names)
         self.task_description = self.environment_cfg.task_description
 
@@ -166,6 +167,22 @@ class IsaacLabArenaEnv(BaseEnv):
 
         env_builder = ArenaEnvBuilder(arena_env, args)
         _, env_cfg = env_builder.build_registered()
+
+        # Apply caller-provided timing overrides while preserving Arena defaults when unset.
+        if self.arena_cfg.sim_dt is not None:
+            env_cfg.sim.dt = float(self.arena_cfg.sim_dt)
+        if self.arena_cfg.decimation is not None:
+            env_cfg.decimation = int(self.arena_cfg.decimation)
+        if self.arena_cfg.render_interval is not None:
+            env_cfg.sim.render_interval = int(self.arena_cfg.render_interval)
+
+        # Disable Arena's internal recorder because verl-vla owns recording lifecycle.
+        from isaaclab.managers.recorder_manager import RecorderManagerBaseCfg
+
+        env_cfg.recorders = RecorderManagerBaseCfg()
+
+        self._add_teleop_viewer_camera(env_cfg)
+
         # Embodiment-owned cfg patch: for G1/GR1 this turns composite-success into a
         # sparse RL reward (gated on rl_success_reward) -- WITHOUT touching the
         # termination terms, so IsaacLab keeps owning auto-reset (episode horizon stays
@@ -184,11 +201,37 @@ class IsaacLabArenaEnv(BaseEnv):
         if action_mgr is not None:
             self.action_dim = int(action_mgr.total_action_dim)
         logger.info(
-            "Arena environment initialised: state_mode=%s action_dim=%d state_dim=%d cameras=%s",
+            "Arena environment initialised: state_mode=%s action_dim=%d state_dim=%d cameras=%s "
+            "sim_dt=%s decimation=%d render_interval=%d",
             self.embodiment.state_mode,
             self.action_dim,
             self.state_dim,
             self.camera_names,
+            env_cfg.sim.dt,
+            env_cfg.decimation,
+            env_cfg.sim.render_interval,
+        )
+
+    def _add_teleop_viewer_camera(self, env_cfg) -> None:
+        if not self.enable_teleop_viewer_camera:
+            return
+
+        from isaaclab import sim as sim_utils
+        from isaaclab.sensors import TiledCameraCfg
+
+        height, width, _ = self.environment_cfg.image_shape
+        env_cfg.scene.teleop_viewer_camera = TiledCameraCfg(
+            prim_path="{ENV_REGEX_NS}/TeleopViewerCamera",
+            update_period=0.0,
+            height=int(height),
+            width=int(width),
+            data_types=["rgb"],
+            spawn=sim_utils.PinholeCameraCfg(focal_length=10.0, clipping_range=(0.1, 100.0)),
+            offset=TiledCameraCfg.OffsetCfg(
+                pos=(-0.49973265, 1.18229066, 0.35),
+                rot=(-0.20094651, 0.59684052, 0.7361839, -0.24786117),
+                convention="opengl",
+            ),
         )
 
     @property
@@ -256,7 +299,7 @@ class IsaacLabArenaEnv(BaseEnv):
         successes = self._extract_success(terminations)
 
         obs = self._make_obs(raw_obs, env_ids=env_ids)
-        return {
+        result = {
             "observation": obs["observation"],
             "task": obs["task"],
             "task_id": obs["task_id"],
@@ -265,6 +308,10 @@ class IsaacLabArenaEnv(BaseEnv):
             "next.truncated": to_tensor(timeouts),
             "next.success": to_tensor(successes),
         }
+        if self.enable_teleop_viewer_camera:
+            viewer_frames = self._to_numpy(self._raw_env.scene["teleop_viewer_camera"].data.output["rgb"])
+            result["teleop_images"] = [{"teleop.third_person_rgb": viewer_frames[env_id]} for env_id in env_ids]
+        return result
 
     # Stable-action adapter: temporarily replace policy actions with a held pose.
 
