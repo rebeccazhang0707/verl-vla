@@ -13,6 +13,9 @@ defaults:
   # Isaac Lab Arena simulator config.
   - /env/simulator@arena: arena
 
+  # Real Piper arm config.
+  - /env/simulator@piper: piper
+
   # Apply selector config last.
   - _self_
 

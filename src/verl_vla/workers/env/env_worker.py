@@ -169,7 +169,7 @@ class EnvWorker(Worker, DistProfilerExtension):
             # both train and eval (eval is selected via the reset_eval option at
             # reset time), so reuse the shared simulator list instead of a
             # dedicated eval one.
-            if self.simulator_type in ("arena", "isaac", "lerobot") and self.simulator_list:
+            if self.simulator_type in ("arena", "isaac", "lerobot", "piper") and self.simulator_list:
                 return self.simulator_list
             raise RuntimeError("Eval simulator is not initialized. Add 'eval' to env.env_worker.modes.")
         return self.simulator_list
@@ -251,6 +251,21 @@ class EnvWorker(Worker, DistProfilerExtension):
                         rank=self._rank,
                         world_size=self._world_size,
                         env_cls=IsaacLabArenaEnv,
+                        stage_id=stage_id,
+                        stage_num=self.stage_num,
+                        start_timeout_s=self.env_worker_cfg.simulator_start_timeout_s,
+                    )
+                )
+        elif self.simulator_type == "piper":
+            from verl_vla.envs.piper.piper_env import PiperEnv
+
+            for stage_id in range(self.stage_num):
+                self.simulator_list.append(
+                    EnvManager(
+                        self.simulator_cfg,
+                        rank=self._rank,
+                        world_size=self._world_size,
+                        env_cls=PiperEnv,
                         stage_id=stage_id,
                         stage_num=self.stage_num,
                         start_timeout_s=self.env_worker_cfg.simulator_start_timeout_s,

@@ -29,7 +29,8 @@ class LiberoLerobotStrategy(InterventionStrategyBase):
     device_type = "lerobot"
     _GRIPPER_TERM = True
 
-    def __init__(self, cfg: LerobotTeleopConfig | None = None):
+    def __init__(self, cfg: LerobotTeleopConfig | None = None, *, simulator_cfg: Any):
+        del simulator_cfg
         lerobot_cfg = cfg or LerobotTeleopConfig()
         super().__init__(lerobot_cfg)
         self.cfg = lerobot_cfg
@@ -81,6 +82,19 @@ class LiberoLerobotStrategy(InterventionStrategyBase):
             "has_pose": self._has_pose,
             "control_mode": "relative",
             "command": self._last_command.astype(float).tolist(),
+            "key_bindings": self.key_bindings(),
+        }
+
+    def key_bindings(self) -> dict[str, str]:
+        return {
+            "Space": "enter setup hold / exit intervention",
+            "Tab": "start intervention / return to setup hold",
+            "Move leader arm": "relative position control",
+            "Rotate leader wrist": "relative rotation control when enabled",
+            "Leader gripper": "open / close gripper",
+            "R": "manual reward",
+            "Backspace": "restart recording episode",
+            "Enter": "stop recording episode",
         }
 
     def handle_keyboard_events(self, events: list[dict[str, Any]]) -> None:

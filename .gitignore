@@ -133,6 +133,7 @@ log
 outputs
 .history
 certs/
+.miical_code/
 
 # documentation build artifacts
 docs/_build/

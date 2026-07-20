@@ -70,15 +70,6 @@ class KeyboardDevice(DeviceBase):
 
     def key_bindings(self) -> dict[str, str]:
         return {
-            "W/S": "-x / +x",
-            "A/D": "+y / -y",
-            "Q/E, PgUp/PgDown": "+z / -z",
-            "Z/X": "+roll / -roll",
-            "T/G, Up/Down": "+pitch / -pitch",
-            "C/V, Left/Right": "+yaw / -yaw",
-            "Space": "toggle intervention",
-            "K": "toggle gripper",
-            "L": "reset device",
             "R": "manual reward",
             "Backspace": "restart recording episode",
             "Enter": "stop recording episode",
@@ -91,6 +82,8 @@ class KeyboardDevice(DeviceBase):
         value = str(value)
         if value.startswith("Key") and len(value) == 4:
             return value[-1].upper()
+        if value.startswith("Digit") and len(value) == 6:
+            return value[-1]
         if value == "Space":
             return "SPACE"
         return value.upper()

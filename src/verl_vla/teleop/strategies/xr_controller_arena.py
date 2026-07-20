@@ -72,7 +72,10 @@ class ArenaXRControllerStrategy(InterventionStrategyBase):
     def __init__(
         self,
         cfg: XRControllerTeleopConfig | None = None,
+        *,
+        simulator_cfg: Any,
     ):
+        del simulator_cfg
         xr_cfg = cfg or XRControllerTeleopConfig()
         super().__init__(xr_cfg)
         self.cfg = xr_cfg
@@ -159,6 +162,17 @@ class ArenaXRControllerStrategy(InterventionStrategyBase):
             "adapter_ready": self._adapter is not None,
             "instructions": list(self._INSTRUCTIONS),
             **cast(XRControllerDevice, device).snapshot(),
+            "key_bindings": self.key_bindings(),
+        }
+
+    def key_bindings(self) -> dict[str, str]:
+        return {
+            "Controller grip pose": "move active wrist targets",
+            "Thumbsticks": "base locomotion and torso control",
+            "Trigger": "activate corresponding hand",
+            "A/X or Enter": "stop recording episode",
+            "B/Y or Backspace": "restart recording episode",
+            "R": "manual reward",
         }
 
     def _create_adapter(self) -> _ArenaG1EEToJointAdapter | None:

@@ -1,0 +1,104 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+
+# Minimal real Piper arm backend configuration.
+
+# Target class instantiated from this configuration.
+_target_: verl_vla.envs.piper.config.PiperConfig
+
+# Simulator backend selected by EnvWorker.
+simulator_type: piper
+
+# SocketCAN channel for each Piper arm, in policy action order.
+can_channels:
+
+  - can0
+  - can1
+
+# Human-readable name for each Piper arm.
+arm_names:
+
+  - left
+  - right
+
+# pyAgxArm model name for each Piper arm.
+robot_models:
+
+  - piper_x
+  - piper_x
+
+# CAN interface implementation passed to pyAgxArm.
+can_interface: socketcan
+
+# CAN bitrate for every configured Piper arm.
+bitrate: 1000000
+
+# Piper firmware profile passed to pyAgxArm.
+firmware_version: v189
+
+# Normal arm speed percentage used for teleop moves.
+speed_percent: 10
+
+# Arm speed percentage used while moving during reset.
+reset_speed_percent: 5
+
+# Maximum seconds to wait for reset target convergence.
+reset_timeout_s: 15.0
+
+# Seconds between reset convergence polls.
+reset_poll_interval_s: 0.1
+
+# Joint-space reset tolerance in radians.
+reset_joint_tolerance: 0.03
+
+# Optional per-arm joint targets used by reset. When null, PiperEnv captures
+# each arm's startup joint angles as the initial pose.
+initial_joint_angles: null
+
+# Task string published in observations and recordings.
+task_description: Teleoperate the Piper arms.
+
+# Maximum gripper opening width in meters.
+gripper_open_width: 0.105
+
+# Minimum gripper opening width in meters.
+gripper_close_width: 0.0
+
+# Relative gripper width change per teleop step in meters.
+gripper_width_step: 0.005
+
+# Gripper force passed to the pyAgxArm gripper command.
+gripper_force: 1.0
+
+# V4L2 camera device for each published image stream.
+camera_devices:
+
+  - /dev/video0
+  - /dev/video2
+  - /dev/video4
+
+# Observation image name for each configured camera.
+camera_names:
+
+  - left_wrist
+  - right_wrist
+  - top
+
+# Captured image height in pixels.
+image_height: 480
+
+# Captured image width in pixels.
+image_width: 640
+
+# Requested camera capture rate in frames per second.
+camera_fps: 20
+
+# Requested camera pixel format.
+camera_fourcc: MJPG
+
+# Finite-difference step in radians for numerical IK Jacobian columns.
+ik_jacobian_eps: 0.0001
+
+# Maximum joint update sent in one teleop step, in radians.
+max_joint_delta_per_step: 0.04

@@ -28,7 +28,8 @@ class LiberoGamepadStrategy(InterventionStrategyBase):
     device_type = "gamepad"
     _GRIPPER_TERM = True
 
-    def __init__(self, cfg: GamepadTeleopConfig | None = None):
+    def __init__(self, cfg: GamepadTeleopConfig | None = None, *, simulator_cfg: Any):
+        del simulator_cfg
         gamepad_cfg = cfg or GamepadTeleopConfig()
         super().__init__(gamepad_cfg)
         self.cfg = gamepad_cfg
@@ -81,6 +82,22 @@ class LiberoGamepadStrategy(InterventionStrategyBase):
             "active": self._active,
             "close_gripper": self._close_gripper,
             "command": command.astype(float).tolist(),
+            "key_bindings": self.key_bindings(),
+        }
+
+    def key_bindings(self) -> dict[str, str]:
+        return {
+            "Left Stick Y": "+x / -x",
+            "Left Stick X": "+y / -y",
+            "Right Stick Y": "+z / -z",
+            "Right Stick X": "+yaw / -yaw",
+            "D-Pad Left/Right": "+roll / -roll",
+            "D-Pad Up/Down": "+pitch / -pitch",
+            "RT": "intervention (hold)",
+            "X": "toggle gripper",
+            "LT": "restart recording episode",
+            "LB": "start/stop recording episode",
+            "RB": "manual reward",
         }
 
     def _command_from_device(self, device: DeviceBase) -> np.ndarray:

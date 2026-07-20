@@ -28,7 +28,8 @@ class LiberoKeyboardStrategy(InterventionStrategyBase):
     device_type = "keyboard"
     _GRIPPER_TERM = True
 
-    def __init__(self, cfg: KeyboardTeleopConfig | None = None):
+    def __init__(self, cfg: KeyboardTeleopConfig | None = None, *, simulator_cfg: Any):
+        del simulator_cfg
         keyboard_cfg = cfg or KeyboardTeleopConfig()
         super().__init__(keyboard_cfg)
         self.cfg = keyboard_cfg
@@ -79,6 +80,23 @@ class LiberoKeyboardStrategy(InterventionStrategyBase):
             "close_gripper": self._close_gripper,
             "gripper_active": self._gripper_active,
             "command": command.astype(float).tolist(),
+            "key_bindings": self.key_bindings(),
+        }
+
+    def key_bindings(self) -> dict[str, str]:
+        return {
+            "Space": "toggle intervention",
+            "W/S": "-x / +x",
+            "A/D": "+y / -y",
+            "Q/E, PgUp/PgDown": "+z / -z",
+            "Z/X": "+roll / -roll",
+            "T/G, Up/Down": "+pitch / -pitch",
+            "C/V, Left/Right": "+yaw / -yaw",
+            "K": "toggle gripper",
+            "L": "reset keyboard teleop",
+            "R": "manual reward",
+            "Backspace": "restart recording episode",
+            "Enter": "stop recording episode",
         }
 
     def _command_from_device(self, device: DeviceBase) -> np.ndarray:

@@ -47,6 +47,9 @@ lerobot-teleop = [
 openvla-oft = [
     "timm==0.9.16",
 ]
+piper = [
+    "pyAgxArm @ git+https://github.com/agilexrobotics/pyAgxArm.git@cc498c00af0bcb9e297943e94f4792c0e3ee5b2c",
+]
 pi0 = [
     "diffusers==0.35.1",
     "onnx-ir",

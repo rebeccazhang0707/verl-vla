@@ -33,7 +33,8 @@ class LiberoXRControllerStrategy(InterventionStrategyBase):
     _ROTATION_DELTA_FRAME = "local"
     _GRIPPER_TERM = True
 
-    def __init__(self, cfg: XRControllerTeleopConfig | None = None):
+    def __init__(self, cfg: XRControllerTeleopConfig | None = None, *, simulator_cfg: Any):
+        del simulator_cfg
         xr_cfg = cfg or XRControllerTeleopConfig()
         super().__init__(xr_cfg)
         self.cfg = xr_cfg
@@ -100,6 +101,16 @@ class LiberoXRControllerStrategy(InterventionStrategyBase):
             "is_intervening": self._active,
             "active": self._active,
             "command": self._last_command.astype(float).tolist(),
+            "key_bindings": self.key_bindings(),
+        }
+
+    def key_bindings(self) -> dict[str, str]:
+        return {
+            "Grip pose": "relative position and rotation control",
+            "Configured gripper button": "open / close gripper",
+            "A/X or Enter": "stop recording episode",
+            "B/Y or Backspace": "restart recording episode",
+            "R": "manual reward",
         }
 
     def _consume_command_from_device(self, device: DeviceBase) -> np.ndarray:

@@ -17,6 +17,7 @@ from typing import Any
 from verl_vla.teleop.strategies.base import InterventionStrategyBase
 from verl_vla.teleop.strategies.gamepad_libero import LiberoGamepadStrategy
 from verl_vla.teleop.strategies.keyboard_libero import LiberoKeyboardStrategy
+from verl_vla.teleop.strategies.keyboard_piper import PiperKeyboardStrategy
 from verl_vla.teleop.strategies.lerobot_libero import LiberoLerobotStrategy
 from verl_vla.teleop.strategies.xr_controller_arena import ArenaXRControllerStrategy
 from verl_vla.teleop.strategies.xr_controller_libero import LiberoXRControllerStrategy
@@ -30,22 +31,23 @@ class InterventionStrategyRegistry:
         key = (strategy_cls.env_type, strategy_cls.device_type)
         self._strategies[key] = strategy_cls
 
-    def get(self, env_type: str, device_type: str, cfg: Any) -> InterventionStrategyBase:
+    def get(self, env_type: str, device_type: str, cfg: Any, **strategy_kwargs: Any) -> InterventionStrategyBase:
         key = (env_type, device_type)
         if key not in self._strategies:
             raise NotImplementedError(
                 f"No teleop intervention strategy registered for env={env_type} device={device_type}"
             )
-        return self._strategies[key](cfg)
+        return self._strategies[key](cfg, **strategy_kwargs)
 
 
 _REGISTRY = InterventionStrategyRegistry()
 _REGISTRY.register(LiberoKeyboardStrategy)
+_REGISTRY.register(PiperKeyboardStrategy)
 _REGISTRY.register(LiberoXRControllerStrategy)
 _REGISTRY.register(ArenaXRControllerStrategy)
 _REGISTRY.register(LiberoGamepadStrategy)
 _REGISTRY.register(LiberoLerobotStrategy)
 
 
-def get_strategy(env_type: str, device_type: str, cfg: Any) -> InterventionStrategyBase:
-    return _REGISTRY.get(env_type, device_type, cfg)
+def get_strategy(env_type: str, device_type: str, cfg: Any, **strategy_kwargs: Any) -> InterventionStrategyBase:
+    return _REGISTRY.get(env_type, device_type, cfg, **strategy_kwargs)

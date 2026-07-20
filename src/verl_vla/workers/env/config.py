@@ -22,6 +22,7 @@ from verl.base_config import BaseConfig
 
 from verl_vla.envs.arena.config import ArenaSimulatorConfig
 from verl_vla.envs.libero.config import LiberoSimulatorConfig
+from verl_vla.envs.piper.config import PiperConfig
 from verl_vla.recorder.config import RecorderConfig
 from verl_vla.teleop.config import TeleopConfig
 
@@ -35,13 +36,16 @@ class SimulatorConfig(BaseConfig):
     simulator_type: str = "libero"
     libero: LiberoSimulatorConfig = field(default_factory=LiberoSimulatorConfig)
     arena: ArenaSimulatorConfig = field(default_factory=ArenaSimulatorConfig)
+    piper: PiperConfig = field(default_factory=PiperConfig)
 
     def __post_init__(self):
         if not isinstance(self.libero, LiberoSimulatorConfig):
             object.__setattr__(self, "libero", instantiate(self.libero))
         if not isinstance(self.arena, ArenaSimulatorConfig):
             object.__setattr__(self, "arena", instantiate(self.arena))
-        if self.simulator_type not in {"libero", "arena"}:
+        if not isinstance(self.piper, PiperConfig):
+            object.__setattr__(self, "piper", instantiate(self.piper))
+        if self.simulator_type not in {"libero", "arena", "piper"}:
             raise ValueError(f"Unsupported simulator_type: {self.simulator_type}")
 
 

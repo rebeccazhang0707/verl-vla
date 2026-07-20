@@ -536,6 +536,7 @@ class BaseEnv(gym.Env):
                 env_id=env_id,
                 env_type=self.env_type,
                 device=teleop_cfg.device or "keyboard",
+                strategy_kwargs={"simulator_cfg": getattr(self.cfg.simulator, self.env_type)},
             )
             for env_id in range(self.num_envs)
         ]
