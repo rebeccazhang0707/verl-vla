@@ -609,6 +609,21 @@ class PiperEnv(BaseEnv):
         self._arms.close()
         self._cameras.close()
 
+    @override
+    def get_recorder_strategy_kwargs(self) -> dict[str, Any]:
+        return {
+            "camera_names": tuple(str(name) for name in self.piper_cfg.camera_names),
+            "image_shape": (
+                int(self.piper_cfg.image_height),
+                int(self.piper_cfg.image_width),
+                3,
+            ),
+            "state_dim": self.state_dim,
+            "action_dim": self.action_dim,
+            "fps": int(self.cfg.recorder.video.fps),
+            "robot_type": "piper",
+        }
+
     def _validate_env_ids(self, env_ids) -> None:
         env_ids = np.asarray(env_ids, dtype=np.int64).reshape(-1)
         if len(env_ids) != 1 or int(env_ids[0]) != 0:

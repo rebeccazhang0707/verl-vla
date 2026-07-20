@@ -21,12 +21,14 @@ from collections.abc import Callable
 from .arena import ArenaLeRobotStrategy
 from .base import BaseLeRobotStrategy
 from .libero import LiberoLeRobotStrategy
+from .piper import PiperLeRobotStrategy
 
 StrategyFactory = Callable[..., BaseLeRobotStrategy]
 
 _REGISTRY: dict[str, StrategyFactory] = {
     "arena": ArenaLeRobotStrategy,
     "libero": LiberoLeRobotStrategy,
+    "piper": PiperLeRobotStrategy,
 }
 
 
