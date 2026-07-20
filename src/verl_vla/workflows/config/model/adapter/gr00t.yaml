@@ -74,6 +74,9 @@ critic:
   # Whether to apply layer normalization in the critic head.
   layernorm: false
 
+  # Projection width for pooled critic features (0 disables the projection).
+  pool_proj_dim: 0
+
 # Trainable policy components -------------------------------------------------
 
 # Freeze the Eagle vision tower during online RL.

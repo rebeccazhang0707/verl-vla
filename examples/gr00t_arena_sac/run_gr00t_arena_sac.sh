@@ -121,6 +121,23 @@ ALPHA_TYPE="${ALPHA_TYPE:-softplus}"
 AUTO_ENTROPY="${AUTO_ENTROPY:-False}"
 CRITIC_TAU="${CRITIC_TAU:-0.01}"
 
+# ── SAC stability / exploration knobs (single-variable ablation) ─────────────
+# Defaults reproduce the CURRENT config; move a single knob toward the verified
+# baseline per run. See test_scripts.sh for the ordered ablation recipes.
+EMA_DECAY="${EMA_DECAY:-null}"                                     # baseline 0.95; null disables actor EMA
+FREEZE_ACTION_IO="${FREEZE_ACTION_IO:-False}"                      # baseline True (freeze state/action encoder+decoder)
+CRITIC_POOL_PROJ_DIM="${CRITIC_POOL_PROJ_DIM:-0}"                  # baseline 256 (critic pooled-feature projection)
+CRITIC_LAYERNORM="${CRITIC_LAYERNORM:-False}"                      # baseline True
+FLOW_SDE_ENABLE="${FLOW_SDE_ENABLE:-False}"                        # baseline True (stochastic flow sampler -> real SAC exploration)
+ACTOR_POSITIVE_SAMPLE_RATIO="${ACTOR_POSITIVE_SAMPLE_RATIO:-0.9}"  # baseline 0.8
+
+# Flow-SDE noise magnitude (only used when FLOW_SDE_ENABLE=True). Lower these to
+# reduce rollout randomness. Effective rollout noise ~ beta(t) * noise_level * rollout_scale.
+FLOW_SDE_NOISE_LEVEL="${FLOW_SDE_NOISE_LEVEL:-0.065}"              # base per-step sigma0
+FLOW_SDE_ROLLOUT_NOISE_SCALE="${FLOW_SDE_ROLLOUT_NOISE_SCALE:-1.0}"  # rollout exploration multiplier
+FLOW_SDE_TRAIN_NOISE_SCALE="${FLOW_SDE_TRAIN_NOISE_SCALE:-1.0}"    # train-time noise multiplier
+FLOW_SDE_INITIAL_BETA="${FLOW_SDE_INITIAL_BETA:-1.0}"             # beta start (anneals to flow_sde_beta_min)
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 TRAINER_LOGGER="${TRAINER_LOGGER:-[console]}"
 
@@ -171,13 +188,23 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "cluster.actor_rollout_ref.actor.mini_batch_size=$MINI_BATCH_SIZE" \
   "cluster.actor_rollout_ref.actor.micro_batch_size=$MICRO_BATCH_SIZE" \
   "cluster.actor_rollout_ref.actor.actor_update_interval=$ACTOR_UPDATE_INTERVAL" \
+  "cluster.actor_rollout_ref.actor.ema_decay=$EMA_DECAY" \
   "cluster.actor_rollout_ref.actor.sac.auto_entropy=$AUTO_ENTROPY" \
   "cluster.actor_rollout_ref.actor.sac.initial_alpha=$INITIAL_ALPHA" \
   "cluster.actor_rollout_ref.actor.sac.alpha_type=$ALPHA_TYPE" \
   "cluster.actor_rollout_ref.actor.critic.tau=$CRITIC_TAU" \
   "cluster.actor_rollout_ref.actor.critic.warmup_steps=$CRITIC_WARMUP_STEPS" \
+  "cluster.actor_rollout_ref.actor.replay.actor_positive_sample_ratio=$ACTOR_POSITIVE_SAMPLE_RATIO" \
   "cluster.actor_rollout_ref.actor.replay.save_dir=$REPLAY_POOL_DIR" \
   "cluster.actor_rollout_ref.actor.replay.online_single_size=2000" \
+  "cluster.actor_rollout_ref.model.adapter.freeze_action_io=$FREEZE_ACTION_IO" \
+  "cluster.actor_rollout_ref.model.adapter.flow_sde_enable=$FLOW_SDE_ENABLE" \
+  "cluster.actor_rollout_ref.model.adapter.flow_sde_noise_level=$FLOW_SDE_NOISE_LEVEL" \
+  "cluster.actor_rollout_ref.model.adapter.flow_sde_rollout_noise_scale=$FLOW_SDE_ROLLOUT_NOISE_SCALE" \
+  "cluster.actor_rollout_ref.model.adapter.flow_sde_train_noise_scale=$FLOW_SDE_TRAIN_NOISE_SCALE" \
+  "cluster.actor_rollout_ref.model.adapter.flow_sde_initial_beta=$FLOW_SDE_INITIAL_BETA" \
+  "cluster.actor_rollout_ref.model.adapter.critic.pool_proj_dim=$CRITIC_POOL_PROJ_DIM" \
+  "cluster.actor_rollout_ref.model.adapter.critic.layernorm=$CRITIC_LAYERNORM" \
   "cluster.actor_rollout_ref.rollout.name=hf" \
   "cluster.actor_rollout_ref.rollout.output_critic_value=false" \
   "cluster.actor_rollout_ref.rollout.tensor_model_parallel_size=1" \

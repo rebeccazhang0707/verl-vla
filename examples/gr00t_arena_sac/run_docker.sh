@@ -118,6 +118,29 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-$WORKDIR/outputs/arena_gr00t_gr1_eval}"
 # root short avoids Linux's 107-byte socket-path limit.
 RAY_TMPDIR="${RAY_TMPDIR:-/tmp/ray}"
 
+# Inner train/eval scripts read their knobs from env, but docker exec/run do not
+# inherit the host env — only what we -e forward. Pass through any of these that
+# the caller set (unset ones are skipped so eval / defaults are untouched).
+INNER_FORWARD_VARS=(
+  EMA_DECAY FREEZE_ACTION_IO CRITIC_POOL_PROJ_DIM CRITIC_LAYERNORM
+  FLOW_SDE_ENABLE ACTOR_POSITIVE_SAMPLE_RATIO
+  FLOW_SDE_NOISE_LEVEL FLOW_SDE_ROLLOUT_NOISE_SCALE FLOW_SDE_TRAIN_NOISE_SCALE FLOW_SDE_INITIAL_BETA
+  CRITIC_TAU INITIAL_ALPHA ALPHA_TYPE AUTO_ENTROPY CRITIC_WARMUP_STEPS
+  ACTOR_UPDATE_INTERVAL MINI_BATCH_SIZE MICRO_BATCH_SIZE
+  MAX_INTERACTIONS TOTAL_TRAINING_STEPS ROLLOUT_INTERVAL WARM_ROLLOUT_STEPS
+  SAVE_FREQ TEST_FREQ VAL_BEFORE_TRAIN RESUME_MODE RESUME_FROM_PATH
+  TRAINER_LOGGER PROJECT_NAME EXPERIMENT_NAME REPLAY_POOL_DIR
+  NUM_NODES NUM_ENV_GPUS NUM_MODEL_GPUS NUM_ENV NUM_STAGE
+  NUM_ACTION_CHUNKS GROOT_EMBODIMENT_TAG GROOT_EMBODIMENT_ID ACTION_DIM
+  WANDB_API_KEY WANDB_MODE WANDB_ENTITY WANDB_PROJECT WANDB_BASE_URL WANDB_DIR
+)
+INNER_ENV_ARGS=()
+for _v in "${INNER_FORWARD_VARS[@]}"; do
+  if [[ -n "${!_v+x}" ]]; then
+    INNER_ENV_ARGS+=(-e "$_v")
+  fi
+done
+
 mkdir -p "$HOST_REPO/outputs"
 chmod 777 "$HOST_REPO/outputs" 2>/dev/null || true
 DOCKER_MOUNT_ARGS+=(-v "$HOST_REPO:$WORKDIR")
@@ -169,6 +192,7 @@ if [[ "$MODE" == "run" && "$DIRECT_RUN" == "1" ]]; then
     -e "ARENA_TASK=${ARENA_TASK:-}" \
     -e "TASK_SUITE=${TASK_SUITE:-}" \
     -e "TASK_ID=${TASK_ID:-}" \
+    "${INNER_ENV_ARGS[@]}" \
     -w "$WORKDIR" \
     --entrypoint bash \
     "$IMAGE" \
@@ -308,6 +332,7 @@ case "$MODE" in
       -e ARENA_TASK="${ARENA_TASK:-}" \
       -e TASK_SUITE="${TASK_SUITE:-}" \
       -e TASK_ID="${TASK_ID:-}" \
+      "${INNER_ENV_ARGS[@]}" \
       "$CONTAINER_NAME" \
       bash "$INNER_SCRIPT"
     HOST_OUTPUT="${OUTPUT_ROOT/#$WORKDIR/$HOST_REPO}"
