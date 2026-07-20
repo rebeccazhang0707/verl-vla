@@ -20,7 +20,7 @@ import argparse
 import os
 from pathlib import Path
 
-from verl_vla.utils.recorder import get_lerobot_dataset_cls
+from verl_vla.recorder import get_lerobot_dataset_cls
 
 
 def parse_args() -> argparse.Namespace:
