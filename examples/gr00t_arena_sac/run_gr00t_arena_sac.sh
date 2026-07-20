@@ -127,6 +127,9 @@ ACTOR_UPDATE_INTERVAL="${ACTOR_UPDATE_INTERVAL:-1}"
 SAVE_FREQ="${SAVE_FREQ:-500}"
 TEST_FREQ="${TEST_FREQ:--1}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
+# Trajectories aggregated per eval; Arena has no fixed benchmark, so without
+# this the eval SR is a single 0/1 episode instead of an average.
+EVAL_EPISODES="${EVAL_EPISODES:-$((NUM_ENV_GPUS * NUM_ENV))}"
 
 # ── Episodic replay collection (requires auto_reset=true, which this script sets) ──
 # Task branches may set a task-specific default above (libero: True); fall back off.
@@ -255,6 +258,7 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "trainer.warm_rollout_steps=$WARM_ROLLOUT_STEPS" \
   "trainer.save_freq=$SAVE_FREQ" \
   "trainer.test_freq=$TEST_FREQ" \
+  "trainer.eval_episodes=$EVAL_EPISODES" \
   "trainer.val_before_train=$VAL_BEFORE_TRAIN" \
   "trainer.val_only=False" \
   "trainer.episodic_replay=$EPISODIC_REPLAY" \
