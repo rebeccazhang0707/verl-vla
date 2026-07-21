@@ -110,6 +110,44 @@ def iter_lerobot_frame_records(
             yield {column: values[row_idx] for column, values in column_values.items()}
 
 
+def read_lerobot_episode_columns(
+    dataset_root: str | Path,
+    episode_index: int,
+    *,
+    columns: list[str],
+    optional_columns: list[str] | None = None,
+) -> dict[str, np.ndarray]:
+    """Read selected columns for one episode without decoding video features."""
+    episode_index = int(episode_index)
+    optional_columns = optional_columns or []
+    requested_columns = [*columns, *optional_columns]
+    tables = []
+    for data_file in list_lerobot_data_files(dataset_root):
+        names = set(pq.ParquetFile(data_file).schema_arrow.names)
+        missing_columns = [column for column in ["episode_index", "frame_index", *columns] if column not in names]
+        if missing_columns:
+            raise KeyError(f"Missing LeRobot columns in {data_file}: {missing_columns}")
+
+        read_columns = ["episode_index", "frame_index"]
+        read_columns.extend(column for column in requested_columns if column in names)
+        table = pq.read_table(data_file, columns=read_columns)
+        table = table.filter(pa.compute.equal(table["episode_index"], episode_index))
+        if table.num_rows:
+            tables.append(table)
+
+    if not tables:
+        raise ValueError(f"LeRobot episode {episode_index} has no frames under {Path(dataset_root)}.")
+
+    table = pa.concat_tables(tables, promote_options="default").sort_by("frame_index")
+    frame_indices = table["frame_index"].to_numpy().astype(np.int64, copy=False)
+    if not np.array_equal(frame_indices, np.arange(table.num_rows)):
+        raise ValueError(f"LeRobot episode {episode_index} frame_index values are not contiguous from zero.")
+
+    return {
+        column: np.asarray(table[column].to_pylist()) for column in requested_columns if column in table.column_names
+    }
+
+
 def write_lerobot_frame_columns(
     dataset_root: str | Path,
     *,

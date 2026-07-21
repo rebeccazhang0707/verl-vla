@@ -91,7 +91,7 @@ class TrainCluster:
     Public API:
         start() / shutdown(): create and tear down Ray workers/resources.
         rollout(), train(), update_weights(), eval(): env-loop RL operations.
-        record(): env-only teleop recording, optionally without collecting outputs.
+        record() / replay(): env-only teleop recording and dataset trajectory replay.
         load_checkpoint() / save_checkpoint(): actor checkpoint lifecycle.
         start_profiling(), stop_profiling(), dump_memory_snapshot(): diagnostics.
         actor_worker_group and train_world_size expose actor worker metadata.
@@ -493,17 +493,7 @@ class TrainCluster:
         return actor_wg.update_actor(data)
 
     def record(self, *, collect_dataset: bool = True) -> Path | None:
-        if self.cluster_type != "env":
-            raise RuntimeError("record is only wired for env-only train clusters.")
-        env_resource = self.config.resource.env
-        env_workers_per_node = (
-            env_resource.workers_per_node if env_resource.device == "cpu" else env_resource.gpus_per_node
-        )
-        assert env_resource.nnodes * env_workers_per_node == 1
-
-        env_wg = self.worker_groups.get(ROLE_TO_WORKER_NAME[Role.Env])
-        if env_wg is None:
-            raise RuntimeError("Env worker group is not initialized. Call start() before record().")
+        env_wg = self._single_env_worker_group("record")
         env_wg.record()
 
         if not collect_dataset:
@@ -523,6 +513,24 @@ class TrainCluster:
             video_files_size_in_mb=recorder_cfg.lerobot.video_files_size_in_mb,
         )
         return Path(output_dataset["root"])
+
+    def replay(self, episode: dict[str, Any]) -> dict[str, Any]:
+        env_wg = self._single_env_worker_group("replay")
+        results = env_wg.replay_episode(episode)
+        return results[0]
+
+    def _single_env_worker_group(self, operation: str):
+        if self.cluster_type != "env":
+            raise RuntimeError(f"{operation} is only wired for env-only train clusters.")
+        env_resource = self.config.resource.env
+        workers_per_node = env_resource.workers_per_node if env_resource.device == "cpu" else env_resource.gpus_per_node
+        worker_count = env_resource.nnodes * workers_per_node
+        if worker_count != 1:
+            raise ValueError(f"{operation} requires exactly one environment worker, got {worker_count}.")
+        env_wg = self.worker_groups.get(ROLE_TO_WORKER_NAME[Role.Env])
+        if env_wg is None:
+            raise RuntimeError(f"Env worker group is not initialized. Call start() before {operation}().")
+        return env_wg
 
     def update_weights(self) -> None:
         assert self.cluster_type == "env_loop"

@@ -1,0 +1,100 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Hydra configuration composition order.
+defaults:
+
+  # Attach the env-only TrainCluster config under `cluster`.
+  - /cluster@cluster: env_cluster
+
+  # Attach Ray initialization config under `ray_kwargs`.
+  - /ray@ray_kwargs: default
+
+  # Keep local overrides in this file taking precedence over composed defaults.
+  - _self_
+
+
+# Root directory of the local LeRobot dataset.
+root: ???
+
+# Episode indices replayed in order.
+episode_indices:
+
+  - 0
+
+# Additional dataset columns passed through to the simulator unchanged.
+extra_columns:
+
+  - info.reset_state_id
+
+
+# Playback rate relative to the dataset FPS.
+speed: 1.0
+
+# Whether to restart the selected episode sequence after it finishes.
+loop: False
+
+
+# Distributed environment cluster configuration.
+cluster:
+
+  # Cluster resource allocation.
+  resource:
+
+    # Environment worker resource allocation.
+    env:
+
+      # Number of nodes allocated to replay.
+      nnodes: 1
+
+      # Number of GPUs allocated on each node. Unused by the default CPU worker.
+      gpus_per_node: 1
+
+      # Number of CPU environment workers launched on each node.
+      workers_per_node: 1
+
+  # Environment execution configuration.
+  env:
+
+    # Environment worker configuration.
+    env_worker:
+
+      # Replay manages termination itself rather than resetting automatically.
+      auto_reset: False
+
+      # Wait for the operator to press Enter before replay begins.
+      confirm_before_record: True
+
+      # Replay currently runs one simulator environment.
+      num_envs: 1
+
+      # Replay pacing is owned by the dataset FPS and playback speed.
+      target_step_hz: null
+
+      # Read-only browser observation viewer configuration.
+      teleop:
+
+        # Start the existing observation web server.
+        enable: True
+
+        # Enable keyboard input for the Enter confirmation before replay.
+        devices:
+
+          - keyboard
+
+      # Recorder configuration.
+      recorder:
+
+        # Do not write a second dataset while replaying.
+        enable: False

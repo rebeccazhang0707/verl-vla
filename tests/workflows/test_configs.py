@@ -42,6 +42,7 @@ def test_train_workflow_config_composes(
         ("dagger", {"cluster", "max_episodes", "ray_kwargs"}),
         ("eval", {"cluster", "max_episodes", "output_dir", "ray_kwargs"}),
         ("record", {"cluster", "num_episodes", "ray_kwargs"}),
+        ("replay", {"cluster", "root", "episode_indices", "extra_columns", "speed", "loop", "ray_kwargs"}),
         ("teleop", {"cluster", "ray_kwargs"}),
     ],
 )

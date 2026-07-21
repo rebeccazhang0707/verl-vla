@@ -86,6 +86,7 @@ class MultiRecorder(BaseRecorder):
         *,
         env_id: int = 0,
         observation: dict[str, Any],
+        extra: dict[str, Any] | None = None,
         action: Any,
         task: str,
         next_reward: Any = 0.0,
@@ -99,6 +100,7 @@ class MultiRecorder(BaseRecorder):
             recorder.record_once(
                 env_id=env_id,
                 observation=observation,
+                extra=extra,
                 action=action,
                 task=task,
                 next_reward=next_reward,

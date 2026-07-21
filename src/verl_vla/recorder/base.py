@@ -30,6 +30,7 @@ class BaseRecorder(ABC):
         *,
         env_id: int = 0,
         observation: dict[str, Any],
+        extra: dict[str, Any] | None = None,
         action: Any,
         task: str,
         next_reward: Any = 0.0,

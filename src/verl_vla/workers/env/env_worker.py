@@ -376,6 +376,11 @@ class EnvWorker(Worker, DistProfilerExtension):
         self.simulator_list[0].record()
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def replay_episode(self, episode):
+        assert self.stage_num == 1
+        return self.simulator_list[0].replay_episode(**episode)
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     @DistProfiler.annotate(color="gray", role="env_finish_rollout")
     def finish_rollout(self):
         for simulator in self.simulator_list:

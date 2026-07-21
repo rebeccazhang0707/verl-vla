@@ -80,6 +80,7 @@ limitations under the License.
     let lastFpsAt = performance.now();
     let serverClockOffsetMs = null;
     let inputSocket = null;
+    let consoleSocket = null;
     let xrSession = null;
     let xrReferenceSpace = null;
     let selectedImageName = null;
@@ -476,10 +477,6 @@ limitations under the License.
       };
       inputSocket.onmessage = (event) => {
         const payload = JSON.parse(event.data);
-        if (payload.console && !payload.devices && !payload.active_device) {
-          renderConsole(payload.console);
-          return;
-        }
         if (payload.lerobot_tx) {
           lerobotDevice.handleTxPackets(payload.lerobot_tx);
         }
@@ -495,6 +492,18 @@ limitations under the License.
         status.textContent = "reconnecting";
         lerobotDevice.detach();
         setTimeout(connectInputStream, 1000);
+      };
+    }
+
+    function connectConsoleStream() {
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      consoleSocket = new WebSocket(`${protocol}://${window.location.host}/ws/console`);
+      consoleSocket.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        renderConsole(payload.console);
+      };
+      consoleSocket.onclose = () => {
+        setTimeout(connectConsoleStream, 1000);
       };
     }
 
@@ -542,11 +551,8 @@ limitations under the License.
     }
 
     function renderInput(input) {
-      if (input.console) {
-        renderConsole(input.console);
-      }
       const devices = input.devices || [];
-      const {console: _console, record_control: _recordControl, ...summaryInput} = input;
+      const {record_control: _recordControl, ...summaryInput} = input;
       let activeDevice = input.active_device || {};
       for (const device of devices) {
         if (!activeDevice.device && isDeviceIntervening(device)) {
@@ -812,6 +818,7 @@ limitations under the License.
     startNetworkProbe();
     connectObsStream();
     connectInputStream();
+    connectConsoleStream();
   </script>
 </body>
 </html>

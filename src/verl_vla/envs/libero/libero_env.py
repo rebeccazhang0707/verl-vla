@@ -322,6 +322,7 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         *,
         env_ids,
         reset_eval: bool = False,
+        extra=None,
     ):
         """Reset LIBERO envs.
 
@@ -334,13 +335,16 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
         env_ids = np.asarray(env_ids, dtype=np.int64)
         if reset_eval:
             self.reset_planner.reset_eval_cursor()
-
-        self.rollout_id += 1
         reset_states = (
             self.reset_planner.next_eval_states(len(env_ids))
             if self.only_eval
             else self.reset_planner.sample_train_states(len(env_ids))
         )
+        if extra is not None:
+            reset_states = self.reset_planner.valid_eval_states[
+                self.reset_planner.valid_eval_states[:, 2] == int(extra["info.reset_state_id"][0])
+            ]
+        self.rollout_id += 1
         self._reset_to_states(reset_states, env_ids)
 
         # Perform extra warmup steps after reset to let the observations settle.
@@ -385,6 +389,10 @@ class LiberoEnv(LiberoResetStateMixin, BaseEnv):
             "task": [self.task_descriptions[env_id] for env_id in env_ids],
             "task_id": self.task_ids[env_ids].astype(np.int64, copy=False),
             "eval_episode_id": self.eval_episode_ids[env_ids].astype(np.int64, copy=False),
+            "extra": [
+                {"info.reset_state_id": np.asarray([self.reset_state_ids[env_id]], dtype=np.int64)}
+                for env_id in env_ids
+            ],
             "next.reward": to_tensor(step_reward),
             "next.terminated": to_tensor(np.asarray(terminations, dtype=bool)),
             "next.truncated": to_tensor(np.asarray(truncations, dtype=bool)),

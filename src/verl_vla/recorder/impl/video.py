@@ -58,6 +58,7 @@ class VideoRecorder(BaseRecorder):
         *,
         env_id: int = 0,
         observation: dict[str, Any],
+        extra: dict[str, Any] | None = None,
         action: Any,
         task: str,
         next_reward: Any = 0.0,
@@ -68,7 +69,7 @@ class VideoRecorder(BaseRecorder):
         critic_value: Any = None,
     ) -> None:
         frame = self.strategy.make_frame(
-            observation=observation,
+            observation={**observation, **(extra or {})},
             action=action,
             task=task,
             next_reward=next_reward,

@@ -48,18 +48,14 @@ class WebConsoleSession:
         self._events: list[dict] = []
         self._next_id = 1
         self._input_queue: queue.Queue[str] = queue.Queue()
+        self._subscribers: set[queue.Queue[dict]] = set()
         self._append_event("backend", "Console ready.")
 
-    def snapshot(self) -> dict:
-        with self._lock:
-            return {"events": list(self._events)}
-
-    def handle_message(self, message: dict) -> dict:
+    def handle_message(self, message: dict) -> None:
         payload = message.get("payload") or {}
         text = str(payload.get("text", ""))
         self.write_frontend(text)
         self._input_queue.put(text)
-        return self.snapshot()
 
     def input(self, prompt: str) -> str:
         self.write_backend(prompt)
@@ -71,6 +67,17 @@ class WebConsoleSession:
                 self._input_queue.get_nowait()
             except queue.Empty:
                 return
+
+    def subscribe(self) -> queue.Queue[dict]:
+        subscriber: queue.Queue[dict] = queue.Queue(maxsize=1)
+        with self._lock:
+            self._subscribers.add(subscriber)
+            subscriber.put_nowait({"events": list(self._events)})
+        return subscriber
+
+    def unsubscribe(self, subscriber: queue.Queue[dict]) -> None:
+        with self._lock:
+            self._subscribers.discard(subscriber)
 
     def write_backend(self, text: str) -> None:
         if text:
@@ -92,6 +99,13 @@ class WebConsoleSession:
                 }
             )
             self._events = self._events[-200:]
+            snapshot = {"events": list(self._events)}
+            for subscriber in self._subscribers:
+                try:
+                    subscriber.get_nowait()
+                except queue.Empty:
+                    pass
+                subscriber.put_nowait(snapshot)
             return event_id
 
 
@@ -125,13 +139,8 @@ def create_app(
     @app.get("/api/input/latest")
     def latest_input():
         if latest_input_fn is not None:
-            payload = latest_input_fn()
-        else:
-            payload = {device_type: device.snapshot() for device_type, device in input_devices.items()}
-        if console is not None:
-            payload = dict(payload)
-            payload["console"] = console.snapshot()
-        return payload
+            return latest_input_fn()
+        return {device_type: device.snapshot() for device_type, device in input_devices.items()}
 
     @app.get("/api/input/drain")
     def drain_input():
@@ -173,6 +182,32 @@ def create_app(
         except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
             pass
 
+    @app.websocket("/ws/console")
+    async def console_stream(websocket: WebSocket):
+        await websocket.accept()
+        if console is None:
+            await websocket.close()
+            return
+
+        subscriber = console.subscribe()
+        disconnect = asyncio.create_task(websocket.receive())
+        try:
+            while not disconnect.done():
+                try:
+                    snapshot = await asyncio.to_thread(subscriber.get, timeout=0.2)
+                except queue.Empty:
+                    continue
+                await websocket.send_json({"console": snapshot})
+        except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            disconnect.cancel()
+            try:
+                await disconnect
+            except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                pass
+            console.unsubscribe(subscriber)
+
     @app.websocket("/ws/input")
     async def input_stream(websocket: WebSocket):
         await websocket.accept()
@@ -182,7 +217,7 @@ def create_app(
                 message_type = message.get("type")
                 if message_type == "console_text":
                     if console is not None:
-                        await websocket.send_json({"console": console.handle_message(message)})
+                        console.handle_message(message)
                     continue
                 device_type = str(message.get("device") or "")
                 if device_type not in input_devices:
@@ -215,9 +250,6 @@ def create_app(
                     payload = latest_input_fn()
                 else:
                     payload = input_devices[device_type].snapshot()
-                if console is not None:
-                    payload = dict(payload)
-                    payload["console"] = console.snapshot()
                 if device_type == "lerobot" and hasattr(input_devices[device_type], "drain_tx_packets"):
                     payload = dict(payload)
                     payload["lerobot_tx"] = input_devices[device_type].drain_tx_packets()
@@ -292,9 +324,5 @@ class TeleopObsServer:
 
     def latest_input(self) -> dict:
         if self.latest_input_fn is not None:
-            payload = self.latest_input_fn()
-        else:
-            payload = {device_type: device.snapshot() for device_type, device in self.input_devices.items()}
-        payload = dict(payload)
-        payload["console"] = self.console.snapshot()
-        return payload
+            return self.latest_input_fn()
+        return {device_type: device.snapshot() for device_type, device in self.input_devices.items()}

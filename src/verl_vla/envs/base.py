@@ -45,6 +45,7 @@ class BaseEnv(gym.Env):
         finish_rollout(): Flush any buffered recorder episodes for all envs.
         pop_completed_dataset(): Return a completed recorder dataset root for
             worker-side aggregation, if one exists.
+        replay_episode(): Reset and execute one recorded action trajectory.
 
     Hooks implemented by subclasses:
         env_type: Class attribute used for teleop and recorder strategy lookup.
@@ -202,6 +203,65 @@ class BaseEnv(gym.Env):
                 or np.asarray(step_result["next.truncated"], dtype=bool).any()
             )
 
+    def replay_episode(
+        self,
+        *,
+        episode_index: int,
+        actions: np.ndarray,
+        states: np.ndarray | None,
+        fps: float,
+        speed: float,
+        extra: dict[str, np.ndarray],
+    ) -> dict[str, Any]:
+        """Reset one environment and execute a recorded action trajectory."""
+        if self.num_envs != 1:
+            raise ValueError(f"Replay requires num_envs=1, got {self.num_envs}.")
+
+        env_ids = np.asarray([0], dtype=np.int64)
+        self.reset(options={"env_idx": env_ids, "extra": extra})
+        self.target_step_hz = fps * speed
+
+        squared_error_sum = 0.0
+        state_value_count = 0
+        max_state_error = 0.0
+        executed_frames = 0
+        replay_success = False
+        replay_return = 0.0
+        stopped_on_done = False
+
+        for frame_index, action in enumerate(actions):
+            if states is not None:
+                current_state = np.asarray(self._latest_obs["observation"][0]["observation.state"])
+                state_delta = current_state - states[frame_index]
+                squared_error_sum += float(np.square(state_delta).sum())
+                state_value_count += int(state_delta.size)
+                max_state_error = max(max_state_error, float(np.abs(state_delta).max()))
+
+            result = self.mask_step(
+                action.reshape(1, -1),
+                np.ones(1, dtype=bool),
+                is_intervention=np.zeros(1, dtype=bool),
+                critic_value=np.zeros(1, dtype=np.float32),
+            )
+            executed_frames += 1
+            replay_return += float(np.asarray(result["next.reward"])[0])
+            replay_success |= bool(np.asarray(result["next.success"])[0])
+            done = bool(np.asarray(result["next.terminated"])[0] or np.asarray(result["next.truncated"])[0])
+            if done:
+                stopped_on_done = frame_index + 1 < len(actions)
+                break
+
+        return {
+            "episode_index": int(episode_index),
+            "expected_frames": int(len(actions)),
+            "executed_frames": executed_frames,
+            "replay_return": replay_return,
+            "replay_success": replay_success,
+            "stopped_on_done": stopped_on_done,
+            "state_rmse": (float(np.sqrt(squared_error_sum / state_value_count)) if state_value_count > 0 else None),
+            "max_state_error": max_state_error if state_value_count > 0 else None,
+        }
+
     ### Step Control ###
 
     def env_init(self) -> None:
@@ -212,6 +272,7 @@ class BaseEnv(gym.Env):
         *,
         env_ids,
         reset_eval: bool = False,
+        extra: dict[str, Any] | None = None,
     ):
         """Reset the underlying simulator and return observations.
 
@@ -219,6 +280,7 @@ class BaseEnv(gym.Env):
             env_ids: Environment ids to reset.
             reset_eval: If True, start a fresh evaluation queue and force a
                 real reset even when auto reset has a cached latest obs.
+            extra: Optional simulator-specific reset metadata.
         """
         raise NotImplementedError
 
@@ -244,6 +306,7 @@ class BaseEnv(gym.Env):
                 eval_episode_id: Optional array with shape ``[B]`` containing
                     eval benchmark ids for fixed-case deduplication and repeat
                     quotas.
+                extra: Optional sequence of per-env metadata dictionaries.
                 teleop_images: Optional sequence of per-env image dictionaries
                     appended to the normalized observation images for teleop
                     publishing only.
@@ -271,13 +334,24 @@ class BaseEnv(gym.Env):
         reset_eval = bool(options.get("reset_eval", False))
         if env_ids is None or reset_eval:
             env_ids = np.arange(self.num_envs)
-        return {
+        reset_kwargs = {
             "env_ids": env_ids,
             "reset_eval": reset_eval,
         }
+        if "extra" in options:
+            reset_kwargs["extra"] = options["extra"]
+        return reset_kwargs
 
     @pace_calls("target_step_hz")
-    def mask_step(self, action, execute_mask, is_intervention, critic_value, manual_reward=None, force_truncated=None):
+    def mask_step(
+        self,
+        action,
+        execute_mask,
+        is_intervention,
+        critic_value,
+        manual_reward=None,
+        force_truncated=None,
+    ):
         """Step selected envs and apply optional manual record overrides.
 
         Args:
@@ -294,7 +368,6 @@ class BaseEnv(gym.Env):
                 env id. True values mark that env's local step result as failed
                 truncation. Applied after ``manual_reward`` if both are set for
                 the same env.
-
         Notes:
             ``result`` returned by ``env_step`` is indexed by local result id:
             ``local_id`` position ``i`` corresponds to global env id
@@ -648,13 +721,16 @@ class BaseEnv(gym.Env):
         if not recorder_cfg.enable:
             return None
 
+        strategy_kwargs = self.get_recorder_strategy_kwargs()
+        if self.target_step_hz is not None:
+            strategy_kwargs["fps"] = int(self.target_step_hz)
         return MultiRecorder.from_cfg(
             cfg=recorder_cfg,
             env_type=self.env_type,
             rank=self.rank,
             stage_id=self.stage_id,
             num_envs=self.num_envs,
-            strategy_kwargs=self.get_recorder_strategy_kwargs(),
+            strategy_kwargs=strategy_kwargs,
         )
 
     def get_recorder_strategy_kwargs(self) -> dict[str, Any]:
@@ -680,6 +756,7 @@ class BaseEnv(gym.Env):
 
         source_obs = self._slice_latest_obs(env_ids)
         observations = source_obs["observation"]
+        extras = step_result.get("extra", [{} for _ in env_ids])
         tasks = source_obs["task"]
         rewards = step_result["next.reward"]
         terminations = step_result["next.terminated"]
@@ -695,6 +772,7 @@ class BaseEnv(gym.Env):
             self.recorder.record_once(
                 env_id=env_id,
                 observation=observations[local_id],
+                extra=extras[local_id],
                 action=actions[local_id],
                 task=tasks[local_id],
                 next_reward=rewards[local_id],
