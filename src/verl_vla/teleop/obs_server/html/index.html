@@ -27,6 +27,8 @@ limitations under the License.
     <span>env: <span id="env-id">-</span></span>
     <span>step: <span id="step">-</span></span>
     <span>fps: <span id="fps">-</span></span>
+    <span>latency: <span id="latency">-</span></span>
+    <span>net RTT: <span id="network-rtt">-</span></span>
     <span>ws: <span id="ws-status">connecting</span></span>
     <span>input: <span id="input-status">connecting</span></span>
     <span>intervention: <span id="intervention-status">off</span></span>
@@ -76,8 +78,8 @@ limitations under the License.
     const TELEOP_DEVICE_CONFIGS = __TELEOP_DEVICE_CONFIGS__;
     let frames = 0;
     let lastFpsAt = performance.now();
+    let serverClockOffsetMs = null;
     let inputSocket = null;
-    let inputPollTimer = null;
     let xrSession = null;
     let xrReferenceSpace = null;
     let selectedImageName = null;
@@ -313,6 +315,11 @@ limitations under the License.
     }
 
     function renderObs(obs, images) {
+      const receivedAt = Date.now();
+      if (serverClockOffsetMs !== null && Number.isFinite(obs.timestamp)) {
+        const latencyMs = receivedAt - obs.timestamp * 1000 + serverClockOffsetMs;
+        document.getElementById("latency").textContent = `${latencyMs.toFixed(1)} ms`;
+      }
       document.getElementById("env-id").textContent = obs.env_id ?? "-";
       document.getElementById("step").textContent = obs.step ?? "-";
       renderDataInto(document.getElementById("state"), {
@@ -387,6 +394,7 @@ limitations under the License.
 
       socket.onopen = () => {
         status.textContent = "connected";
+        calibrateServerClock();
       };
       socket.onmessage = (event) => {
         try {
@@ -406,6 +414,54 @@ limitations under the License.
       };
     }
 
+    async function calibrateServerClock() {
+      try {
+        const requestStartedAt = Date.now();
+        const response = await fetch("/api/health", {cache: "no-store"});
+        const payload = await response.json();
+        const responseReceivedAt = Date.now();
+        serverClockOffsetMs = payload.server_time * 1000
+          - (requestStartedAt + responseReceivedAt) / 2;
+      } catch (error) {
+        console.warn("Failed to calibrate teleop server clock", error);
+      }
+    }
+
+    function startNetworkProbe() {
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const probeUrl = `${protocol}://${window.location.host}/ws/ping`;
+      const workerSource = `
+        const url = ${JSON.stringify(probeUrl)};
+        let socket;
+        let timer;
+        function connect() {
+          socket = new WebSocket(url);
+          socket.onopen = () => {
+            timer = setInterval(() => {
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({sent_at: performance.now()}));
+              }
+            }, 500);
+          };
+          socket.onmessage = (event) => {
+            const payload = JSON.parse(event.data);
+            postMessage({rtt_ms: performance.now() - payload.sent_at});
+          };
+          socket.onclose = () => {
+            clearInterval(timer);
+            setTimeout(connect, 1000);
+          };
+        }
+        connect();
+      `;
+      const workerUrl = URL.createObjectURL(new Blob([workerSource], {type: "text/javascript"}));
+      const worker = new Worker(workerUrl);
+      URL.revokeObjectURL(workerUrl);
+      worker.onmessage = (event) => {
+        document.getElementById("network-rtt").textContent = `${event.data.rtt_ms.toFixed(1)} ms`;
+      };
+    }
+
     function connectInputStream() {
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
       inputSocket = new WebSocket(`${protocol}://${window.location.host}/ws/input`);
@@ -417,10 +473,6 @@ limitations under the License.
         if (TELEOP_DEVICE_TYPES.includes("lerobot")) {
           lerobotDevice.attach();
         }
-        if (inputPollTimer) {
-          clearInterval(inputPollTimer);
-        }
-        inputPollTimer = setInterval(pollInputState, 750);
       };
       inputSocket.onmessage = (event) => {
         const payload = JSON.parse(event.data);
@@ -442,10 +494,6 @@ limitations under the License.
       inputSocket.onclose = () => {
         status.textContent = "reconnecting";
         lerobotDevice.detach();
-        if (inputPollTimer) {
-          clearInterval(inputPollTimer);
-          inputPollTimer = null;
-        }
         setTimeout(connectInputStream, 1000);
       };
     }
@@ -761,6 +809,7 @@ limitations under the License.
     }
 
     keyboardRouter.attach();
+    startNetworkProbe();
     connectObsStream();
     connectInputStream();
   </script>

@@ -256,14 +256,14 @@ class TeleopServer:
 
     def _publish_loop(self) -> None:
         min_interval_s = 1.0 / self.cfg.max_fps
-        last_publish_at = 0.0
+        next_publish_at = 0.0
         while not self._publisher_stop.is_set():
             try:
                 frame = self._pending_frames.get(timeout=0.1)
             except queue.Empty:
                 continue
 
-            wait_s = last_publish_at + min_interval_s - time.monotonic()
+            wait_s = next_publish_at - time.monotonic()
             if wait_s > 0 and self._publisher_stop.wait(wait_s):
                 return
 
@@ -276,6 +276,7 @@ class TeleopServer:
             store = self._store
             if store is None:
                 return
+            publish_started_at = time.monotonic()
             try:
                 store.update(
                     step=frame.step,
@@ -286,7 +287,7 @@ class TeleopServer:
                 )
             except Exception:
                 logger.exception("Failed to encode teleop observation frame")
-            last_publish_at = time.monotonic()
+            next_publish_at = publish_started_at + min_interval_s
 
     def write_console(self, text: str) -> None:
         if self._server is not None:

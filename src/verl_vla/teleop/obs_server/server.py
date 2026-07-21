@@ -120,7 +120,7 @@ def create_app(
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "env_id": store.env_id, "port": store.port}
+        return {"status": "ok", "env_id": store.env_id, "port": store.port, "server_time": time.time()}
 
     @app.get("/api/input/latest")
     def latest_input():
@@ -162,6 +162,16 @@ def create_app(
             pass
         finally:
             store.unsubscribe(subscriber)
+
+    @app.websocket("/ws/ping")
+    async def ping_stream(websocket: WebSocket):
+        await websocket.accept()
+        try:
+            while True:
+                payload = await websocket.receive_json()
+                await websocket.send_json(payload)
+        except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+            pass
 
     @app.websocket("/ws/input")
     async def input_stream(websocket: WebSocket):
