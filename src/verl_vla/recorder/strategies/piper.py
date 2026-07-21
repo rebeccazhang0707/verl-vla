@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from verl_vla.recorder.strategies.arena import ArenaLeRobotStrategy
 
 
