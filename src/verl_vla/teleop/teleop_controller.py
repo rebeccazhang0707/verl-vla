@@ -195,6 +195,8 @@ class TeleopController:
         return "Enter"
 
     def reset(self) -> None:
+        if self._teleop_server is not None:
+            self._teleop_server.reset()
         for input_device in self.input_devices.values():
             input_device.reset()
         for strategy in self.strategies.values():

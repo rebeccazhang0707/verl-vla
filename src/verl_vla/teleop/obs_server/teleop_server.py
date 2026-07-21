@@ -244,7 +244,6 @@ class TeleopServer:
     ) -> None:
         if self._store is None:
             return
-        self._step += 1
         frame = _ObservationFrame(
             step=self._step,
             images={str(name): np.array(image, copy=True, order="C") for name, image in images.items()},
@@ -252,7 +251,11 @@ class TeleopServer:
             extra=_as_jsonable(extra or {}),
             task_description=task_description,
         )
+        self._step += 1
         _put_latest(self._pending_frames, frame)
+
+    def reset(self) -> None:
+        self._step = 0
 
     def _publish_loop(self) -> None:
         min_interval_s = 1.0 / self.cfg.max_fps
