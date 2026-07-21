@@ -17,7 +17,10 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import logging
+from contextlib import contextmanager, nullcontext
+from functools import partial, wraps
 from typing import Any
 
 import numpy as np
@@ -34,6 +37,44 @@ from verl_vla.envs.base import BaseEnv
 from verl_vla.utils.envs.action import to_tensor
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_arena_startup(init):
+    """Prevent concurrent Isaac stage construction in one Arena runtime.
+
+    Arena env construction cold-starts Omniverse/Isaac stage composition,
+    renderer/camera plugins, recursive USD asset resolution, and GPU contexts.
+    Starting several Ray EnvWorkers at the same time creates a short resource
+    spike and has caused child processes to exit during USD composition. The
+    lock only serializes this startup path; rollout remains parallel after the
+    envs are ready.
+    """
+
+    @wraps(init)
+    def wrapped(*args, **kwargs):
+        with open("/tmp/verl_vla_arena_startup.lock", "w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            return init(*args, **kwargs)
+
+    return wrapped
+
+
+@contextmanager
+def _asset_cache_dir(cache_dir: str):
+    from isaaclab.sim.spawners.from_files import from_files
+
+    retrieve_file_path = from_files.retrieve_file_path
+    from_files.retrieve_file_path = partial(retrieve_file_path, download_dir=cache_dir)
+    try:
+        yield
+    finally:
+        from_files.retrieve_file_path = retrieve_file_path
+
+
+def _arena_asset_cache(cache_dir: str | None):
+    if cache_dir is None:
+        return nullcontext()
+    return _asset_cache_dir(cache_dir)
 
 
 class IsaacLabArenaEnv(BaseEnv):
@@ -56,6 +97,7 @@ class IsaacLabArenaEnv(BaseEnv):
 
     env_type = "arena"
 
+    @_serialize_arena_startup
     def __init__(
         self,
         cfg,
@@ -192,7 +234,8 @@ class IsaacLabArenaEnv(BaseEnv):
             rl_success_reward=self.arena_cfg.rl_success_reward,
             subtask_reward=self.environment_cfg.subtask_reward,
         )
-        self.env = env_builder.make_registered(env_cfg=env_cfg)
+        with _arena_asset_cache(self.arena_cfg.asset_cache_dir):
+            self.env = env_builder.make_registered(env_cfg=env_cfg)
 
         self.action_space = self.env.action_space
         self.observation_space = self.env.observation_space

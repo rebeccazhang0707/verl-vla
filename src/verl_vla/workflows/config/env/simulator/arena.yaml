@@ -66,6 +66,9 @@ solve_relations: true
 # Whether to enable Pinocchio support in Arena environments.
 enable_pinocchio: true
 
+# Optional local directory for IsaacLab's remote USD asset mirror.
+asset_cache_dir: null
+
 # Optional placement seed forwarded to the Arena builder.
 placement_seed: null
 

@@ -79,6 +79,7 @@ class ArenaSimulatorConfig(BaseConfig):
     disable_fabric: bool = False
     solve_relations: bool = True
     enable_pinocchio: bool = True
+    asset_cache_dir: str | None = None
     placement_seed: int | None = None
     resolve_on_reset: bool | None = None
     presets: str | None = None
