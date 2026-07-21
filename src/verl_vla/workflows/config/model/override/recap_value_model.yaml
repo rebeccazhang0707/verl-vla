@@ -38,6 +38,9 @@ critic_expert_variant: gemma3_100m
 # Input image size.
 image_size: 384
 
+# Ordered camera fields consumed by the value critic.
+image_keys: [observation.images.image, observation.images.wrist_image]
+
 # Freeze the vision encoder during value-model SFT.
 freeze_vision_encoder: True
 

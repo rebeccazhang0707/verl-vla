@@ -59,6 +59,10 @@ class ReCapValueCriticConfig(PretrainedConfig):
         critic_expert_variant: str = "gemma3_100m",
         image_size: int = 384,
         max_token_len: int = 200,
+        image_keys: tuple[str, str] | list[str] = (
+            "observation.images.image",
+            "observation.images.wrist_image",
+        ),
         include_state_in_prompt: bool = False,
         max_state_dim: int = 32,
         freeze_vision_encoder: bool = False,
@@ -81,6 +85,9 @@ class ReCapValueCriticConfig(PretrainedConfig):
         self.critic_expert_variant = critic_expert_variant
         self.image_size = image_size
         self.max_token_len = max_token_len
+        if len(image_keys) != 2:
+            raise ValueError(f"ReCap value critic requires exactly two image keys, got {image_keys}.")
+        self.image_keys = list(image_keys)
         self.include_state_in_prompt = include_state_in_prompt
         self.max_state_dim = max_state_dim
         self.freeze_vision_encoder = freeze_vision_encoder

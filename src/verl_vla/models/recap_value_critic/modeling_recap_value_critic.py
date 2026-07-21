@@ -332,6 +332,7 @@ class ReCapValueCriticTrainableModel(PreTrainedModel, SupportSFTTraining):
             "critic_expert_variant",
             "image_size",
             "max_token_len",
+            "image_keys",
             "include_state_in_prompt",
             "max_state_dim",
             "freeze_vision_encoder",
@@ -385,8 +386,9 @@ class ReCapValueCriticTrainableModel(PreTrainedModel, SupportSFTTraining):
         super().sft_init()
 
     def _extract_images_and_masks(self, obs: DataProto) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-        image = _normalize_image(obs.batch["observation.images.image"], self.config.image_size)
-        wrist_image = _normalize_image(obs.batch["observation.images.wrist_image"], self.config.image_size)
+        image_key, wrist_image_key = self.config.image_keys
+        image = _normalize_image(obs.batch[image_key], self.config.image_size)
+        wrist_image = _normalize_image(obs.batch[wrist_image_key], self.config.image_size)
         batch_size = image.shape[0]
         device = image.device
         empty = torch.zeros_like(image)
