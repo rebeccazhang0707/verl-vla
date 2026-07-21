@@ -12,20 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# GR00T N1.6 compatibility fields for verl/FSDP and deterministic rollout.
-
-# Compatibility metadata used by verl's sequence-parallel config patch.
-num_attention_heads: 32
-
-# N1.6 does not use grouped-query attention at this wrapper level.
-num_key_value_heads: 32
-
-# Optional processor source; null uses the loaded checkpoint directory.
-verl_processor_path: null
-
-# Number of predicted actions executed per environment interaction.
-verl_action_chunk_size: 8
-
 # Attention implementation forwarded to the top-level model load. The Eagle backbone
 # is force-patched to flash_attention_2 regardless (see _patch_eagle_compat).
 attn_implementation: eager

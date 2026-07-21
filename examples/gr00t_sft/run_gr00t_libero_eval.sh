@@ -56,9 +56,6 @@ python -m verl_vla.entrypoints.eval \
   cluster.actor_rollout_ref.model.enable_gradient_checkpointing=False \
   cluster.actor_rollout_ref.model.use_remove_padding=False \
   cluster.actor_rollout_ref.model.trust_remote_code=True \
-  cluster.actor_rollout_ref.model.override_config.num_attention_heads=32 \
-  cluster.actor_rollout_ref.model.override_config.num_key_value_heads=32 \
-  cluster.actor_rollout_ref.model.override_config.verl_processor_path="$MODEL_PATH" \
   cluster.actor_rollout_ref.model.adapter.policy_type=libero \
   cluster.actor_rollout_ref.model.adapter.embodiment_tag=libero_panda \
   cluster.actor_rollout_ref.model.adapter.action_dim=7 \
@@ -69,7 +66,6 @@ python -m verl_vla.entrypoints.eval \
   cluster.actor_rollout_ref.model.adapter.freeze_vision_tower=False \
   cluster.actor_rollout_ref.model.adapter.norm_stats_path="$NORM_STATS_PATH" \
   cluster.actor_rollout_ref.model.adapter.num_action_chunks="$ACTION_CHUNK_SIZE" \
-  cluster.actor_rollout_ref.model.override_config.verl_action_chunk_size="$ACTION_CHUNK_SIZE" \
   cluster.actor_rollout_ref.rollout.name=hf \
   cluster.actor_rollout_ref.rollout.mode=async_envloop \
   cluster.actor_rollout_ref.rollout.output_critic_value=False \

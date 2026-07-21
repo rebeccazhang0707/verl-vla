@@ -53,12 +53,8 @@ python -m verl_vla.entrypoints.train.sft \
   cluster.actor_rollout_ref.model.enable_gradient_checkpointing=False \
   cluster.actor_rollout_ref.model.use_remove_padding=False \
   cluster.actor_rollout_ref.model.trust_remote_code=True \
-  cluster.actor_rollout_ref.model.override_config.num_attention_heads=32 \
-  cluster.actor_rollout_ref.model.override_config.num_key_value_heads=32 \
-  cluster.actor_rollout_ref.model.override_config.verl_processor_path="$MODEL_PATH" \
   cluster.actor_rollout_ref.model.adapter.norm_stats_path="$NORM_STATS_PATH" \
   cluster.actor_rollout_ref.model.adapter.num_action_chunks=8 \
-  cluster.actor_rollout_ref.model.override_config.verl_action_chunk_size=8 \
   cluster.actor_rollout_ref.actor.strategy=fsdp2 \
   cluster.actor_rollout_ref.actor.fsdp_config.model_dtype=float32 \
   cluster.actor_rollout_ref.actor.fsdp_config.use_torch_compile=False \

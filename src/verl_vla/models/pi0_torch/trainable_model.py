@@ -337,11 +337,8 @@ class PI0TrainableModel(
 
         norm_stats_path = self.norm_stats_path
         if not norm_stats_path:
-            self.config.save_pretrained(save_directory)
             return
 
-        original_state_stats = self.config.state_norm_stats
-        original_action_stats = self.config.action_norm_stats
         exported_stats_path = Path(save_directory) / "norm_stats.json"
         source_stats_path = Path(norm_stats_path).expanduser()
         if not source_stats_path.is_absolute():
@@ -353,13 +350,6 @@ class PI0TrainableModel(
         # embedded statistics or an absolute path from the training host.
         if source_stats_path.resolve() != exported_stats_path.resolve():
             shutil.copyfile(source_stats_path, exported_stats_path)
-        self.config.state_norm_stats = {}
-        self.config.action_norm_stats = {}
-        try:
-            self.config.save_pretrained(save_directory)
-        finally:
-            self.config.state_norm_stats = original_state_stats
-            self.config.action_norm_stats = original_action_stats
 
     def export_policy(self, output_dir, *, state_dict=None) -> None:
         """Export PI0 weights together with its normalization statistics."""

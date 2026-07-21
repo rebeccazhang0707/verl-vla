@@ -11,7 +11,6 @@ environment adaptation settings.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -104,7 +103,10 @@ class PI0AdapterConfig:
         return config
 
     def save_pretrained(self, save_directory: str | Path) -> None:
-        output_dir = Path(save_directory)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        with (output_dir / "adapter_config.json").open("w", encoding="utf-8") as file:
-            json.dump(self.to_dict(), file, indent=2, sort_keys=True)
+        """Satisfy verl's config hook without polluting the native export.
+
+        The adapter settings come from the workflow configuration when a full
+        training checkpoint is resumed. The native PI0 policy owns every file
+        under ``huggingface/`` and writes its config during policy export.
+        """
+        del save_directory

@@ -13,7 +13,7 @@ from .group import Gr00tCriticGroup
 
 
 def _build_critic_group(model, *, pooling: str) -> Gr00tCriticGroup:
-    config = model.config.critic
+    config = model.adapter_config.critic
     return Gr00tCriticGroup(
         head_num=int(config.head_num),
         input_dim=int(model.critic_input_dim),

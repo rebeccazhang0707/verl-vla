@@ -11,7 +11,6 @@ environment adaptation settings (policy IO, critic, Flow-SDE).
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -130,12 +129,6 @@ class Gr00tAdapterConfig:
         }
         config["critic"] = self.critic.to_dict()
         return config
-
-    def save_pretrained(self, save_directory: str | Path) -> None:
-        output_dir = Path(save_directory)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        with (output_dir / "adapter_config.json").open("w", encoding="utf-8") as file:
-            json.dump(self.to_dict(), file, indent=2, sort_keys=True)
 
 
 __all__ = ["Gr00tAdapterConfig", "Gr00tCriticConfig"]

@@ -12,7 +12,7 @@ policy plus optional SAC critic / Flow-SDE actor sampling. SAC no longer uses a
 from __future__ import annotations
 
 import contextlib
-import json
+import copy
 import logging
 import math
 from pathlib import Path
@@ -44,6 +44,8 @@ CRITIC_BACKENDS = {
     "mean_pool": MeanPoolCriticBackend(),
 }
 
+_BETA_PATCH_LOCK = Lock()
+
 
 class _CpuBeta(torch.distributions.Beta):
     def __init__(self, concentration1: float, concentration0: float):
@@ -53,39 +55,10 @@ class _CpuBeta(torch.distributions.Beta):
         )
 
 
-_BETA_PATCH_LOCK = Lock()
-
-
 def beta_schedule(step: int, beta0: float, beta_min: float, T: int) -> float:
     """Cosine anneal of the Flow-SDE exploration scale (GR00T-specific; pi0 uses ScheduledScalar)."""
     progress = min(step / T, 1.0)
     return beta_min + (beta0 - beta_min) * 0.5 * (1.0 + math.cos(math.pi * progress))
-
-
-@contextlib.contextmanager
-def _hide_non_peft_adapter_config(path):
-    """Temporarily hide verl-vla ``adapter_config.json`` from Transformers PEFT.
-
-    HuggingFace treats any ``adapter_config.json`` as a PEFT adapter.  Our file
-    is framework config, not PEFT, so rename it for the duration of
-    ``from_pretrained``.
-    """
-    adapter_path = Path(path) / "adapter_config.json"
-    hidden_path = Path(path) / ".verl_adapter_config.json.hide"
-    moved = False
-    if adapter_path.is_file():
-        try:
-            payload = json.loads(adapter_path.read_text(encoding="utf-8"))
-        except Exception:
-            payload = None
-        if not isinstance(payload, dict) or "base_model_name_or_path" not in payload:
-            adapter_path.rename(hidden_path)
-            moved = True
-    try:
-        yield
-    finally:
-        if moved and hidden_path.is_file() and not adapter_path.exists():
-            hidden_path.rename(adapter_path)
 
 
 def load_gr00t_n1d6_policy(path, *, config, torch_dtype):
@@ -94,7 +67,7 @@ def load_gr00t_n1d6_policy(path, *, config, torch_dtype):
 
     apply_gr00t_compat_patches()
 
-    with _BETA_PATCH_LOCK, no_init_weights(), _hide_non_peft_adapter_config(path):
+    with _BETA_PATCH_LOCK, no_init_weights():
         original_beta = upstream_model.Beta
         upstream_model.Beta = _CpuBeta
         try:
@@ -114,9 +87,13 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         super().__init__()
         if adapter_config is None:
             adapter_config = Gr00tAdapterConfig(model_path=getattr(policy.config, "_name_or_path", None))
-        self.config = adapter_config
-        SupportSFTTraining.__init__(self, self.config)
+        SupportSFTTraining.__init__(self, adapter_config)
+        self.adapter_config = adapter_config
         self.init_trainable_model(policy=policy)
+        # verl saves ``model.config`` as native Hugging Face metadata. Keep the
+        # framework settings separate so the exported GR00T directory remains
+        # directly loadable by Transformers.
+        self.config = policy.config
         self._adapter: Optional[GR00TN16Adapter] = None
         self._adapter_model_path = (
             adapter_config.adapter_model_path
@@ -219,7 +196,7 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
 
         self.critic = None
         self.critic_api = None
-        if self.config.critic.enabled:
+        if self.adapter_config.critic.enabled:
             if self.critic_type not in CRITIC_BACKENDS:
                 raise ValueError(f"Unsupported critic_type: {self.critic_type}")
             self.critic_api = CRITIC_BACKENDS[self.critic_type]
@@ -233,7 +210,7 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
             )
 
         self.freeze_vision_tower_enabled = bool(getattr(adapter_config, "freeze_vision_tower", True))
-        if self.freeze_vision_tower_enabled and self.config.critic.enabled:
+        if self.freeze_vision_tower_enabled and self.adapter_config.critic.enabled:
             self.freeze_vision_tower()
         self.freeze_action_io_enabled = bool(getattr(adapter_config, "freeze_action_io", False))
         if self.freeze_action_io_enabled:
@@ -265,7 +242,9 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         return get_gr00t_policy_classes(self.policy_type)
 
     def _resolve_norm_stats_path(self) -> str | None:
-        path = getattr(self.config, "norm_stats_path", None) or getattr(self.policy.config, "norm_stats_path", None)
+        path = getattr(self.adapter_config, "norm_stats_path", None) or getattr(
+            self.policy.config, "norm_stats_path", None
+        )
         if path in (None, "", "null", "None"):
             return None
         return str(path)
@@ -277,14 +256,13 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
                     "Gr00tN1d6TrainableModel: cannot build GR00TN16Adapter without a checkpoint path; "
                     "set adapter.model_path / adapter_model_path."
                 )
-            processor_path = getattr(self.policy.config, "verl_processor_path", None) or self._adapter_model_path
             norm_stats_path = self._resolve_norm_stats_path()
             self._adapter = GR00TN16Adapter(
-                str(processor_path),
+                str(self._adapter_model_path),
                 embodiment_tag=self.embodiment_tag,
                 norm_stats_path=norm_stats_path,
-                override_modality_configs=getattr(self.config, "override_modality_configs", None),
-                use_relative_action=getattr(self.config, "use_relative_action", None),
+                override_modality_configs=getattr(self.adapter_config, "override_modality_configs", None),
+                use_relative_action=getattr(self.adapter_config, "use_relative_action", None),
                 training=bool(training) if training is not None else False,
             )
             # Projector index + real action width come from the processor/checkpoint.
@@ -385,7 +363,7 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         register_fsdp_forward_method(self, "sft_loss")
 
     def sac_init(self):
-        if self.config.critic.enabled and self.critic is None and self.critic_api is not None:
+        if self.adapter_config.critic.enabled and self.critic is None and self.critic_api is not None:
             self.critic_api.init(self)
         if self.freeze_vision_tower_enabled:
             self.freeze_vision_tower()
@@ -539,7 +517,7 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         }
         if image_mask is not None:
             out["image_mask"] = image_mask
-        if self.config.critic.privileged_obs and "priv_obs" in s:
+        if self.adapter_config.critic.privileged_obs and "priv_obs" in s:
             out["priv_obs"] = s["priv_obs"].to(device, dtype=dtype)
         return out
 
@@ -934,14 +912,9 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         normalized_state_dict = normalize_adapter_state_dict(state_dict)
         return nn.Module.load_state_dict(self, normalized_state_dict, strict=strict, assign=assign)
 
-    def export_policy(self, output_dir, *, state_dict=None):
-        """Export native GR00T weights plus optional SAC critic sidecar.
-
-        Policy weights go through ``policy.save_pretrained`` (HF layout). When a
-        critic is present, its state dict is written to ``critic.pt`` so SAC
-        resume / distillation can reload Q-heads without the full FSDP shard.
-        """
-        output_dir = Path(output_dir)
+    def save_pretrained(self, save_directory, *args, state_dict=None, **kwargs):
+        """Export only the native GR00T policy and processor."""
+        output_dir = Path(save_directory)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         processor = None
@@ -950,29 +923,20 @@ class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTrain
         except Exception:
             processor = None
         policy_state = self.extract_policy_state_dict(state_dict) if state_dict is not None else None
-        original_processor_path = getattr(self.policy.config, "verl_processor_path", None)
-        original_norm_stats_path = getattr(self.policy.config, "norm_stats_path", None)
-        original_architectures = getattr(self.policy.config, "architectures", None)
-        self.policy.config.verl_processor_path = None
-        self.policy.config.norm_stats_path = None
-        self.policy.config.architectures = ["Gr00tN1d6"]
+        kwargs.setdefault("safe_serialization", True)
+        native_policy = self.native_policy
+        export_config = copy.deepcopy(native_policy.config)
         try:
-            self.native_policy.save_pretrained(output_dir, state_dict=policy_state, safe_serialization=True)
-            if processor is not None:
-                processor.save_pretrained(output_dir)
-            self.config.save_pretrained(output_dir)
+            native_policy.save_pretrained(output_dir, *args, state_dict=policy_state, **kwargs)
         finally:
-            self.policy.config.verl_processor_path = original_processor_path
-            self.policy.config.norm_stats_path = original_norm_stats_path
-            self.policy.config.architectures = original_architectures
+            native_policy.config = export_config
+            self.config = export_config
+        export_config.save_pretrained(output_dir)
+        if processor is not None:
+            processor.save_pretrained(output_dir)
 
-        critic_state = None
-        if state_dict is not None:
-            critic_state = extract_critic_state_dict(normalize_adapter_state_dict(state_dict))
-        elif self.critic is not None:
-            critic_state = self.critic.state_dict()
-        if critic_state:
-            torch.save(critic_state, output_dir / "critic.pt")
+    def export_policy(self, output_dir, *, state_dict=None):
+        self.save_pretrained(output_dir, state_dict=state_dict)
 
 
 __all__ = ["Gr00tN1d6TrainableModel", "load_gr00t_n1d6_policy", "beta_schedule"]
