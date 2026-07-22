@@ -53,6 +53,16 @@ ARENA_TASK=libero TASK_SUITE=libero_spatial TASK_ID=3 \
 | `TARGET_ENTROPY` | `-64.0` | Target entropy over the 128-dim steering noise (≈ −dim/2) |
 | `BACKUP_ENTROPY` | `False` | Keep the −α·logπ term out of the critic TD target (RLinf parity) |
 | `CRITIC_WARMUP_STEPS` | `100` | Critic-only steps before actor updates |
+| `EMA_DECAY` | `null` | Actor EMA over the tiny noise actor (null = off) |
+| `CRITIC_POOL_PROJ_DIM` | `0` | Critic pooled-feature projection (SAC baseline 256) |
+| `CRITIC_LAYERNORM` | `True` | LayerNorm in critic heads (SAC baseline True) |
+| `ACTOR_POSITIVE_SAMPLE_RATIO` | `0.8` | Positive replay ratio for actor batches |
+| `EVAL_EPISODES` | `GPUs×NUM_ENV` | Trajectories averaged per eval SR |
+| `EPISODIC_REPLAY` | `True` | Episodic replay collection |
+
+The SAC launcher's `FREEZE_ACTION_IO` / `FLOW_SDE_*` knobs are intentionally
+absent: DSRL freezes the whole VLA and owns the exploration noise
+(`flow_sde_enable=true` raises at model init).
 
 Adapter-level knobs live under `cluster.actor_rollout_ref.model.adapter.dsrl.*`
 (`hidden_dims`, `feature_latent_dim`, `state_latent_dim`, `noise_per_step`,

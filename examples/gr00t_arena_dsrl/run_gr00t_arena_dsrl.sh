@@ -22,6 +22,11 @@
 #   * actor lr is the noise-actor lr (3e-4, RLinf parity), not a VLA lr.
 #   * auto entropy tuning is on; TARGET_ENTROPY defaults to -(noise_dim/2)
 #     with GR00T's padded noise_dim=128 → -64 (RLinf uses -16 for pi0's 32).
+#   * BACKUP_ENTROPY=False keeps -alpha*log_pi out of the critic TD target
+#     (RLinf parity; the 128-dim summed log-prob would dominate the bootstrap).
+#   * The SAC launcher's FREEZE_ACTION_IO / FLOW_SDE_* knobs are intentionally
+#     absent: DSRL freezes everything and owns the exploration noise
+#     (flow_sde_enable=true would raise at model init).
 #   * TD3+BC and offline RLPD prefill are incompatible with DSRL (demos are
 #     env actions, not steering noise) — keep them disabled.
 #
@@ -51,6 +56,7 @@ GROOT_MODEL_PATH="${GROOT_MODEL_PATH:-/models/checkpoint-10000}"
 NUM_ACTION_CHUNKS="${NUM_ACTION_CHUNKS:-16}"
 
 # ── Task-specific defaults ───────────────────────────────────────────────────
+# EXTRA_OVERRIDES holds hydra overrides that differ per task.
 EXTRA_OVERRIDES=()
 case "$ARENA_TASK" in
   gr1)
@@ -61,6 +67,7 @@ case "$ARENA_TASK" in
     OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/outputs/arena_gr00t_gr1_dsrl}"
     PROJECT_NAME="${PROJECT_NAME:-gr00t-arena-gr1-dsrl}"
     EXPERIMENT_NAME="${EXPERIMENT_NAME:-arena_gr00t_gr1_fridge_dsrl}"
+    EPISODIC_REPLAY="${EPISODIC_REPLAY:-True}"
     # 32 interactions × 16 action chunks = 512 env steps (episode_length_s≈10 @ 50 Hz).
     MAX_INTERACTIONS="${MAX_INTERACTIONS:-32}"
     export ARENA_GR1_JOINT_SPACE_DIR="${ARENA_GR1_JOINT_SPACE_DIR:-/workspaces/isaaclab_arena/isaaclab_arena_gr00t/embodiments/gr1}"
@@ -80,12 +87,20 @@ case "$ARENA_TASK" in
     EXPERIMENT_NAME="${EXPERIMENT_NAME:-arena_gr00t_libero_${TASK_SUITE}_task${TASK_ID}_dsrl}"
     # 10 interactions × 16 action chunks = 160 env steps (matches LIBERO eval default).
     MAX_INTERACTIONS="${MAX_INTERACTIONS:-10}"
+    # Episodes run up to max_episode_steps=512 env steps but a rollout window is only
+    # 160, so episodes span 3-4 windows. Collect them episodically so the early/middle
+    # transitions are not dropped (docs/reinforcement-learning/episodic-replay.md).
+    EPISODIC_REPLAY="${EPISODIC_REPLAY:-True}"
+
     export LIBERO_IN_LAB_ROOT="${LIBERO_IN_LAB_ROOT:-/libero_in_lab}"
     if [[ ! -d "$LIBERO_IN_LAB_ROOT" ]]; then
-      echo "[warn] LIBERO_IN_LAB_ROOT='$LIBERO_IN_LAB_ROOT' missing — Arena LIBERO may fail to resolve USD/configs"
+      echo "[warn] LIBERO_IN_LAB_ROOT='$LIBERO_IN_LAB_ROOT' missing — Arena LIBERO may fail to resolve USD/hdf5"
     fi
+    ARENA_LIBERO_DATA_DIR="${ARENA_LIBERO_DATA_DIR:-/workspaces/isaaclab_arena/isaaclab_arena_examples/external_environments/libero/data}"
+    export LIBERO_CONFIG_DIR="${LIBERO_CONFIG_DIR:-$ARENA_LIBERO_DATA_DIR/config}"
     EXTRA_RAY_ENV=(
       "+ray_kwargs.ray_init.runtime_env.env_vars.LIBERO_IN_LAB_ROOT=$LIBERO_IN_LAB_ROOT"
+      "+ray_kwargs.ray_init.runtime_env.env_vars.LIBERO_CONFIG_DIR=$LIBERO_CONFIG_DIR"
     )
     EXTRA_OVERRIDES+=(
       "cluster.env.env_worker.simulator.arena.libero.libero_task_suite=$TASK_SUITE"
@@ -102,16 +117,18 @@ esac
 REPLAY_POOL_DIR="${REPLAY_POOL_DIR:-$OUTPUT_ROOT/replay_pools}"
 
 # ── Topology (Ray resource pools under cluster.resource) ─────────────────────
+# Default: co-located 4 env workers + 4 model workers, 8 Isaac envs per env GPU.
+# Scale workers with NUM_ENV_GPUS / NUM_MODEL_GPUS; override NUM_ENV for denser sims.
 NUM_NODES="${NUM_NODES:-1}"
-NUM_ENV_GPUS="${NUM_ENV_GPUS:-1}"
-NUM_MODEL_GPUS="${NUM_MODEL_GPUS:-1}"
+NUM_ENV_GPUS="${NUM_ENV_GPUS:-4}"
+NUM_MODEL_GPUS="${NUM_MODEL_GPUS:-4}"
 NUM_ENV="${NUM_ENV:-8}"
 NUM_STAGE="${NUM_STAGE:-2}"
 
 # ── SAC batch / schedule ─────────────────────────────────────────────────────
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-32}"
-TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1000}"
+TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-5000}"
 ROLLOUT_INTERVAL="${ROLLOUT_INTERVAL:-20}"
 WARM_ROLLOUT_STEPS="${WARM_ROLLOUT_STEPS:-5}"
 CRITIC_WARMUP_STEPS="${CRITIC_WARMUP_STEPS:-100}"
@@ -119,6 +136,14 @@ ACTOR_UPDATE_INTERVAL="${ACTOR_UPDATE_INTERVAL:-1}"
 SAVE_FREQ="${SAVE_FREQ:-500}"
 TEST_FREQ="${TEST_FREQ:--1}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
+# Trajectories aggregated per eval; Arena has no fixed benchmark, so without
+# this the eval SR is a single 0/1 episode instead of an average.
+EVAL_EPISODES="${EVAL_EPISODES:-$((NUM_ENV_GPUS * NUM_ENV))}"
+
+# ── Episodic replay collection (requires auto_reset=true, which this script sets) ──
+# Task branches may set a task-specific default above (libero: True); fall back off.
+EPISODIC_REPLAY="${EPISODIC_REPLAY:-False}"
+EPISODIC_MAX_OPEN_LEN="${EPISODIC_MAX_OPEN_LEN:-128}"
 
 # ── DSRL noise actor / critic optimisation (RLinf DSRL parity) ───────────────
 NOISE_ACTOR_LR="${NOISE_ACTOR_LR:-3e-4}"
@@ -133,6 +158,16 @@ TARGET_ENTROPY="${TARGET_ENTROPY:--64.0}"
 # RLinf DSRL parity: no -alpha*log_pi term in the critic TD target (the summed
 # noise log-prob would dominate the bootstrap before alpha anneals).
 BACKUP_ENTROPY="${BACKUP_ENTROPY:-False}"
+
+# ── SAC stability / replay knobs (shared with the SAC launcher ablations) ────
+# Actor EMA acts on the tiny noise actor under DSRL; null disables (default).
+EMA_DECAY="${EMA_DECAY:-null}"
+# Critic capacity knobs — the critic trains as usual under DSRL (it scores the
+# steering noise), so these remain meaningful. FREEZE_ACTION_IO / FLOW_SDE_*
+# are intentionally absent (see header notes).
+CRITIC_POOL_PROJ_DIM="${CRITIC_POOL_PROJ_DIM:-0}"                  # SAC baseline 256
+CRITIC_LAYERNORM="${CRITIC_LAYERNORM:-True}"                      # SAC baseline True
+ACTOR_POSITIVE_SAMPLE_RATIO="${ACTOR_POSITIVE_SAMPLE_RATIO:-0.8}"
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 TRAINER_LOGGER="${TRAINER_LOGGER:-[console]}"
@@ -171,6 +206,8 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "cluster.actor_rollout_ref.model.adapter.action_dim=$ACTION_DIM" \
   "cluster.actor_rollout_ref.model.adapter.num_action_chunks=$NUM_ACTION_CHUNKS" \
   "cluster.actor_rollout_ref.model.adapter.dsrl.enabled=true" \
+  "cluster.actor_rollout_ref.model.adapter.critic.pool_proj_dim=$CRITIC_POOL_PROJ_DIM" \
+  "cluster.actor_rollout_ref.model.adapter.critic.layernorm=$CRITIC_LAYERNORM" \
   "cluster.actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16" \
   "cluster.actor_rollout_ref.actor.fsdp_config.wrap_policy.transformer_layer_cls_to_wrap=[Qwen3DecoderLayer,Siglip2EncoderLayer,BasicTransformerBlock,MultiEmbodimentActionEncoder,CategorySpecificMLP]" \
   "cluster.actor_rollout_ref.actor.optim.lr=$NOISE_ACTOR_LR" \
@@ -178,6 +215,7 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "cluster.actor_rollout_ref.actor.mini_batch_size=$MINI_BATCH_SIZE" \
   "cluster.actor_rollout_ref.actor.micro_batch_size=$MICRO_BATCH_SIZE" \
   "cluster.actor_rollout_ref.actor.actor_update_interval=$ACTOR_UPDATE_INTERVAL" \
+  "cluster.actor_rollout_ref.actor.ema_decay=$EMA_DECAY" \
   "cluster.actor_rollout_ref.actor.sac.auto_entropy=$AUTO_ENTROPY" \
   "cluster.actor_rollout_ref.actor.sac.initial_alpha=$INITIAL_ALPHA" \
   "cluster.actor_rollout_ref.actor.sac.alpha_type=$ALPHA_TYPE" \
@@ -186,8 +224,9 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "cluster.actor_rollout_ref.actor.critic.lr=$CRITIC_LR" \
   "cluster.actor_rollout_ref.actor.critic.tau=$CRITIC_TAU" \
   "cluster.actor_rollout_ref.actor.critic.warmup_steps=$CRITIC_WARMUP_STEPS" \
+  "cluster.actor_rollout_ref.actor.replay.actor_positive_sample_ratio=$ACTOR_POSITIVE_SAMPLE_RATIO" \
   "cluster.actor_rollout_ref.actor.replay.save_dir=$REPLAY_POOL_DIR" \
-  "cluster.actor_rollout_ref.actor.replay.online_single_size=2000" \
+  "cluster.actor_rollout_ref.actor.replay.online_single_size=20000" \
   "cluster.actor_rollout_ref.rollout.name=hf" \
   "cluster.actor_rollout_ref.rollout.output_critic_value=false" \
   "cluster.actor_rollout_ref.rollout.tensor_model_parallel_size=1" \
@@ -220,6 +259,9 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "trainer.warm_rollout_steps=$WARM_ROLLOUT_STEPS" \
   "trainer.save_freq=$SAVE_FREQ" \
   "trainer.test_freq=$TEST_FREQ" \
+  "trainer.eval_episodes=$EVAL_EPISODES" \
   "trainer.val_before_train=$VAL_BEFORE_TRAIN" \
   "trainer.val_only=False" \
+  "trainer.episodic_replay=$EPISODIC_REPLAY" \
+  "trainer.episodic_max_open_len=$EPISODIC_MAX_OPEN_LEN" \
   "$@"
