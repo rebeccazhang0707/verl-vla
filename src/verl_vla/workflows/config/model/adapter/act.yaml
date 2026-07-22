@@ -1,0 +1,65 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+
+# ACT LIBERO adapter configuration.
+
+# Select the LIBERO policy path in the model implementation.
+policy_type: libero
+
+# Number of action steps returned to the environment by the ACT policy adapter.
+n_action_steps: 20
+
+# Optional temporal-ensemble coefficient for rollout-time action smoothing.
+temporal_ensemble_coeff: null
+
+# Optional state normalization statistics JSON.
+state_norm_stats: null
+
+# Optional action normalization statistics JSON.
+action_norm_stats: null
+
+# Optional image normalization statistics JSON.
+image_norm_stats: null
+
+# Optional critic owned by the ACT adapter.
+critic:
+
+  # Whether this component is enabled.
+  enabled: False
+
+  # Backend or implementation type selected for this component.
+  type: mean_pool
+
+  # Number of attention heads in the critic.
+  head_num: 2
+
+  # Embedding dimension of the critic prefix encoder.
+  prefix_embed_dim: 512
+
+  # Input feature dimension for the critic.
+  input_dim: 0
+
+  # Hidden-layer dimensions for the critic.
+  hidden_dims: [1024, 512, 256]
+
+# SAC action-noise scale.
+sac_action_noise_scale: 0.1
+
+# Whether SAC action-noise scheduling is enabled.
+sac_action_noise_schedule_enabled: False
+
+# Initial SAC scheduled action-noise value.
+sac_action_noise_schedule_initial: null
+
+# Final SAC scheduled action-noise value.
+sac_action_noise_schedule_final: null
+
+# SAC action-noise schedule method.
+sac_action_noise_schedule_method: cos
+
+# Whether to freeze the vision tower during training.
+freeze_vision_tower: True
+
+# Learning rate for the vision backbone optimizer group.
+optimizer_lr_backbone: 1e-5
