@@ -31,55 +31,40 @@ from verl_vla.utils.data import (
     flatten_trajectories,
     reduce_substep_dims,
 )
-from verl_vla.utils.episode_collector import EpisodeCollector
 from verl_vla.utils.rlpd import (
     iter_rlpd_replay_prefill_batches,
     pad_dataproto_to_divisor_with_valid_mask,
 )
 
 from .config import SACTrainerConfig
+from .episode_buffer import EpisodeBuffer
 
 
 def prepare_sac_actor_input(
-    rollout_output: DataProto,
+    episode: DataProto,
     *,
-    config,
     trainer_config: SACTrainerConfig,
     global_steps: int,
 ) -> DataProto:
-    """Prepare env-loop output for SAC updates."""
-
-    terminated_steps = reduce_substep_dims(rollout_output.batch["next.terminated"].bool(), reduction="any")
-    truncated_steps = reduce_substep_dims(rollout_output.batch["next.truncated"].bool(), reduction="any")
+    """Convert a complete raw episode into SAC transitions."""
+    terminated_steps = reduce_substep_dims(episode.batch["next.terminated"].bool(), reduction="any")
+    truncated_steps = reduce_substep_dims(episode.batch["next.truncated"].bool(), reduction="any")
     done_steps = terminated_steps | truncated_steps
-    success_steps = reduce_substep_dims(rollout_output.batch["next.success"].bool(), reduction="any")
-    reward_steps = reduce_substep_dims(rollout_output.batch["next.reward"].float(), reduction="sum")
-    del rollout_output.batch["next.terminated"]
-    del rollout_output.batch["next.truncated"]
-    del rollout_output.batch["next.success"]
-    del rollout_output.batch["next.reward"]
+    success_steps = reduce_substep_dims(episode.batch["next.success"].bool(), reduction="any")
+    reward_steps = reduce_substep_dims(episode.batch["next.reward"].float(), reduction="sum")
+    del episode.batch["next.terminated"]
+    del episode.batch["next.truncated"]
+    del episode.batch["next.success"]
+    del episode.batch["next.reward"]
 
     valid_mask, success_mask = _build_sac_transition_masks(done_steps, success_steps)
-    step_penalty = float(trainer_config.step_penalty)
+    episode.batch["info.terminateds"] = terminated_steps.float()
+    episode.batch["info.valids"] = valid_mask.float()
+    episode.batch["info.rewards"] = (reward_steps - float(trainer_config.step_penalty)) * valid_mask.float()
+    episode.batch["info.success_mask"] = success_mask.float()
+    episode.meta_info["global_steps"] = global_steps
 
-    rollout_output.batch["info.terminateds"] = terminated_steps.float()
-    rollout_output.batch["info.valids"] = valid_mask.float()
-    rollout_output.batch["info.rewards"] = (reward_steps - step_penalty) * valid_mask.float()
-    rollout_output.batch["info.success_mask"] = success_mask.float()
-    rollout_output.meta_info["global_steps"] = global_steps
-
-    # Collection-side masking diagnostics: how much of the raw [B, S] rollout the
-    # legacy per-window mask keeps vs. drops. These expose the near-termination bias directly.
-    total_chunks = int(valid_mask.numel())
-    valid_chunks = int(valid_mask.sum().item())
-    collect_valid_ratio = (valid_chunks / total_chunks) if total_chunks else 1.0
-    rows_without_done_ratio = float((~done_steps.any(dim=1)).float().mean().item()) if done_steps.numel() else 0.0
-    rollout_output.meta_info["data/collect_valid_ratio"] = collect_valid_ratio
-    rollout_output.meta_info["data/collect_dropped_ratio"] = 1.0 - collect_valid_ratio
-    rollout_output.meta_info["data/collect_rows_without_done_ratio"] = rows_without_done_ratio
-
-    rollout_output = add_transition_prefixes(rollout_output, transition_boundary_mask=done_steps)
-    return flatten_trajectories(rollout_output)
+    return flatten_trajectories(add_transition_prefixes(episode, transition_boundary_mask=done_steps))
 
 
 class RobRaySACTrainer:
@@ -94,75 +79,31 @@ class RobRaySACTrainer:
         self.trainer_config: SACTrainerConfig = instantiate(trainer_config)
         self.config = OmegaConf.create(tracking_config)
 
-        self._episode_collector: EpisodeCollector | None = None
-        self._stashed_transitions: list[DataProto] = []
-        if self.trainer_config.episodic_replay:
-            auto_reset = bool(OmegaConf.select(self.config, "cluster.env.env_worker.auto_reset", default=False))
-            if not auto_reset:
-                raise ValueError(
-                    "trainer.episodic_replay=True requires cluster.env.env_worker.auto_reset=True: "
-                    "without auto reset each rollout starts from a real reset and the legacy "
-                    "per-rollout masking path is already correct."
-                )
-            self._episode_collector = EpisodeCollector(
-                step_penalty=float(self.trainer_config.step_penalty),
-                max_open_len=int(self.trainer_config.episodic_max_open_len),
-            )
+        self._episode_buffer = EpisodeBuffer()
 
-    def _prepare_actor_input(self, rollout_output: DataProto | None) -> DataProto | None:
-        """Turn a rollout into SAC transitions, via the episodic collector when enabled.
+    def _prepare_actor_input(self, rollout_output: DataProto) -> DataProto | None:
+        """Collect complete episodes and turn them into SAC transitions."""
+        episodes = self._episode_buffer.ingest(rollout_output)
+        if not episodes:
+            return None
 
-        ``rollout_output=None`` drains transitions stashed by an eval-time force
-        flush without ingesting new data. Returns ``None`` when there is nothing
-        to train on this step.
-        """
-        if self._episode_collector is None:
-            if rollout_output is None:
-                return None
-            return prepare_sac_actor_input(
-                rollout_output,
-                config=self.config,
+        parts = [
+            prepare_sac_actor_input(
+                episode,
                 trainer_config=self.trainer_config,
                 global_steps=self.global_steps,
             )
-
-        parts = list(self._stashed_transitions)
-        self._stashed_transitions.clear()
-        meta_info: dict[str, Any] = {}
-        if rollout_output is not None:
-            meta_info = dict(rollout_output.meta_info)
-            transitions = self._episode_collector.ingest(rollout_output)
-            if transitions is not None:
-                parts.append(transitions)
-        if not parts:
-            return None
-
+            for episode in episodes
+        ]
         actor_input = parts[0] if len(parts) == 1 else DataProto.concat(parts)
-        actor_input.meta_info.update(meta_info)
+        actor_input.meta_info.update(rollout_output.meta_info)
         actor_input.meta_info["global_steps"] = self.global_steps
         actor_input.meta_info.setdefault("global_token_num", [0])
-        actor_input.meta_info.update(self._episode_collector.metrics())
         return pad_dataproto_to_divisor_with_valid_mask(
             actor_input,
             int(self.cluster.actor_worker_group.world_size),
             valid_key="info.valids",
         )
-
-    def _flush_episode_collector(self) -> None:
-        """Force-flush open episode buffers ahead of a continuity break.
-
-        Eval rollouts reuse the training envs and overwrite their cached
-        observations, so the next training rollout does not continue the open
-        episodes. Flushed transitions are stashed and merged into the next
-        actor input. (With async_rollout the prefetched rollout may actually
-        predate the eval; flushing is then conservative — it truncates a still
-        continuous episode early, which is safe.)
-        """
-        if self._episode_collector is None:
-            return
-        flushed = self._episode_collector.force_flush_all()
-        if flushed is not None:
-            self._stashed_transitions.append(flushed)
 
     def _prefill_replay_pool_from_rlpd(self) -> None:
         rlpd_config = self.trainer_config.rlpd
@@ -269,9 +210,6 @@ class RobRaySACTrainer:
                             # compute rewards and other metrics, and prepare for actor update
                             metrics.update(rollout_metrics)
                             actor_input = self._prepare_actor_input(rollout_output)
-                    elif self._stashed_transitions:
-                        actor_input = self._prepare_actor_input(None)
-
                     # === update policy ===
                     critic_only_update = training_step < rollout_times + critic_only_steps_after_rollout
                     with marked_timer("update_actor", timing_raw, color="red"):
@@ -304,9 +242,7 @@ class RobRaySACTrainer:
                         if is_last_step:
                             last_val_metrics = val_metrics
                     metrics.update(val_metrics)
-                    # Eval reuses the training envs and breaks per-lane continuity;
-                    # close the open episode buffers before the next rollout.
-                    self._flush_episode_collector()
+                    self._episode_buffer.clear()
 
                 # === save checkpoint ===
                 # Check if the ESI (Elastic Server Instance)/training plan is close to expiration.

@@ -43,11 +43,6 @@ class SACTrainerConfig(BaseConfig):
     esi_redundant_time: int = 0
     device: str = "cuda"
     rlpd: RLPDConfig = field(default_factory=RLPDConfig)
-    # Streaming episodic replay collection (fixes near-termination bias, see
-    # docs/reinforcement-learning/episodic-replay.md). Requires env_worker.auto_reset=True.
-    episodic_replay: bool = False
-    # Per-lane open-buffer cap in macro-steps before a forced truncation flush.
-    episodic_max_open_len: int = 128
 
     def __post_init__(self):
         if self.total_training_steps <= 0:
@@ -58,5 +53,3 @@ class SACTrainerConfig(BaseConfig):
             raise ValueError(f"rollout_times must be non-negative, got {self.rollout_times}")
         if self.warm_rollout_steps < 0:
             raise ValueError(f"warm_rollout_steps must be non-negative, got {self.warm_rollout_steps}")
-        if self.episodic_max_open_len < 2:
-            raise ValueError(f"episodic_max_open_len must be >= 2, got {self.episodic_max_open_len}")

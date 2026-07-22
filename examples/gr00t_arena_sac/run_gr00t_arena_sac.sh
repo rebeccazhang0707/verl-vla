@@ -73,10 +73,6 @@ case "$ARENA_TASK" in
     EXPERIMENT_NAME="${EXPERIMENT_NAME:-arena_gr00t_libero_${TASK_SUITE}_task${TASK_ID}}"
     # 10 interactions × 16 action chunks = 160 env steps (matches LIBERO eval default).
     MAX_INTERACTIONS="${MAX_INTERACTIONS:-10}"
-    # Episodes run up to max_episode_steps=512 env steps but a rollout window is only
-    # 160, so episodes span 3-4 windows. Collect them episodically so the early/middle
-    # transitions are not dropped.
-    EPISODIC_REPLAY="${EPISODIC_REPLAY:-True}"
     export LIBERO_IN_LAB_ROOT="${LIBERO_IN_LAB_ROOT:-/libero_in_lab}"
     if [[ ! -d "$LIBERO_IN_LAB_ROOT" ]]; then
       echo "[warn] LIBERO_IN_LAB_ROOT='$LIBERO_IN_LAB_ROOT' missing — Arena LIBERO may fail to resolve USD/configs"
@@ -118,11 +114,6 @@ ACTOR_UPDATE_INTERVAL="${ACTOR_UPDATE_INTERVAL:-1}"
 SAVE_FREQ="${SAVE_FREQ:-500}"
 TEST_FREQ="${TEST_FREQ:--1}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
-
-# ── Episodic replay collection (requires auto_reset=true, which this script sets) ──
-# Task branches may set a task-specific default above (libero: True); fall back off.
-EPISODIC_REPLAY="${EPISODIC_REPLAY:-False}"
-EPISODIC_MAX_OPEN_LEN="${EPISODIC_MAX_OPEN_LEN:-128}"
 
 # ── SAC entropy / critic tau ─────────────────────────────────────────────────
 INITIAL_ALPHA="${INITIAL_ALPHA:-0.01}"
@@ -221,6 +212,4 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "trainer.test_freq=$TEST_FREQ" \
   "trainer.val_before_train=$VAL_BEFORE_TRAIN" \
   "trainer.val_only=False" \
-  "trainer.episodic_replay=$EPISODIC_REPLAY" \
-  "trainer.episodic_max_open_len=$EPISODIC_MAX_OPEN_LEN" \
   "$@"

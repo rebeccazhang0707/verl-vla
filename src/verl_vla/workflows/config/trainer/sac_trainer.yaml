@@ -72,11 +72,3 @@ esi_redundant_time: 0
 
 # Device used by trainer-side tensors.
 device: cuda
-
-# Streaming episodic replay collection (docs/reinforcement-learning/episodic-replay.md).
-# Carries episodes across rollout windows so early/middle transitions are not
-# dropped (near-termination bias). Requires cluster.env.env_worker.auto_reset=True.
-episodic_replay: False
-
-# Per-lane open-buffer cap (macro-steps) before a forced truncation flush.
-episodic_max_open_len: 128
