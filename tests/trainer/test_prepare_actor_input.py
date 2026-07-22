@@ -22,6 +22,7 @@ transition continuity can be asserted exactly across rollout windows.
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 from verl import DataProto
 
@@ -95,12 +96,12 @@ def lane_time(data: DataProto, prefix: str) -> tuple[torch.Tensor, torch.Tensor]
     return state[:, 0], state[:, 1]
 
 
-def make_trainer(*, step_penalty: float = 0.0, world_size: int = 1) -> RobRaySACTrainer:
+def make_trainer(*, step_penalty: float = 0.0, world_size: int = 1, auto_reset: bool = True) -> RobRaySACTrainer:
     trainer = RobRaySACTrainer.__new__(RobRaySACTrainer)
     trainer.trainer_config = SimpleNamespace(step_penalty=step_penalty)
     trainer.global_steps = 0
     trainer.cluster = SimpleNamespace(actor_worker_group=SimpleNamespace(world_size=world_size))
-    trainer._episode_buffer = EpisodeBuffer()
+    trainer._episode_buffer = EpisodeBuffer(auto_reset=auto_reset)
     return trainer
 
 
@@ -191,10 +192,30 @@ def test_prepare_actor_input_pads_transitions_to_actor_world_size():
     assert out.batch["info.valids"].sum().item() == 3
 
 
+def test_non_auto_reset_rejects_lane_without_done():
+    """Without auto reset the next rollout starts from a real reset, so a lane
+    that ends the window mid-episode would splice with an unrelated episode."""
+    trainer = make_trainer(auto_reset=False)
+
+    with pytest.raises(ValueError, match="without a done in lanes \\[1\\]"):
+        trainer._prepare_actor_input(make_rollout(2, 3, terminated={(0, 2)}))
+
+
+def test_non_auto_reset_accepts_done_in_every_lane():
+    trainer = make_trainer(auto_reset=False)
+
+    # lane0 finishes early and pads with repeated terminal dones; lane1 finishes at the window end.
+    out = trainer._prepare_actor_input(make_rollout(2, 4, terminated={(0, 1), (0, 2), (0, 3), (1, 3)}))
+
+    assert out is not None and len(out) == 6  # lane0 steps 0-1 + lane1 steps 0-3; padding discarded
+
+
 if __name__ == "__main__":
     test_prepare_actor_input_emits_complete_episodes_with_episode_success()
     test_prepare_actor_input_discards_single_slot_done_segments()
     test_prepare_actor_input_recovers_cross_rollout_episode()
     test_prepare_actor_input_keeps_open_episode_until_done()
     test_prepare_actor_input_pads_transitions_to_actor_world_size()
+    test_non_auto_reset_rejects_lane_without_done()
+    test_non_auto_reset_accepts_done_in_every_lane()
     print("all actor input preparation tests passed")

@@ -79,7 +79,8 @@ class RobRaySACTrainer:
         self.trainer_config: SACTrainerConfig = instantiate(trainer_config)
         self.config = OmegaConf.create(tracking_config)
 
-        self._episode_buffer = EpisodeBuffer()
+        auto_reset = bool(OmegaConf.select(self.config, "cluster.env.env_worker.auto_reset", default=False))
+        self._episode_buffer = EpisodeBuffer(auto_reset=auto_reset)
 
     def _prepare_actor_input(self, rollout_output: DataProto) -> DataProto | None:
         """Collect complete episodes and turn them into SAC transitions."""
