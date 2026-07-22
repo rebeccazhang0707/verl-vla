@@ -31,6 +31,7 @@ from verl_vla.utils.data import (
     flatten_trajectories,
     reduce_substep_dims,
 )
+from verl_vla.utils.episode_collector import EpisodeCollector
 from verl_vla.utils.rlpd import (
     iter_rlpd_replay_prefill_batches,
     pad_dataproto_to_divisor_with_valid_mask,
@@ -67,6 +68,16 @@ def prepare_sac_actor_input(
     rollout_output.batch["info.success_mask"] = success_mask.float()
     rollout_output.meta_info["global_steps"] = global_steps
 
+    # Collection-side masking diagnostics: how much of the raw [B, S] rollout the
+    # legacy per-window mask keeps vs. drops. These expose the near-termination bias directly.
+    total_chunks = int(valid_mask.numel())
+    valid_chunks = int(valid_mask.sum().item())
+    collect_valid_ratio = (valid_chunks / total_chunks) if total_chunks else 1.0
+    rows_without_done_ratio = float((~done_steps.any(dim=1)).float().mean().item()) if done_steps.numel() else 0.0
+    rollout_output.meta_info["data/collect_valid_ratio"] = collect_valid_ratio
+    rollout_output.meta_info["data/collect_dropped_ratio"] = 1.0 - collect_valid_ratio
+    rollout_output.meta_info["data/collect_rows_without_done_ratio"] = rows_without_done_ratio
+
     rollout_output = add_transition_prefixes(rollout_output, transition_boundary_mask=done_steps)
     return flatten_trajectories(rollout_output)
 
@@ -82,6 +93,76 @@ class RobRaySACTrainer:
         self.tracking_config = tracking_config
         self.trainer_config: SACTrainerConfig = instantiate(trainer_config)
         self.config = OmegaConf.create(tracking_config)
+
+        self._episode_collector: EpisodeCollector | None = None
+        self._stashed_transitions: list[DataProto] = []
+        if self.trainer_config.episodic_replay:
+            auto_reset = bool(OmegaConf.select(self.config, "cluster.env.env_worker.auto_reset", default=False))
+            if not auto_reset:
+                raise ValueError(
+                    "trainer.episodic_replay=True requires cluster.env.env_worker.auto_reset=True: "
+                    "without auto reset each rollout starts from a real reset and the legacy "
+                    "per-rollout masking path is already correct."
+                )
+            self._episode_collector = EpisodeCollector(
+                step_penalty=float(self.trainer_config.step_penalty),
+                max_open_len=int(self.trainer_config.episodic_max_open_len),
+            )
+
+    def _prepare_actor_input(self, rollout_output: DataProto | None) -> DataProto | None:
+        """Turn a rollout into SAC transitions, via the episodic collector when enabled.
+
+        ``rollout_output=None`` drains transitions stashed by an eval-time force
+        flush without ingesting new data. Returns ``None`` when there is nothing
+        to train on this step.
+        """
+        if self._episode_collector is None:
+            if rollout_output is None:
+                return None
+            return prepare_sac_actor_input(
+                rollout_output,
+                config=self.config,
+                trainer_config=self.trainer_config,
+                global_steps=self.global_steps,
+            )
+
+        parts = list(self._stashed_transitions)
+        self._stashed_transitions.clear()
+        meta_info: dict[str, Any] = {}
+        if rollout_output is not None:
+            meta_info = dict(rollout_output.meta_info)
+            transitions = self._episode_collector.ingest(rollout_output)
+            if transitions is not None:
+                parts.append(transitions)
+        if not parts:
+            return None
+
+        actor_input = parts[0] if len(parts) == 1 else DataProto.concat(parts)
+        actor_input.meta_info.update(meta_info)
+        actor_input.meta_info["global_steps"] = self.global_steps
+        actor_input.meta_info.setdefault("global_token_num", [0])
+        actor_input.meta_info.update(self._episode_collector.metrics())
+        return pad_dataproto_to_divisor_with_valid_mask(
+            actor_input,
+            int(self.cluster.actor_worker_group.world_size),
+            valid_key="info.valids",
+        )
+
+    def _flush_episode_collector(self) -> None:
+        """Force-flush open episode buffers ahead of a continuity break.
+
+        Eval rollouts reuse the training envs and overwrite their cached
+        observations, so the next training rollout does not continue the open
+        episodes. Flushed transitions are stashed and merged into the next
+        actor input. (With async_rollout the prefetched rollout may actually
+        predate the eval; flushing is then conservative — it truncates a still
+        continuous episode early, which is safe.)
+        """
+        if self._episode_collector is None:
+            return
+        flushed = self._episode_collector.force_flush_all()
+        if flushed is not None:
+            self._stashed_transitions.append(flushed)
 
     def _prefill_replay_pool_from_rlpd(self) -> None:
         rlpd_config = self.trainer_config.rlpd
@@ -187,12 +268,9 @@ class RobRaySACTrainer:
 
                             # compute rewards and other metrics, and prepare for actor update
                             metrics.update(rollout_metrics)
-                            actor_input = prepare_sac_actor_input(
-                                rollout_output,
-                                config=self.config,
-                                trainer_config=self.trainer_config,
-                                global_steps=self.global_steps,
-                            )
+                            actor_input = self._prepare_actor_input(rollout_output)
+                    elif self._stashed_transitions:
+                        actor_input = self._prepare_actor_input(None)
 
                     # === update policy ===
                     critic_only_update = training_step < rollout_times + critic_only_steps_after_rollout
@@ -226,6 +304,9 @@ class RobRaySACTrainer:
                         if is_last_step:
                             last_val_metrics = val_metrics
                     metrics.update(val_metrics)
+                    # Eval reuses the training envs and breaks per-lane continuity;
+                    # close the open episode buffers before the next rollout.
+                    self._flush_episode_collector()
 
                 # === save checkpoint ===
                 # Check if the ESI (Elastic Server Instance)/training plan is close to expiration.
