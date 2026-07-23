@@ -56,6 +56,16 @@ class VLAFSDPEngine(FSDPEngine):
         self._train_rng_state = None
         self._fsdp_unshard_exit_stack = None
 
+    def to(self, device: str, model: bool = True, optimizer: bool = True, grad: bool = True) -> None:
+        # verl enters every engine mode through to(), even when offload is
+        # disabled and no state needs to move. Its FSDP implementation still
+        # runs a full Python garbage collection on that no-op path, which
+        # stalls every VLA training step. Preserve the upstream lifecycle only
+        # when at least one kind of training state actually needs moving.
+        if not model and not optimizer and not grad:
+            return
+        super().to(device=device, model=model, optimizer=optimizer, grad=grad)
+
     def _build_module(self):
         if getattr(self.model_config, "native_architecture", None) is None:
             raise ValueError(
