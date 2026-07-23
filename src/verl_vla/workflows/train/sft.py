@@ -42,6 +42,7 @@ def _run_sft_remote(config):
         trainer = RobRaySFTTrainer(
             data_config=config.data,
             trainer_config=config.trainer,
+            profiler_config=config.global_profiler,
             cluster=cluster,
             tracking_config=cast(dict[str, Any], OmegaConf.to_container(config, resolve=True)),
         )

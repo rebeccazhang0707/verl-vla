@@ -204,12 +204,14 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
         aggressive_empty_cache(force_sync=True)
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="actor"))
+    @DistProfiler.annotate(color="red", role="actor_update")
     def update_actor(self, data: DataProto) -> DataProto:
         assert self._is_actor
         output = self.actor.train_mini_batch(data=data)
         return output.to("cpu") if output is not None else None
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="actor"), blocking=False)
+    @DistProfiler.annotate(color="red", role="actor_update")
     def update_actor_async(self, data: DataProto) -> DataProto:
         assert self._is_actor
         output = self.actor.train_mini_batch(data=data)

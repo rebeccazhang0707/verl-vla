@@ -19,6 +19,7 @@ from typing import Any
 
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
 from tqdm import tqdm
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer
 from verl.utils.checkpoint.checkpoint_manager import should_save_ckpt_esi
@@ -40,12 +41,14 @@ class RobRaySFTTrainer(RayPPOTrainer):
         self,
         data_config,
         trainer_config,
+        profiler_config: DictConfig,
         cluster: TrainCluster,
         tracking_config: dict[str, Any],
     ):
         self.cluster = cluster
         self.tracking_config = tracking_config
         self.trainer_config: SFTTrainerConfig = instantiate(trainer_config)
+        self.profiler_config = profiler_config
         self.use_critic = False
         self.use_reference_policy = False
         self.data_config: LeRobotDataLoaderConfig = instantiate(data_config)
@@ -96,11 +99,21 @@ class RobRaySFTTrainer(RayPPOTrainer):
         train_iter = iter(self.sft_dataloader)
         actor_output_future = None
         actor_output_epoch = self.epoch
+        profile_steps = set(self.profiler_config.steps or [])
+        profile_continuous_steps = bool(self.profiler_config.profile_continuous_steps)
+        profiling_active = False
         while self.global_steps < self.total_training_steps:
             timing_raw = {}
+            current_step = self.global_steps + 1
+            current_step_profile = current_step in profile_steps
+            next_step_profile = current_step + 1 in profile_steps
 
             with marked_timer("step", timing_raw):
                 if actor_output_future is None:
+                    if current_step_profile:
+                        with marked_timer("start_profile", timing_raw):
+                            self.cluster.start_profiling(step=current_step)
+                        profiling_active = True
                     actor_output_future, train_iter, actor_output_epoch = self._submit_sft_update(
                         train_iter,
                         timing_raw,
@@ -109,7 +122,17 @@ class RobRaySFTTrainer(RayPPOTrainer):
                 is_last_step, should_save = self._get_step_control_flags()
                 next_actor_output_future = None
                 next_actor_output_epoch = self.epoch
-                if not is_last_step and not should_save:
+                # A prefetched update may start before the next loop iteration.
+                # Keep profile start/stop RPCs on the boundaries of the updates
+                # named by global_profiler.steps, while retaining prefetch inside
+                # an unprofiled run or one continuous profiled interval.
+                can_prefetch_next = (
+                    not is_last_step
+                    and not should_save
+                    and current_step_profile == next_step_profile
+                    and (profile_continuous_steps or not current_step_profile)
+                )
+                if can_prefetch_next:
                     next_actor_output_future, train_iter, next_actor_output_epoch = self._submit_sft_update(
                         train_iter,
                         timing_raw,
@@ -123,6 +146,14 @@ class RobRaySFTTrainer(RayPPOTrainer):
                 actor_output_future = next_actor_output_future
                 actor_output_epoch = next_actor_output_epoch
                 self.global_steps += 1
+
+                stop_profile = current_step_profile and (
+                    not profile_continuous_steps or not next_step_profile or is_last_step
+                )
+                if stop_profile:
+                    with marked_timer("stop_profile", timing_raw):
+                        self.cluster.stop_profiling()
+                    profiling_active = False
 
                 if should_save:
                     with marked_timer("save_checkpoint", timing_raw, color="green"):
@@ -158,6 +189,8 @@ class RobRaySFTTrainer(RayPPOTrainer):
             tracking_logger.log(data=metrics, step=self.global_steps)
 
             if early_stop:
+                if profiling_active:
+                    self.cluster.stop_profiling()
                 progress_bar.set_postfix(
                     sft_loss=f"{metrics.get('sft/loss', 0.0):.4f}",
                     early_stop="true",

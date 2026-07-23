@@ -7,8 +7,8 @@
 # Instantiate verl profiler config.
 _target_: verl.utils.profiler.ProfilerConfig
 
-# Profiler tool name, for example nsys, npu, or torch.
-tool: null
+# Profiler tool selected by the workflow-level profiling schedule.
+tool: ${oc.select:global_profiler.tool,null}
 
 # Whether actor profiling is enabled.
 enable: False
@@ -20,7 +20,40 @@ all_ranks: False
 ranks: []
 
 # Directory for profiler outputs.
-save_path: null
+save_path: ${oc.select:global_profiler.save_path,null}
 
 # Tool-specific profiler config.
-tool_config: {}
+tool_config:
+
+  # Nsight Systems profiler config.
+  nsys:
+
+    # Instantiate the verl Nsight Systems config.
+    _target_: verl.utils.profiler.config.NsightToolConfig
+
+    # Whether each profiled operation writes a separate trace.
+    discrete: ${oc.select:global_profiler.global_tool_config.nsys.discrete,false}
+
+  # PyTorch profiler config.
+  torch:
+
+    # Instantiate the verl PyTorch profiler config.
+    _target_: verl.utils.profiler.config.TorchProfilerToolConfig
+
+    # Activities and metadata collected in the Chrome trace.
+    contents: []
+
+    # Whether each profiled operation writes a separate trace.
+    discrete: false
+
+  # PyTorch CUDA memory snapshot config.
+  torch_memory:
+
+    # Instantiate the verl CUDA memory profiler config.
+    _target_: verl.utils.profiler.config.TorchMemoryToolConfig
+
+    # Maximum number of allocation history entries.
+    trace_alloc_max_entries: ${oc.select:global_profiler.global_tool_config.torch_memory.trace_alloc_max_entries,100000}
+
+    # Maximum captured allocation stack depth.
+    stack_depth: ${oc.select:global_profiler.global_tool_config.torch_memory.stack_depth,32}
