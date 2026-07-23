@@ -68,6 +68,9 @@ cluster:
       # Whether recording waits for operator confirmation.
       confirm_before_record: True
 
+      # Pace operator-driven recording at the dataset frame rate.
+      target_step_hz: 30
+
       # Teleoperation configuration.
       teleop:
 
