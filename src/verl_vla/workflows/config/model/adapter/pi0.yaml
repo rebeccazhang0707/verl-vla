@@ -73,8 +73,10 @@ dsrl:
   # Projection width of the normalized robot state.
   state_latent_dim: 64
 
-  # Optional explicit actor input widths; null derives them from the model.
+  # Optional explicit prefix-feature width; null derives it from the model.
   feature_dim: null
+
+  # Optional explicit robot-state width; null derives it from the model.
   state_dim: null
 
   # false (RLinf parity): one shared noise vector broadcast over the chunk.
