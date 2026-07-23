@@ -1,12 +1,11 @@
 # GR00T Arena DSRL (latent-noise steering)
 
 DSRL ([Diffusion Steering via Reinforcement Learning](https://arxiv.org/abs/2506.15799),
-RLinf recipe: `libero_spatial_dsrl_openpi.yaml`) keeps the **whole VLA frozen** and
-trains only a small SAC policy over the flow-matching **initial noise `x0`**:
+DSRL keeps the **whole VLA frozen** and trains only a small SAC policy over the flow-matching **initial noise `x0`**:
 
 ```
 obs ──frozen backbone──▶ pooled VL features ┐
-obs ──processor────────▶ raw state          ┴─▶ noise actor (tanh Gaussian, ~0.5M params)
+obs ──processor────────▶ raw state  ────────┴─▶ noise actor (tanh Gaussian, ~0.5M params)
                                                    │  steering noise x0  (the SAC action)
                                                    ▼
                               frozen flow head, deterministic Euler ODE
