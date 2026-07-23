@@ -92,8 +92,8 @@ class AsyncRecorder(BaseRecorder):
         self._enqueue("clear_episode", env_id=env_id)
 
     @override
-    def set_mode(self, mode: str) -> None:
-        self._enqueue("set_mode", mode=mode)
+    def set_mode(self, mode: str) -> bool:
+        return bool(self._run_sync("set_mode", mode=mode))
 
     @override
     def pop_completed(self) -> Path | None:

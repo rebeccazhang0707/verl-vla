@@ -54,9 +54,14 @@ class VideoRecorder(BaseRecorder):
         self._video_counts: dict[str, np.ndarray] = {self.mode: np.zeros(num_envs, dtype=np.int64)}
 
     @override
-    def set_mode(self, mode: str) -> None:
+    def set_mode(self, mode: str) -> bool:
+        if mode == self.mode:
+            return False
+        for frames in self._frames:
+            frames.clear()
         self.mode = mode
         self._video_counts.setdefault(mode, np.zeros(self.num_envs, dtype=np.int64))
+        return True
 
     @override
     def record_once(

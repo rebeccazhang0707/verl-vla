@@ -22,13 +22,13 @@ import verl_vla.recorder.impl.video as video_module
 from verl_vla.envs.base import BaseEnv
 from verl_vla.recorder.base import BaseRecorder
 from verl_vla.recorder.impl.video import VideoRecorder
-from verl_vla.recorder.recorder import MultiRecorder
 
 
 class _SpyRecorder(BaseRecorder):
     def __init__(self) -> None:
         self.modes: list[str] = []
         self.cleared: list[int] = []
+        self.mode = "train"
 
     def record_once(self, **kwargs) -> None:
         pass
@@ -39,8 +39,13 @@ class _SpyRecorder(BaseRecorder):
     def clear_episode(self, env_id: int = 0) -> None:
         self.cleared.append(env_id)
 
-    def set_mode(self, mode: str) -> None:
+    def set_mode(self, mode: str) -> bool:
+        if mode == self.mode:
+            return False
+        self.mode = mode
         self.modes.append(mode)
+        self.cleared.extend([0, 1])
+        return True
 
     def finalize(self) -> None:
         pass
@@ -66,40 +71,26 @@ class _ModeFakeEnv(BaseEnv):
         raise NotImplementedError
 
 
-def test_set_recorder_mode_forwards_and_clears_buffers() -> None:
+def test_reset_switches_recorder_mode_and_clears_buffers() -> None:
     recorder = _SpyRecorder()
     env = _ModeFakeEnv(recorder)
     env._recorder_episode_done[:] = True
 
-    env.set_recorder_mode("train")
+    env.reset(options={"env_idx": [0, 1], "mode": "train"})
     assert recorder.modes == []
     assert recorder.cleared == []
 
-    env.set_recorder_mode("eval")
+    env.reset(options={"env_idx": [0, 1], "mode": "eval"})
     assert recorder.modes == ["eval"]
     assert recorder.cleared == [0, 1]
     assert not env._recorder_episode_done.any()
-
-    env.set_recorder_mode("eval")
-    assert recorder.modes == ["eval"]
-
-
-def test_reset_applies_mode_even_on_auto_reset_early_return() -> None:
-    recorder = _SpyRecorder()
-    env = _ModeFakeEnv(recorder)
-
-    env.reset(options={"env_idx": [0, 1], "mode": "eval"})
-    assert recorder.modes == ["eval"]
 
     # Auto-reset early return still switches the recorder back to train.
     env.reset(options={"env_idx": [0, 1], "mode": "train"})
     assert recorder.modes == ["eval", "train"]
 
-
-def test_multi_recorder_forwards_set_mode() -> None:
-    children = [_SpyRecorder(), _SpyRecorder()]
-    MultiRecorder(list(children)).set_mode("eval")
-    assert all(child.modes == ["eval"] for child in children)
+    env.reset(options={"env_idx": [0, 1], "mode": "eval"})
+    assert recorder.modes == ["eval", "train", "eval"]
 
 
 def test_video_recorder_saves_per_mode_dirs_and_counts(monkeypatch, tmp_path: Path) -> None:
