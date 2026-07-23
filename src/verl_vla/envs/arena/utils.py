@@ -33,25 +33,32 @@ def arena_success_reward(env):
 
 
 def arena_subtask_graded_reward(env):
-    """Graded RL reward for a SEQUENTIAL task = fraction of subtasks completed (0 / 0.5 / 1.0).
+    """Graded RL reward for a SEQUENTIAL task, paid ONCE per newly-completed subtask.
 
-    Reads the latched per-subtask state the ``success`` termination wrote to
-    ``env.extras['subtask_success_state']`` this step (terminations run before rewards,
-    so the state is fresh and not advanced twice). Gives long-horizon tasks an early
-    (e.g. pick-and-place) credit signal instead of a single composite +1 only after
-    BOTH subtasks. Falls back to the composite ``success`` term when the task exposes
-    no subtask state.
+    Emits the per-step *increase* in the completed-subtask fraction read from the
+    latched ``env.extras['subtask_success_state']``, so the episode return telescopes to
+    the final fraction (0 / 0.5 / 1.0) without letting the agent farm reward by lingering.
+    A drop in the fraction marks a reset and restarts ``prev`` from 0. Falls back to the
+    composite ``success`` term when the task exposes no subtask state.
     """
     import torch
 
     state = getattr(env, "extras", {}).get("subtask_success_state", None)
     if not state:
         return env.termination_manager.get_term("success").float()
-    return torch.tensor(
+    cur = torch.tensor(
         [(sum(1 for x in s if x) / max(len(s), 1)) for s in state],
         device=env.device,
         dtype=torch.float32,
     )
+    prev = getattr(env, "_arena_subtask_frac_prev", None)
+    if prev is None or prev.shape != cur.shape:
+        prev = torch.zeros_like(cur)
+    # A drop (cur < prev) means the env reset and cleared the latched state -> start over.
+    prev = torch.where(cur < prev, torch.zeros_like(prev), prev)
+    reward = (cur - prev).clamp(min=0.0)
+    env._arena_subtask_frac_prev = torch.maximum(prev, cur)
+    return reward
 
 
 def apply_arena_rl_reward(env_cfg, subtask_reward: bool = False) -> bool:
@@ -61,7 +68,8 @@ def apply_arena_rl_reward(env_cfg, subtask_reward: bool = False) -> bool:
     otherwise be invisible to training. This mirrors the LIBERO RL setup
     (franka_libero_rl_env_cfg + isaac_env.py): install a ``RewTerm(weight = 1/step_dt)``
     that reads the ``success`` termination so exactly ``+1.0`` is emitted per solved
-    step (or graded 0/0.5/1.0 subtask progress when ``subtask_reward``).
+    step (or a one-off +0.5 per newly-completed subtask when ``subtask_reward``, so the
+    episode return still totals 0/0.5/1.0 without paying 0.5 every step after subtask 1).
 
     Crucially this ONLY adds the reward -- the termination terms are LEFT IN PLACE, so
     IsaacLab keeps owning per-step episode auto-reset (see ``docs/mdp_auto_reset.md``).
@@ -74,9 +82,9 @@ def apply_arena_rl_reward(env_cfg, subtask_reward: bool = False) -> bool:
 
     Args:
         env_cfg: the Arena env cfg to patch in place.
-        subtask_reward: if True, use the graded subtask reward (0/0.5/1.0 = fraction
-            of subtasks done) for earlier long-horizon credit, vs the single
-            composite +1. Gate: ``subtask_reward``.
+        subtask_reward: if True, pay a one-off +0.5 per newly-completed subtask
+            (episode return telescopes to 0/0.5/1.0) for earlier long-horizon credit
+            without per-step farming, vs the single composite +1. Gate: ``subtask_reward``.
 
     Returns:
         True if the success reward was installed, False if no success termination

@@ -75,7 +75,8 @@ image_shape:
 
 # Reward -----------------------------------------------------------------------
 
-# Grade the sequential subtasks as 0, 0.5, and 1.0.
+# Pay a one-off +0.5 per newly-completed subtask (episode return totals 0/0.5/1.0),
+# instead of a single composite +1 -- gives long-horizon credit without per-step farming.
 subtask_reward: true
 
 # Runtime behavior -------------------------------------------------------------
