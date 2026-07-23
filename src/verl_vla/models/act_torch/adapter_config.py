@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -32,29 +31,22 @@ class ACTCriticConfig:
 class ACTAdapterConfig:
     DEFAULTS = {
         "policy_type": "libero",
-        "n_action_steps": 100,
-        "temporal_ensemble_coeff": None,
-        "state_norm_stats": None,
-        "action_norm_stats": None,
-        "image_norm_stats": None,
         "sac_action_noise_scale": 0.1,
         "sac_action_noise_schedule_enabled": False,
         "sac_action_noise_schedule_initial": None,
         "sac_action_noise_schedule_final": None,
         "sac_action_noise_schedule_method": "cos",
         "freeze_vision_tower": True,
-        "optimizer_lr_backbone": 1e-5,
     }
 
     def __init__(
         self,
         *,
-        policy_config: Mapping[str, Any],
         model_path: str | Path | None = None,
         **overrides: Any,
     ) -> None:
         critic = ACTCriticConfig(**dict(overrides.pop("critic", {})))
-        values = {**self.DEFAULTS, **dict(policy_config), **overrides}
+        values = {**self.DEFAULTS, **overrides}
         self.model_path = str(model_path) if model_path is not None else None
         self.critic = critic
         for name, value in values.items():

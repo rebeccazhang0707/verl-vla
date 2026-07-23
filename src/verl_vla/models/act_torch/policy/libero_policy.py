@@ -18,7 +18,6 @@ from verl.protocol import DataProto
 
 from .base import ActInput, ActOutput
 
-ACT_MAX_STATE_DIM = 8
 LIBERO_ACTION_DIM = 7
 
 
@@ -60,11 +59,9 @@ class LiberoActInput(ActInput):
         wrist_images = _normalize_image_range(wrist_images)
 
         batch_size = images.shape[0]
-        cam_high = images
-        left_wrist = wrist_images
         input.images = {
-            "observation.images.cam_high": cam_high,
-            "observation.images.cam_left_wrist": left_wrist,
+            "observation.images.image": images,
+            "observation.images.wrist_image": wrist_images,
         }
         input.img_masks = [
             torch.ones((batch_size,), device=device, dtype=torch.bool),
@@ -74,9 +71,7 @@ class LiberoActInput(ActInput):
         input.task = list(env_obs.non_tensor_batch.get("task", ["" for _ in range(batch_size)]))
 
         state = env_obs.batch["observation.state"]
-        input.state = torch.nn.functional.pad(
-            state, (0, max(0, ACT_MAX_STATE_DIM - state.shape[-1])), "constant", 0
-        ).to(device=device, dtype=torch.float32)
+        input.state = state.to(device=device, dtype=torch.float32)
 
         if "observation.environment_state" in env_obs.batch:
             input.env_state = env_obs.batch["observation.environment_state"].to(device=device, dtype=torch.float32)

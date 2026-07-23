@@ -88,13 +88,14 @@ class VLAModelConfig(HFModelConfig):
 
         class_name = str(checkpoint_config.get("_class_name", ""))
         model_type = str(checkpoint_config.get("model_type", ""))
+        policy_type = str(checkpoint_config.get("type", ""))
         architectures = " ".join(checkpoint_config.get("architectures", []))
         identity = f"{class_name} {model_type} {architectures}".lower()
         if class_name == "PI0Policy":
             architecture = "pi0"
         elif model_type == "openvla":
             architecture = "openvla_oft"
-        elif model_type == "act":
+        elif policy_type == "act":
             architecture = "act"
         elif model_type == "recap_value_critic":
             architecture = "recap_value_critic"

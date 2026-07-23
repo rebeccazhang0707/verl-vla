@@ -13,96 +13,49 @@
 # limitations under the License.
 
 import logging
-from collections import deque
+from collections.abc import Mapping
+from copy import deepcopy
+from pathlib import Path
 from typing import Literal, Optional, cast
 
 import einops
 import torch
-import torch.nn.functional as F
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.processor import PolicyProcessorPipeline
+from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 from torch import Tensor, nn
 from torch.distributed.fsdp import register_fsdp_forward_method
 from typing_extensions import override
 from verl.protocol import DataProto
 
 from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelMixin
-from .act_utils import IdentityTransform, ImageTransform, Normalize, Unnormalize
 from .adapter_config import ACTAdapterConfig
 from .critic import CRITIC_BACKENDS
-from .model.modeling_act import ACT
 from .policy import get_act_policy_classes
 from .policy.base import ActOutput
 
 logger = logging.getLogger(__name__)
 
 
-class ACTTemporalEnsembler:
-    def __init__(self, temporal_ensemble_coeff: float, chunk_size: int) -> None:
-        self.chunk_size = chunk_size
-        self.ensemble_weights = torch.exp(-temporal_ensemble_coeff * torch.arange(chunk_size))
-        self.ensemble_weights_cumsum = torch.cumsum(self.ensemble_weights, dim=0)
-        self.reset()
-
-    def reset(self):
-        self.ensembled_actions = None
-        self.ensembled_actions_count = None
-
-    def update(self, actions: Tensor) -> Tensor:
-        self.ensemble_weights = self.ensemble_weights.to(device=actions.device)
-        self.ensemble_weights_cumsum = self.ensemble_weights_cumsum.to(device=actions.device)
-        if self.ensembled_actions is None:
-            self.ensembled_actions = actions.clone()
-            self.ensembled_actions_count = torch.ones(
-                (self.chunk_size, 1), dtype=torch.long, device=self.ensembled_actions.device
-            )
-        else:
-            self.ensembled_actions *= self.ensemble_weights_cumsum[self.ensembled_actions_count - 1]
-            self.ensembled_actions += actions[:, :-1] * self.ensemble_weights[self.ensembled_actions_count]
-            self.ensembled_actions /= self.ensemble_weights_cumsum[self.ensembled_actions_count]
-            self.ensembled_actions_count = torch.clamp(self.ensembled_actions_count + 1, max=self.chunk_size)
-            self.ensembled_actions = torch.cat([self.ensembled_actions, actions[:, -1:]], dim=1)
-            self.ensembled_actions_count = torch.cat(
-                [self.ensembled_actions_count, torch.ones_like(self.ensembled_actions_count[-1:])]
-            )
-        action, self.ensembled_actions, self.ensembled_actions_count = (
-            self.ensembled_actions[:, 0],
-            self.ensembled_actions[:, 1:],
-            self.ensembled_actions_count[1:],
-        )
-        return action
-
-
 class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, SupportSFTTraining):
-    def __init__(self, policy: ACT, config: ACTAdapterConfig):
+    def __init__(
+        self,
+        policy: ACTPolicy,
+        *,
+        preprocessor: PolicyProcessorPipeline,
+        postprocessor: PolicyProcessorPipeline,
+        adapter_config: Mapping | None = None,
+        model_path: str | Path | None = None,
+    ):
         super().__init__()
+        config = ACTAdapterConfig(model_path=model_path, **dict(adapter_config or {}))
         SupportSFTTraining.__init__(self, config)
         self.config = config
         self.init_trainable_model(policy=policy)
+        self.preprocessor = preprocessor
+        self.postprocessor = postprocessor
 
-        if self.config.state_norm_stats:
-            self.state_normalize_transform = Normalize(self.config.state_norm_stats)
-            self.state_unnormalize_transform = Unnormalize(self.config.state_norm_stats)
-        else:
-            self.state_normalize_transform = IdentityTransform()
-            self.state_unnormalize_transform = IdentityTransform()
-
-        if self.config.action_norm_stats:
-            self.action_normalize_transform = Normalize(self.config.action_norm_stats)
-            self.action_unnormalize_transform = Unnormalize(self.config.action_norm_stats)
-        else:
-            self.action_normalize_transform = IdentityTransform()
-            self.action_unnormalize_transform = IdentityTransform()
-
-        self.image_transform = ImageTransform(
-            resize_size=self.config.image_resolution,
-            norm_stats=getattr(self.config, "image_norm_stats", None),
-        )
-
-        if self.config.temporal_ensemble_coeff is not None:
-            self.temporal_ensembler = ACTTemporalEnsembler(self.config.temporal_ensemble_coeff, self.config.chunk_size)
-        else:
-            self._action_queue = deque([], maxlen=self.config.n_action_steps)
-
-        if getattr(self.config, "sac_enable", False):
+        if self.config.sac_enable:
             self._ensure_sac_components()
 
     def _ensure_sac_components(self):
@@ -115,10 +68,7 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
         self.critic_backend.to(next(self.policy.parameters()).device)
 
     def reset(self):
-        if self.config.temporal_ensemble_coeff is not None:
-            self.temporal_ensembler.reset()
-        else:
-            self._action_queue = deque([], maxlen=self.config.n_action_steps)
+        self.policy.reset()
 
     def _get_act_policy_classes(self):
         return get_act_policy_classes(self.config.policy_type)
@@ -127,10 +77,56 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
         self.to(device)
         return self
 
-    def forward(
-        self, images: list[Tensor], state: Tensor, actions: Tensor | None = None, env_state: Tensor | None = None
-    ) -> tuple[Tensor, tuple[Tensor | None, Tensor | None]]:
-        return self.policy(images, state, actions, env_state=env_state)
+    def _build_policy_batch(
+        self,
+        act_input,
+        *,
+        actions: Tensor | None = None,
+        action_is_pad: Tensor | None = None,
+    ) -> dict[str, Tensor]:
+        batch: dict[str, Tensor] = {}
+        policy_config = self.policy.config
+        if policy_config.robot_state_feature is not None:
+            state_dim = int(policy_config.robot_state_feature.shape[0])
+            if act_input.state.shape[-1] != state_dim:
+                raise ValueError(
+                    f"ACT state dim mismatch: source has {act_input.state.shape[-1]}, checkpoint expects {state_dim}"
+                )
+            batch[OBS_STATE] = act_input.state
+
+        if policy_config.env_state_feature is not None:
+            if act_input.env_state is None:
+                raise ValueError(f"ACT checkpoint requires {OBS_ENV_STATE}")
+            env_state_dim = int(policy_config.env_state_feature.shape[0])
+            if act_input.env_state.shape[-1] != env_state_dim:
+                raise ValueError(
+                    f"ACT environment state dim mismatch: source has {act_input.env_state.shape[-1]}, "
+                    f"checkpoint expects {env_state_dim}"
+                )
+            batch[OBS_ENV_STATE] = act_input.env_state
+
+        expected_images = tuple(policy_config.image_features)
+        source_images = tuple(act_input.images)
+        if set(source_images) != set(expected_images):
+            raise ValueError(
+                f"ACT image feature mismatch: source has {source_images}, checkpoint expects {expected_images}"
+            )
+        for key in expected_images:
+            image = act_input.images[key]
+            expected_shape = tuple(policy_config.image_features[key].shape)
+            if tuple(image.shape[1:]) != expected_shape:
+                raise ValueError(
+                    f"ACT image shape mismatch for {key}: source has {tuple(image.shape[1:])}, "
+                    f"checkpoint expects {expected_shape}"
+                )
+            batch[key] = image
+
+        if actions is not None:
+            batch[ACTION] = actions
+            if action_is_pad is None:
+                raise ValueError("ACT training requires an action padding mask")
+            batch["action_is_pad"] = action_is_pad
+        return self.preprocessor(batch)
 
     def embed_prefix(
         self, images: dict[str, Tensor], state: Tensor, env_state: Tensor | None = None
@@ -142,25 +138,25 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
 
         batch_size = image_list[0].shape[0] if image_list else state.shape[0]
 
-        latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32, device=state.device)
+        model = self.policy.model
+        config = self.policy.config
+        latent_sample = torch.zeros([batch_size, config.latent_dim], dtype=torch.float32, device=state.device)
 
-        encoder_in_tokens = [self.policy.encoder_latent_input_proj(latent_sample)]
-        encoder_in_pos_embed = list(
-            self.policy.encoder_1d_feature_pos_embed.weight.unsqueeze(1).expand(-1, batch_size, -1)
-        )
+        encoder_in_tokens = [model.encoder_latent_input_proj(latent_sample)]
+        encoder_in_pos_embed = list(model.encoder_1d_feature_pos_embed.weight.unsqueeze(1))
 
-        if self.config.state_dim > 0:
-            encoder_in_tokens.append(self.policy.encoder_robot_state_input_proj(state))
-        if self.config.env_state_dim > 0:
+        if config.robot_state_feature is not None:
+            encoder_in_tokens.append(model.encoder_robot_state_input_proj(state))
+        if config.env_state_feature is not None:
             if env_state is None:
-                env_state = torch.zeros(batch_size, self.config.env_state_dim, device=state.device)
-            encoder_in_tokens.append(self.policy.encoder_env_state_input_proj(env_state))
+                raise ValueError(f"ACT checkpoint requires {OBS_ENV_STATE}")
+            encoder_in_tokens.append(model.encoder_env_state_input_proj(env_state))
 
-        if self.config.num_cameras > 0 and image_list:
+        if config.image_features:
             for img in image_list:
-                cam_features = self.policy.backbone(img)["feature_map"]
-                cam_pos_embed = self.policy.encoder_cam_feat_pos_embed(cam_features).to(dtype=cam_features.dtype)
-                cam_features = self.policy.encoder_img_feat_input_proj(cam_features)
+                cam_features = model.backbone(img)["feature_map"]
+                cam_pos_embed = model.encoder_cam_feat_pos_embed(cam_features).to(dtype=cam_features.dtype)
+                cam_features = model.encoder_img_feat_input_proj(cam_features)
 
                 cam_features = einops.rearrange(cam_features, "b c h w -> (h w) b c")
                 cam_pos_embed = einops.rearrange(cam_pos_embed, "b c h w -> (h w) b c")
@@ -171,7 +167,7 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
         encoder_in_tokens = torch.stack(encoder_in_tokens, axis=0)
         encoder_in_pos_embed = torch.stack(encoder_in_pos_embed, axis=0)
 
-        encoder_out = self.policy.encoder(encoder_in_tokens, pos_embed=encoder_in_pos_embed)
+        encoder_out = model.encoder(encoder_in_tokens, pos_embed=encoder_in_pos_embed)
 
         encoder_out = encoder_out.transpose(0, 1)
         encoder_in_pos_embed = encoder_in_pos_embed.transpose(0, 1)
@@ -184,39 +180,29 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
     ) -> tuple[ActOutput, dict, dict]:
         act_input_cls, act_output_cls = self._get_act_policy_classes()
         act_input = act_input_cls.from_env_obs(env_obs)
+        policy_batch = self._build_policy_batch(act_input)
 
-        state = self.state_normalize_transform(act_input.state)
-        env_state = act_input.env_state
-        images = act_input.images
-        if images and self.image_transform:
-            images = {k: self.image_transform.call_batch([v], key=k)[0] for k, v in images.items()}
-
-        self.policy.eval()
-
-        if self.config.temporal_ensemble_coeff is not None:
-            actions_pred, _ = self.policy(images, state, env_state=env_state)
-            actions_pred = self.action_unnormalize_transform(actions_pred)
-            action = self.temporal_ensembler.update(actions_pred)
-            action = action.unsqueeze(1)
+        if self.policy.config.temporal_ensemble_coeff is not None:
+            action = self.policy.select_action(policy_batch).unsqueeze(1)
         else:
-            actions_pred, _ = self.policy(images, state, env_state=env_state)
-            action = self.action_unnormalize_transform(actions_pred)[:, : self.config.n_action_steps]
-
-        action = action.float()
+            action = self.policy.predict_action_chunk(policy_batch)[:, : self.policy.config.n_action_steps]
+        action = self.postprocessor(action).float()
 
         act_output = act_output_cls.from_model_output(
             {
                 "full_action": action,
                 "log_probs": torch.zeros(action.shape[0], device=action.device, dtype=torch.float32),
-                "action_chunk_size": 1
-                if self.config.temporal_ensemble_coeff is not None
-                else self.config.n_action_steps,
+                "action_chunk_size": (
+                    1 if self.policy.config.temporal_ensemble_coeff is not None else self.policy.config.n_action_steps
+                ),
             }
         )
 
         s = {
-            "states": state,
-            "images": torch.stack(list(images.values()), dim=1) if images else torch.tensor([]),
+            "states": policy_batch.get(OBS_STATE, torch.tensor([], device=action.device)),
+            "images": torch.stack([policy_batch[key] for key in self.policy.config.image_features], dim=1)
+            if self.policy.config.image_features
+            else torch.tensor([], device=action.device),
         }
         a = {
             "full_action": action,
@@ -224,43 +210,49 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
 
         return act_output, s, a
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *, adapter_config=None, policy_config=None, **kwargs):
-        policy = ACT.from_pretrained(pretrained_model_name_or_path, config=policy_config, **kwargs)
-        config = ACTAdapterConfig(
-            policy_config=policy.config.to_dict(),
-            model_path=pretrained_model_name_or_path,
-            **dict(adapter_config or {}),
-        )
-        return cls(policy, config)
-
     def save_pretrained(self, save_directory, *args, state_dict=None, **kwargs):
         del args
         self.export_policy(save_directory, state_dict=state_dict, **kwargs)
 
+    def can_generate(self) -> bool:
+        return False
+
     def export_policy(self, output_dir, *, state_dict=None, **kwargs):
-        policy_state = None if state_dict is None else self.extract_policy_state_dict(state_dict)
-        self.policy.save_pretrained(output_dir, state_dict=policy_state, **kwargs)
+        if kwargs:
+            raise TypeError(f"Unsupported ACT export options: {sorted(kwargs)}")
+        policy_state = self.policy.state_dict() if state_dict is None else self.extract_policy_state_dict(state_dict)
+        native_config = deepcopy(self.policy.config)
+        construction_config = deepcopy(native_config)
+        construction_config.pretrained_backbone_weights = None
+        export_policy = ACTPolicy(construction_config)
+        export_policy.config = native_config
+        export_policy.load_state_dict(policy_state, strict=True)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        export_policy.save_pretrained(output_dir)
+        self.preprocessor.save_pretrained(output_dir)
+        self.postprocessor.save_pretrained(output_dir)
 
     def freeze_vision_tower(self) -> None:
-        if hasattr(self.policy, "backbone") and self.policy.backbone is not None:
-            for param in self.policy.backbone.parameters():
+        if hasattr(self.policy.model, "backbone") and self.policy.model.backbone is not None:
+            for param in self.policy.model.backbone.parameters():
                 param.requires_grad = False
-            self.policy.backbone.eval()
+            self.policy.model.backbone.eval()
 
     def get_optim_params(self) -> list[dict]:
-        backbone_params = [p for n, p in self.named_parameters() if n.startswith("policy.backbone") and p.requires_grad]
+        backbone_prefix = "policy.model.backbone"
+        backbone_params = [p for n, p in self.named_parameters() if n.startswith(backbone_prefix) and p.requires_grad]
         other_params = [
             p
             for n, p in self.named_parameters()
-            if not n.startswith("policy.backbone") and not n.startswith("critic_backend") and p.requires_grad
+            if not n.startswith(backbone_prefix) and not n.startswith("critic_backend") and p.requires_grad
         ]
         param_groups = [{"params": other_params}]
         if backbone_params:
             param_groups.append(
                 {
                     "params": backbone_params,
-                    "lr": self.config.optimizer_lr_backbone,
+                    "lr": self.policy.config.optimizer_lr_backbone,
                 }
             )
         return param_groups
@@ -286,80 +278,67 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
 
         act_input_cls, _ = self._get_act_policy_classes()
         action_tensor = actions["action"]
-
-        if action_tensor.ndim == 2:
-            action_tensor = action_tensor.unsqueeze(1)
-
-        action_horizon = self.config.chunk_size
-        action_length = min(action_tensor.shape[1], action_horizon)
-        action_tensor = action_tensor[:, :action_horizon, : self.config.action_dim]
-
-        if action_mask is not None:
-            action_mask = action_mask[:, :action_horizon]
-
-        if action_tensor.shape[1] < action_horizon:
-            action_tensor = torch.nn.functional.pad(
-                action_tensor,
-                (0, 0, 0, action_horizon - action_tensor.shape[1]),
-                value=0.0,
+        policy_config = self.policy.config
+        expected_shape = (policy_config.chunk_size, policy_config.action_feature.shape[0])
+        if action_tensor.ndim != 3 or tuple(action_tensor.shape[1:]) != expected_shape:
+            raise ValueError(
+                f"ACT action batch must have shape (batch, {expected_shape[0]}, {expected_shape[1]}), "
+                f"got {tuple(action_tensor.shape)}"
             )
-            if action_mask is not None:
-                action_mask = torch.nn.functional.pad(
-                    action_mask,
-                    (0, action_horizon - action_mask.shape[1]),
-                    value=0.0,
-                )
-
-        action_tensor = self.action_normalize_transform(action_tensor)
+        if action_mask is None or tuple(action_mask.shape) != tuple(action_tensor.shape[:2]):
+            actual_shape = None if action_mask is None else tuple(action_mask.shape)
+            raise ValueError(f"ACT action mask must have shape {tuple(action_tensor.shape[:2])}, got {actual_shape}")
 
         with torch.no_grad():
             act_input = act_input_cls.from_env_obs(obs)
-            state = self.state_normalize_transform(act_input.state)
-            env_state = act_input.env_state
-            images = act_input.images
-            if images and self.image_transform:
-                images = {k: self.image_transform.call_batch([v], key=k)[0] for k, v in images.items()}
-
-        action_is_pad = None
-        if action_mask is not None:
             action_is_pad = ~action_mask.to(torch.bool)
+            policy_batch = self._build_policy_batch(
+                act_input,
+                actions=action_tensor,
+                action_is_pad=action_is_pad,
+            )
+            if self.policy.config.image_features:
+                policy_batch[OBS_IMAGES] = [policy_batch[key] for key in self.policy.config.image_features]
 
-        actions_pred, (mu, log_sigma_x2) = self.policy(images, state, action_tensor, action_is_pad, env_state=env_state)
-
-        abs_err = F.l1_loss(action_tensor, actions_pred, reduction="none")
-
-        if action_is_pad is None:
-            action_is_pad = (torch.arange(action_horizon, device=abs_err.device) >= action_length).unsqueeze(0)
+        actions_pred, (mu, log_sigma_x2) = self.policy.model(policy_batch)
+        normalized_actions = policy_batch[ACTION]
+        abs_err = torch.abs(normalized_actions - actions_pred)
         valid_mask = ~action_is_pad.unsqueeze(-1)
-        num_valid = valid_mask.sum() * abs_err.shape[-1]
-        l1_loss = (abs_err * valid_mask).sum() / num_valid.clamp_min(1)
+        l1_loss = (abs_err * valid_mask).mean(dim=(1, 2))
 
         loss = l1_loss
 
-        if self.config.use_vae and mu is not None and log_sigma_x2 is not None:
-            mean_kld = (-0.5 * (1 + log_sigma_x2 - mu.pow(2) - log_sigma_x2.exp())).sum(-1).mean()
-            loss = l1_loss + mean_kld * self.config.kl_weight
-            self.sft_metrics["kl_div"] = mean_kld.detach()
+        if self.policy.config.use_vae and mu is not None and log_sigma_x2 is not None:
+            kld = (-0.5 * (1 + log_sigma_x2 - mu.pow(2) - log_sigma_x2.exp())).sum(-1)
+            loss = l1_loss + kld * self.policy.config.kl_weight
+            self.sft_metrics["kl_div"] = kld.mean().detach()
 
-        self.sft_metrics["l1_loss"] = l1_loss.detach()
+        self.sft_metrics["l1_loss"] = l1_loss.mean().detach()
 
         valids = valids.to(device=loss.device, dtype=loss.dtype)
         return (loss * valids).sum() / valids.sum().clamp_min(1.0)
 
     @override
     def sac_init(self):
+        forward_methods = ["sac_sample_actions"]
+        if not self.config.sac_enable:
+            for method in forward_methods:
+                register_fsdp_forward_method(self, method)
+            return
+
         if not hasattr(self, "critic_backend"):
             raise RuntimeError(
                 "ACT SAC components must be created before distributed wrapping. "
                 "Set model.adapter.critic.enabled=true when building the model."
             )
-        forward_methods = [
-            "sft_loss",
-            "sac_sample_actions",
-            "sac_forward_critic",
-            "sac_forward_actor",
-            "sac_forward_state_features",
-        ]
+        forward_methods.extend(
+            [
+                "sft_loss",
+                "sac_forward_critic",
+                "sac_forward_actor",
+                "sac_forward_state_features",
+            ]
+        )
         for method in forward_methods:
             register_fsdp_forward_method(self, method)
 
@@ -438,7 +417,7 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
         batch_size = prefix_embs.shape[0]
 
         decoder_in = torch.zeros(
-            (self.config.chunk_size, batch_size, self.config.dim_model),
+            (self.policy.config.chunk_size, batch_size, self.policy.config.dim_model),
             dtype=prefix_embs.dtype,
             device=prefix_embs.device,
         )
@@ -446,17 +425,17 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
         encoder_out = prefix_embs.transpose(0, 1)
         encoder_in_pos_embed = encoder_in_pos_embed.transpose(0, 1)
 
-        decoder_out = self.policy.decoder(
+        decoder_out = self.policy.model.decoder(
             decoder_in,
             encoder_out,
             encoder_pos_embed=encoder_in_pos_embed,
-            decoder_pos_embed=self.policy.decoder_pos_embed.weight.unsqueeze(1),
+            decoder_pos_embed=self.policy.model.decoder_pos_embed.weight.unsqueeze(1),
         )
 
         decoder_out = decoder_out.transpose(0, 1)
-        actions = self.policy.action_head(decoder_out)
+        actions = self.policy.model.action_head(decoder_out)
 
-        actions = actions[:, : self.config.n_action_steps, :]
+        actions = actions[:, : self.policy.config.n_action_steps, :]
 
         resolved_noise_scale = self.config.sac_action_noise_scale if noise_scale is None else noise_scale
         if resolved_noise_scale > 0:
@@ -466,9 +445,9 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
         _, act_output_cls = self._get_act_policy_classes()
         act_output = act_output_cls.from_model_output(
             {
-                "full_action": self.action_unnormalize_transform(actions),
+                "full_action": self.postprocessor(actions).to(device=actions.device),
                 "log_probs": None,
-                "action_chunk_size": self.config.n_action_steps,
+                "action_chunk_size": self.policy.config.n_action_steps,
             }
         )
 
@@ -480,11 +459,12 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
         act_input = act_input_cls.from_env_obs(obs)
 
         with torch.no_grad():
-            state = self.state_normalize_transform(act_input.state)
-            env_state = act_input.env_state
-            images = act_input.images
-            if images and self.image_transform:
-                images = {k: self.image_transform.call_batch([v], key=k)[0] for k, v in images.items()}
+            policy_batch = self._build_policy_batch(act_input)
+            state = policy_batch.get(OBS_STATE)
+            if state is None:
+                state = torch.empty((len(obs), 0), device=next(self.policy.parameters()).device)
+            env_state = policy_batch.get(OBS_ENV_STATE)
+            images = {key: policy_batch[key] for key in self.policy.config.image_features}
 
         prefix_embs, encoder_in_pos_embed = self.embed_prefix(images, state, env_state)
 

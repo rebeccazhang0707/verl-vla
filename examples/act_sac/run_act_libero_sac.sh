@@ -25,7 +25,6 @@ ENV_NUM_ENVS=1
 
 PIPELINE_STAGE_NUM=2
 MAX_EPISODE_STEPS=256
-ACTION_CHUNK_STEPS=10
 MAX_INTERACTIONS=32
 
 LIBERO_TASK_SUITE=libero_spatial
@@ -71,10 +70,7 @@ export VERL_LOGGING_LEVEL=INFO
     cluster.actor_rollout_ref.model.load_tokenizer=False \
     cluster.actor_rollout_ref.model.enable_gradient_checkpointing=False \
     cluster.actor_rollout_ref.model.use_remove_padding=False \
-    cluster.actor_rollout_ref.model.override_config.attn_implementation=eager \
     cluster.actor_rollout_ref.model.adapter.policy_type=libero \
-    cluster.actor_rollout_ref.model.override_config.chunk_size=$ACTION_CHUNK_STEPS \
-    cluster.actor_rollout_ref.model.adapter.n_action_steps=$ACTION_CHUNK_STEPS \
     cluster.actor_rollout_ref.model.adapter.critic.enabled=True \
     cluster.actor_rollout_ref.model.adapter.critic.type=mean_pool \
     cluster.actor_rollout_ref.data_keys.action_mask=null \

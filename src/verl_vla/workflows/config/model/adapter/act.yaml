@@ -7,20 +7,9 @@
 # Select the LIBERO policy path in the model implementation.
 policy_type: libero
 
-# Number of action steps returned to the environment by the ACT policy adapter.
-n_action_steps: 20
-
-# Optional temporal-ensemble coefficient for rollout-time action smoothing.
-temporal_ensemble_coeff: null
-
-# Optional state normalization statistics JSON.
-state_norm_stats: null
-
-# Optional action normalization statistics JSON.
-action_norm_stats: null
-
-# Optional image normalization statistics JSON.
-image_norm_stats: null
+# Dataset root used to initialize LeRobot's native processors when the model
+# artifact contains only an ACT config and no saved processor artifacts yet.
+processor_dataset_root: null
 
 # Optional critic owned by the ACT adapter.
 critic:
@@ -60,6 +49,3 @@ sac_action_noise_schedule_method: cos
 
 # Whether to freeze the vision tower during training.
 freeze_vision_tower: True
-
-# Learning rate for the vision backbone optimizer group.
-optimizer_lr_backbone: 1e-5

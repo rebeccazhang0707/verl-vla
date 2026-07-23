@@ -1,0 +1,34 @@
+# ACT SFT composition for this example.
+defaults:
+
+  # Reuse the complete standalone SFT workflow.
+  - /train/sft@_global_
+
+  # Select the ACT native-policy configuration and LIBERO adapter.
+  - override /model/override@cluster.actor_rollout_ref.model.override_config: act
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: act
+
+  - _self_
+
+cluster:
+  actor_rollout_ref:
+    model:
+      load_tokenizer: false
+      # A config-only ACT initializer derives native state/action processors
+      # from this dataset. Exported checkpoints reload their saved processors.
+      adapter:
+        processor_dataset_root: ${data.repo_id}
+
+    actor:
+      fsdp_config:
+        # ACT is small enough to keep parameters materialized between forward
+        # and backward, avoiding another all-gather for each training step.
+        reshard_after_forward: false
+        wrap_policy:
+          transformer_layer_cls_to_wrap:
+            - ACTEncoderLayer
+            - ACTDecoderLayer
+
+data:
+  # Match the chunk_size in assets/hf_models/act_libero/config.json.
+  action_delta_steps: 10

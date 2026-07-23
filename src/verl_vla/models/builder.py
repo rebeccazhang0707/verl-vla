@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
+from pathlib import Path
 
 import torch
 
@@ -34,15 +36,49 @@ def build_vla_model(model_config, *, torch_dtype: torch.dtype):
         )
 
     if architecture == "act":
-        from .act_torch import ACTTorchConfig, ACTTrainableModel
+        from lerobot.configs.policies import PreTrainedConfig
+        from lerobot.policies.act.configuration_act import ACTConfig
+        from lerobot.policies.act.modeling_act import ACTPolicy
+        from lerobot.policies.pretrained import SAFETENSORS_SINGLE_FILE
 
-        config = ACTTorchConfig.from_pretrained(path)
-        _apply_overrides(config, overrides)
-        return ACTTrainableModel.from_pretrained(
-            path,
-            policy_config=config,
-            adapter_config=dict(model_config.adapter),
-            torch_dtype=torch_dtype,
+        from .act_torch import ACTTrainableModel
+        from .act_torch.processor import load_act_processors
+
+        if overrides:
+            raise ValueError("ACT architecture is checkpoint-owned; model.override_config must be empty")
+        model_path = Path(path)
+        weights_path = model_path / SAFETENSORS_SINGLE_FILE
+        initialization_path = model_path / "initialization.json"
+        if weights_path.is_file():
+            policy = ACTPolicy.from_pretrained(path)
+        else:
+            if not initialization_path.is_file():
+                raise FileNotFoundError(
+                    f"Native ACT weights are missing at {weights_path}. Config-only initialization requires "
+                    f"an explicit {initialization_path.name} sidecar."
+                )
+            with initialization_path.open(encoding="utf-8") as file:
+                initialization = json.load(file)
+            if initialization != {"type": "act_config"}:
+                raise ValueError(f"Unsupported ACT initialization metadata in {initialization_path}")
+            config = PreTrainedConfig.from_pretrained(path)
+            if not isinstance(config, ACTConfig):
+                raise TypeError(f"Expected a native ACT config at {path}, got {type(config).__name__}")
+            policy = ACTPolicy(config)
+        adapter_config = dict(model_config.adapter)
+        processor_dataset_root = adapter_config.pop("processor_dataset_root", None)
+        preprocessor, postprocessor = load_act_processors(
+            policy.config,
+            model_path,
+            dataset_root=processor_dataset_root,
+        )
+        policy.to(dtype=torch_dtype)
+        return ACTTrainableModel(
+            policy,
+            preprocessor=preprocessor,
+            postprocessor=postprocessor,
+            adapter_config=adapter_config,
+            model_path=path,
         )
 
     if architecture == "gr00t_n1d6":

@@ -123,10 +123,12 @@ class MeanPoolCriticBackend(CriticBackend):
         head_num = int(getattr(model.config, "critic_head_num", 2))
         input_dim = int(getattr(model.config, "critic_input_dim", 0))
         if input_dim <= 0:
+            policy_config = model.policy.config
+            state_dim = 0 if policy_config.robot_state_feature is None else policy_config.robot_state_feature.shape[0]
             input_dim = (
                 int(getattr(model.config, "critic_prefix_embed_dim", 512))
-                + int(getattr(model.config, "state_dim", 0))
-                + int(getattr(model.config, "chunk_size", 1)) * int(getattr(model.config, "action_dim", 0))
+                + state_dim
+                + policy_config.n_action_steps * policy_config.action_feature.shape[0]
             )
             model.config.critic_input_dim = input_dim
         hidden_dims = [int(dim) for dim in getattr(model.config, "critic_hidden_dims", [1024, 512, 256])]

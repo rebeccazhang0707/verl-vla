@@ -13,16 +13,12 @@
 # limitations under the License.
 
 from .adapter_config import ACTAdapterConfig, ACTCriticConfig
-from .configuration_act_torch import ACTTorchConfig
 from .critic import CRITIC_BACKENDS, CriticBackend, MeanPoolCriticBackend, MeanPoolCriticGroup
-from .model.modeling_act import ACT
 from .trainable_model import ACTTrainableModel
 
 __all__ = [
     "ACTAdapterConfig",
     "ACTCriticConfig",
-    "ACTTorchConfig",
-    "ACT",
     "ACTTrainableModel",
     "CriticBackend",
     "MeanPoolCriticBackend",
