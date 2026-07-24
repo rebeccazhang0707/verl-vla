@@ -52,6 +52,15 @@ GROOT_MODEL_PATH="${GROOT_MODEL_PATH:-/models/checkpoint-10000}"
 MAX_EPISODES="${MAX_EPISODES:-10}"
 NUM_ACTION_CHUNKS="${NUM_ACTION_CHUNKS:-16}"
 
+# ── Rollout topology (Ray resource pools) ────────────────────────────────────
+# Default is single-GPU (1 env worker + 1 model worker, 1 sim env) so a bare eval
+# is cheap. Scale these to spread MAX_EPISODES across GPUs/sims for faster eval;
+# SR is unaffected (episodes are independent), only throughput changes.
+NUM_NODES="${NUM_NODES:-1}"
+NUM_ENV_GPUS="${NUM_ENV_GPUS:-1}"
+NUM_MODEL_GPUS="${NUM_MODEL_GPUS:-1}"
+NUM_ENV="${NUM_ENV:-1}"
+
 # ── Task-specific defaults ───────────────────────────────────────────────────
 # EXTRA_OVERRIDES holds hydra overrides that differ per task.
 EXTRA_OVERRIDES=()
@@ -150,9 +159,16 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "cluster.actor_rollout_ref.rollout.output_critic_value=false" \
   "cluster.actor_rollout_ref.rollout.tensor_model_parallel_size=1" \
   "cluster.resource.env.device=cuda" \
+  "cluster.resource.env.nnodes=$NUM_NODES" \
+  "cluster.resource.env.gpus_per_node=$NUM_ENV_GPUS" \
+  "cluster.resource.env.workers_per_node=$NUM_ENV_GPUS" \
+  "cluster.resource.model.nnodes=$NUM_NODES" \
+  "cluster.resource.model.gpus_per_node=$NUM_MODEL_GPUS" \
+  "cluster.resource.model.workers_per_node=$NUM_MODEL_GPUS" \
   "cluster.env.env_loop.max_interactions=$MAX_INTERACTIONS" \
+  "cluster.env.env_worker.num_envs=$NUM_ENV" \
   "cluster.env.env_worker.auto_reset=true" \
-  "cluster.env.env_worker.simulator_start_timeout_s=600" \
+  "cluster.env.env_worker.simulator_start_timeout_s=${SIMULATOR_START_TIMEOUT_S:-600}" \
   "cluster.env.env_worker.simulator.simulator_type=arena" \
   "cluster.env.env_worker.simulator.arena.environment=$ARENA_ENVIRONMENT" \
   "cluster.env.env_worker.modes=[eval]" \

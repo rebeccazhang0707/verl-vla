@@ -136,6 +136,11 @@ ACTOR_UPDATE_INTERVAL="${ACTOR_UPDATE_INTERVAL:-1}"
 SAVE_FREQ="${SAVE_FREQ:-500}"
 TEST_FREQ="${TEST_FREQ:--1}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
+# Eval-only mode: run a single evaluation (val_before_train) then exit, no training.
+# Combine with VAL_BEFORE_TRAIN=True and RESUME_MODE=resume_path / RESUME_FROM_PATH=
+# <...>/checkpoints/global_step_N to score a trained DSRL checkpoint (the FSDP
+# resume restores the noise actor + critic weights that the HF export cannot).
+VAL_ONLY="${VAL_ONLY:-False}"
 # Trajectories aggregated per eval; Arena has no fixed benchmark, so without
 # this the eval SR is a single 0/1 episode instead of an average.
 EVAL_EPISODES="${EVAL_EPISODES:-$((NUM_ENV_GPUS * NUM_ENV))}"
@@ -261,7 +266,7 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "trainer.test_freq=$TEST_FREQ" \
   "trainer.eval_episodes=$EVAL_EPISODES" \
   "trainer.val_before_train=$VAL_BEFORE_TRAIN" \
-  "trainer.val_only=False" \
+  "trainer.val_only=$VAL_ONLY" \
   "trainer.episodic_replay=$EPISODIC_REPLAY" \
   "trainer.episodic_max_open_len=$EPISODIC_MAX_OPEN_LEN" \
   "$@"
