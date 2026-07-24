@@ -1,12 +1,13 @@
 # GR00T Arena DSRL (latent-noise steering)
 
 DSRL ([Diffusion Steering via Reinforcement Learning](https://arxiv.org/abs/2506.15799),
-RLinf recipe: `libero_spatial_dsrl_openpi.yaml`) keeps the **whole VLA frozen** and
-trains only a small SAC policy over the flow-matching **initial noise `x0`**:
+**posttrain reference recipe**) keeps the **whole VLA frozen** and trains only a
+small SAC policy over the flow-matching **initial noise `x0`**:
 
 ```
 obs ──frozen backbone──▶ pooled VL features ┐
-obs ──processor────────▶ raw state          ┴─▶ noise actor (tanh Gaussian, ~0.5M params)
+obs ──processor────────▶ raw state          ┴─▶ Transformer chunking noise actor
+                                                   │  (tanh Gaussian, ~2M params)
                                                    │  steering noise x0  (the SAC action)
                                                    ▼
                               frozen flow head, deterministic Euler ODE
@@ -15,16 +16,39 @@ obs ──processor────────▶ raw state          ┴─▶ nois
                                               env action chunk
 ```
 
-- **Actor**: `verl_vla.models.dsrl.DSRLNoiseActor` — MLP over the frozen pooled
-  backbone features + raw state, outputs one tanh-bounded noise vector
-  (`max_action_dim`, GR00T: 128) broadcast over the action horizon.
-- **Critic**: the existing SAC critic ensemble, scoring the *steering noise*
-  (defaults auto-switch to `action_dim=max_action_dim`, `action_horizon=1`).
+This variant mirrors the **posttrain reference DSRL-for-GR00T** actor rather than
+the RLinf MLP:
+
+- **Actor**: `verl_vla.models.dsrl.DSRLNoiseActor` — a **Transformer chunking
+  policy** (posttrain `modules/transformer/actor.py` parity). The pooled backbone
+  features + raw state are embedded once, repeated over the flow horizon,
+  differentiated only by a sinusoidal positional encoding, and mixed by a
+  Transformer encoder so **every flow step gets its own** tanh-bounded latent.
+  With `noise_real_dims_only=true` it steers **only the real action DOF**
+  (GR1: 26); `tile_dims=true` (default) tiles that steered block across the full
+  padded `x0` width (128) so the decode is a deterministic function of the SAC
+  action — no base-policy noise leaks in — while the SAC action stays at the real
+  DOF. (`tile_dims=false` = posttrain `fresh_base`: padding drawn fresh `N(0,1)`,
+  which for GR1's 128-vs-26 padding injects ~15% action drift.) The tanh log-prob
+  uses the exact softplus correction.
+- **Critic**: a **Transformer sequence critic** (posttrain
+  `modules/transformer/critic.py` parity, `adapter.critic.type=transformer`).
+  Each of `head_num` (default 4, posttrain) members runs a Transformer over the
+  token sequence `[obs_token, action_1..K]` — the obs token is the same GR00T
+  feature the actor sees, each steered flow step is one action token — attention-
+  pooled to a scalar Q; the ensemble is min-reduced. Scores the *steering noise*.
+- **Feature source** (`adapter.dsrl.feature_source`): actor and critic **share**
+  one observation feature. Default `gr00t` = the frozen VLA's own mean-pooled VL
+  prefix (recommended: aligned with the flow head the noise steers). Optional
+  `dino` = an independent frozen DINOv2 embedding of the camera (posttrain
+  parity; heavier, validate its image preprocessing on first run).
 - **Replay**: `full_action` stores the steering noise; `action` stays the
   decoded env chunk. Trainer / replay pool / env are unchanged.
 - **Generic**: the same `adapter.dsrl.*` keys work for pi0/pi05
-  (`model/adapter/pi0.yaml`); for pi0 also set `critic.input_dim`
-  to `prefix_embed_dim + state_dim + max_action_dim` and `flow_sde_enable=False`.
+  (`model/adapter/pi0.yaml`), which keeps the shared-noise
+  (`noise_per_step=false`) single-token transformer; for pi0 also set
+  `critic.input_dim` to `prefix_embed_dim + state_dim + max_action_dim` and
+  `flow_sde_enable=False`.
 
 ## Launch
 
@@ -187,12 +211,15 @@ docker rm -f "$CN"
 
 | Var | Default | Meaning |
 | --- | --- | --- |
-| `NOISE_ACTOR_LR` | `3e-4` | Noise-actor lr (`actor.optim.lr`; the VLA is frozen) |
-| `CRITIC_LR` | `3e-4` | SAC critic lr |
+| `NOISE_ACTOR_LR` | `5e-5` | Transformer noise-actor lr (posttrain parity; the VLA is frozen) |
+| `CRITIC_LR` | `1e-4` | SAC critic lr (posttrain parity) |
 | `CRITIC_TAU` | `0.005` | Target critic Polyak coefficient |
 | `AUTO_ENTROPY` | `True` | SAC entropy auto-tuning |
-| `TARGET_ENTROPY` | `-64.0` | Target entropy over the 128-dim steering noise (≈ −dim/2) |
-| `BACKUP_ENTROPY` | `False` | Keep the −α·logπ term out of the critic TD target (RLinf parity) |
+| `TARGET_ENTROPY` | `0.0` | Target entropy over the steering-noise latent (posttrain sets 0, not −dim/2) |
+| `BACKUP_ENTROPY` | `False` | Keep the −α·logπ term out of the critic TD target (posttrain parity) |
+| `CRITIC_TYPE` | `transformer` | DSRL critic architecture (`transformer` = posttrain seq critic; `cross_attn`/`mean_pool` = RLinf MLP) |
+| `CRITIC_HEAD_NUM` | `4` | Critic ensemble size (posttrain uses 4 Transformer critics) |
+| `FEATURE_SOURCE` | `gr00t` | Actor/critic obs feature (`gr00t` native VL, or `dino` for a frozen DINOv2) |
 | `CRITIC_WARMUP_STEPS` | `100` | Critic-only steps before actor updates |
 | `EMA_DECAY` | `null` | Actor EMA over the tiny noise actor (null = off) |
 | `CRITIC_POOL_PROJ_DIM` | `0` | Critic pooled-feature projection (SAC baseline 256) |
@@ -206,8 +233,12 @@ absent: DSRL freezes the whole VLA and owns the exploration noise
 (`flow_sde_enable=true` raises at model init).
 
 Adapter-level knobs live under `cluster.actor_rollout_ref.model.adapter.dsrl.*`
-(`hidden_dims`, `feature_latent_dim`, `state_latent_dim`, `noise_per_step`,
-`noise_bound`) — see `src/verl_vla/workflows/config/model/adapter/gr00t.yaml`.
+(actor: `d_model`, `nhead`, `num_encoder_layers`, `noise_per_step`,
+`noise_real_dims_only`, `tile_dims`, `noise_bound`; feature source:
+`feature_source`, `dino_model`) and `adapter.critic.*` (transformer critic: `transformer_d_model`,
+`transformer_nhead`, `transformer_num_layers`, `transformer_action_embedding_dim`,
+`transformer_pooling`) — see
+`src/verl_vla/workflows/config/model/adapter/gr00t.yaml`.
 
 ## Caveats
 

@@ -64,21 +64,19 @@ dsrl:
   # Master switch for DSRL noise steering.
   enabled: false
 
-  # MLP trunk widths of the noise actor.
-  hidden_dims: [256, 256, 256]
-
-  # Projection width of the frozen pooled prefix features (2048 -> this).
-  feature_latent_dim: 128
-
-  # Projection width of the normalized robot state.
-  state_latent_dim: 64
+  # Transformer geometry of the noise actor (posttrain reference actor).
+  d_model: 256
+  nhead: 8
+  num_encoder_layers: 1
+  transformer_dropout: 0.0
+  transformer_activation: gelu
 
   # Optional explicit actor input widths; null derives them from the model.
   feature_dim: null
   state_dim: null
 
-  # false (RLinf parity): one shared noise vector broadcast over the chunk.
-  # true: an independent noise vector per horizon step (larger action space).
+  # false (RLinf parity): one shared noise vector broadcast over the chunk
+  # (single-token transformer). true: an independent latent per horizon step.
   noise_per_step: false
 
   # tanh bound of the steering noise; x0 lives in [-noise_bound, noise_bound].

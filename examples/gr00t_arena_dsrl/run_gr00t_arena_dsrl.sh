@@ -6,9 +6,9 @@
 # DSRL keeps the WHOLE GR00T policy frozen and trains only a small SAC noise
 # actor over the flow-matching initial noise x0 (plus the SAC critic). The
 # steering noise is the SAC action: it seeds the frozen flow head, which
-# deterministically (Euler ODE) decodes it into the env action. Follows the
-# RLinf DSRL recipe (libero_spatial_dsrl_openpi.yaml) adapted to this repo's
-# SAC trainer. Pick the task with ARENA_TASK:
+# deterministically (Euler ODE) decodes it into the env action. The noise actor
+# is a Transformer chunking policy matching the posttrain reference DSRL-for-GR00T
+# (isaac_rl_posttraining), not the RLinf MLP. Pick the task with ARENA_TASK:
 #
 #   ARENA_TASK=gr1     (default)  GR1 fridge (put_item_in_fridge_and_close_door),
 #                                 gr1_joint 26-DOF, embodiment_tag=gr1.
@@ -16,14 +16,18 @@
 #                                 embodiment_tag=new_embodiment; task via TASK_SUITE/TASK_ID.
 #
 # Notes vs. plain SAC (run_gr00t_arena_sac.sh):
-#   * adapter.dsrl.enabled=true freezes the VLA; only ~0.5M params train.
-#   * critic action defaults switch to the noise space (max_action_dim, one
-#     shared step) — do NOT override adapter.critic.action_horizon here.
-#   * actor lr is the noise-actor lr (3e-4, RLinf parity), not a VLA lr.
-#   * auto entropy tuning is on; TARGET_ENTROPY defaults to -(noise_dim/2)
-#     with GR00T's padded noise_dim=128 → -64 (RLinf uses -16 for pi0's 32).
+#   * adapter.dsrl.enabled=true freezes the VLA; only the ~2M-param Transformer
+#     noise actor (+ SAC critic) train.
+#   * adapter.dsrl.noise_per_step=true + noise_real_dims_only=true: the actor
+#     emits an independent latent PER flow step, steering only the real action
+#     DOF (GR1: 26); x0 padding dims stay fresh N(0,1) (posttrain fresh_base).
+#   * critic action defaults switch to the steering-noise space (action_dim=
+#     real DOF, one score per flow step) — do NOT override adapter.critic.* here.
+#   * actor lr 5e-5 / critic lr 1e-4 (posttrain dsrl_sac.yaml), not a VLA lr.
+#   * auto entropy tuning is on; TARGET_ENTROPY defaults to 0.0 for the
+#     steering-noise latent space (posttrain sets 0, not -|A|/2).
 #   * BACKUP_ENTROPY=False keeps -alpha*log_pi out of the critic TD target
-#     (RLinf parity; the 128-dim summed log-prob would dominate the bootstrap).
+#     (posttrain parity; the summed noise log-prob would dominate the bootstrap).
 #   * The SAC launcher's FREEZE_ACTION_IO / FLOW_SDE_* knobs are intentionally
 #     absent: DSRL freezes everything and owns the exploration noise
 #     (flow_sde_enable=true would raise at model init).
@@ -150,18 +154,21 @@ EVAL_EPISODES="${EVAL_EPISODES:-$((NUM_ENV_GPUS * NUM_ENV))}"
 EPISODIC_REPLAY="${EPISODIC_REPLAY:-False}"
 EPISODIC_MAX_OPEN_LEN="${EPISODIC_MAX_OPEN_LEN:-128}"
 
-# ── DSRL noise actor / critic optimisation (RLinf DSRL parity) ───────────────
-NOISE_ACTOR_LR="${NOISE_ACTOR_LR:-3e-4}"
-CRITIC_LR="${CRITIC_LR:-3e-4}"
+# ── DSRL noise actor / critic optimisation (posttrain DSRL parity) ───────────
+# Transformer noise actor 5e-5 / SAC critic 1e-4 (posttrain configs/algorithm/dsrl_sac.yaml).
+NOISE_ACTOR_LR="${NOISE_ACTOR_LR:-5e-5}"
+CRITIC_LR="${CRITIC_LR:-1e-4}"
 CRITIC_TAU="${CRITIC_TAU:-0.005}"
 
-# ── SAC entropy (auto-tuned alpha over the 128-dim steering noise) ───────────
+# ── SAC entropy (auto-tuned alpha over the steering noise) ───────────────────
 AUTO_ENTROPY="${AUTO_ENTROPY:-True}"
 ALPHA_TYPE="${ALPHA_TYPE:-softplus}"
 INITIAL_ALPHA="${INITIAL_ALPHA:-1.0}"
-TARGET_ENTROPY="${TARGET_ENTROPY:--64.0}"
-# RLinf DSRL parity: no -alpha*log_pi term in the critic TD target (the summed
-# noise log-prob would dominate the bootstrap before alpha anneals).
+# posttrain DSRL parity: target_entropy=0 for the steering-noise latent space
+# (dsrl_sac.yaml sets it to 0 explicitly rather than -|A|/2).
+TARGET_ENTROPY="${TARGET_ENTROPY:-0.0}"
+# posttrain DSRL parity: no -alpha*log_pi term in the critic TD target (the
+# summed noise log-prob would dominate the bootstrap before alpha anneals).
 BACKUP_ENTROPY="${BACKUP_ENTROPY:-False}"
 
 # ── SAC stability / replay knobs (shared with the SAC launcher ablations) ────
@@ -170,9 +177,23 @@ EMA_DECAY="${EMA_DECAY:-null}"
 # Critic capacity knobs — the critic trains as usual under DSRL (it scores the
 # steering noise), so these remain meaningful. FREEZE_ACTION_IO / FLOW_SDE_*
 # are intentionally absent (see header notes).
-CRITIC_POOL_PROJ_DIM="${CRITIC_POOL_PROJ_DIM:-0}"                  # SAC baseline 256
-CRITIC_LAYERNORM="${CRITIC_LAYERNORM:-True}"                      # SAC baseline True
+CRITIC_POOL_PROJ_DIM="${CRITIC_POOL_PROJ_DIM:-0}"                  # SAC baseline 256 (cross_attn critic only)
+CRITIC_LAYERNORM="${CRITIC_LAYERNORM:-True}"                      # SAC baseline True (cross_attn critic only)
 ACTOR_POSITIVE_SAMPLE_RATIO="${ACTOR_POSITIVE_SAMPLE_RATIO:-0.8}"
+
+# ── DSRL critic architecture + observation feature source (posttrain parity) ──
+# transformer: posttrain-style Transformer sequence critic over
+#   [obs_token, action_1..K]; cross_attn/mean_pool keep the RLinf MLP-ensemble.
+CRITIC_TYPE="${CRITIC_TYPE:-transformer}"
+# Ensemble size. posttrain uses 4 Transformer critics (min-reduced); 4 also keeps
+# the per-step cost of the Transformer critic in check vs the SAC baseline's 10.
+CRITIC_HEAD_NUM="${CRITIC_HEAD_NUM:-4}"
+# Observation feature source for BOTH actor and critic:
+#   gr00t (default, recommended): GR00T's own frozen mean-pooled VL prefix,
+#         aligned with the flow head the noise steers.
+#   dino: an independent frozen DINOv2 embedding of the camera (posttrain parity;
+#         heavier, and its image preprocessing should be validated on first run).
+FEATURE_SOURCE="${FEATURE_SOURCE:-gr00t}"
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 TRAINER_LOGGER="${TRAINER_LOGGER:-[console]}"
@@ -190,9 +211,9 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
 # main_sac launch (DSRL flavour).
 #
 # Hydra overrides:
-#   * adapter.dsrl.enabled=true  -> freeze the VLA, train the noise actor
+#   * adapter.dsrl.enabled=true  -> freeze the VLA, train the Transformer actor
 #   * critic action defaults auto-switch to the steering-noise space
-#     (action_dim=max_action_dim, action_horizon=1) — no override needed.
+#     (action_dim=real DOF, one score per flow step) — no override needed.
 # ─────────────────────────────────────────────────────────────────────────────
 "$PYTHON" -m verl_vla.entrypoints.train.sac \
   "ray_kwargs.ray_init.runtime_env.env_vars.VERL_LOGGING_LEVEL=INFO" \
@@ -211,6 +232,9 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "cluster.actor_rollout_ref.model.adapter.action_dim=$ACTION_DIM" \
   "cluster.actor_rollout_ref.model.adapter.num_action_chunks=$NUM_ACTION_CHUNKS" \
   "cluster.actor_rollout_ref.model.adapter.dsrl.enabled=true" \
+  "cluster.actor_rollout_ref.model.adapter.dsrl.feature_source=$FEATURE_SOURCE" \
+  "cluster.actor_rollout_ref.model.adapter.critic.type=$CRITIC_TYPE" \
+  "cluster.actor_rollout_ref.model.adapter.critic.head_num=$CRITIC_HEAD_NUM" \
   "cluster.actor_rollout_ref.model.adapter.critic.pool_proj_dim=$CRITIC_POOL_PROJ_DIM" \
   "cluster.actor_rollout_ref.model.adapter.critic.layernorm=$CRITIC_LAYERNORM" \
   "cluster.actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16" \

@@ -33,7 +33,7 @@ from verl_vla.models.dsrl import DSRLSteeringMixin
 
 from .adapter_config import Gr00tAdapterConfig
 from .compat import apply_gr00t_compat_patches
-from .critic import CrossAttentionCriticBackend, MeanPoolCriticBackend
+from .critic import CrossAttentionCriticBackend, MeanPoolCriticBackend, TransformerCriticBackend
 from .gr00t_adapter import GR00TN16Adapter
 from .policy import get_gr00t_policy_classes
 from .utils import GR1, GR00TDim, extract_critic_state_dict, normalize_adapter_state_dict
@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 CRITIC_BACKENDS = {
     "cross_attn": CrossAttentionCriticBackend(),
     "mean_pool": MeanPoolCriticBackend(),
+    "transformer": TransformerCriticBackend(),
 }
 
 
@@ -154,13 +155,47 @@ class Gr00tN1d6TrainableModel(
 
         dsrl_cfg = getattr(adapter_config, "dsrl", None)
         self.dsrl_enable = bool(getattr(dsrl_cfg, "enabled", False))
+        self.dsrl_noise_real_dims_only = bool(self.dsrl_enable and getattr(dsrl_cfg, "noise_real_dims_only", False))
+        # Width of the steering-noise SAC action: the real action DOF when only
+        # real dims are steered (posttrain parity), else the full padded
+        # max_action_dim (RLinf parity).
+        self.dsrl_steer_dim = self.action_dim if self.dsrl_noise_real_dims_only else self.max_action_dim
+        # How the un-steered padding columns of x0 are filled (real-dims mode):
+        # True (default) tiles the steered block across max_action_dim so the
+        # decode is deterministic; False leaves them fresh N(0, 1) (posttrain
+        # fresh_base), which leaks base-policy noise into the action.
+        self.dsrl_tile_dims = bool(getattr(dsrl_cfg, "tile_dims", True)) if self.dsrl_enable else False
+
+        # DSRL observation feature source for the actor + Transformer critic.
+        # "gr00t" (default): the frozen VLA's own mean-pooled VL prefix.
+        # "dino": an independent frozen DINOv2 embedding of the camera frame.
+        self.dsrl_feature_source = (
+            str(getattr(dsrl_cfg, "feature_source", "gr00t")).lower() if self.dsrl_enable else "gr00t"
+        )
+        self.dino_encoder = None
+        if self.dsrl_feature_source == "dino":
+            from .dino import DinoFeatureEncoder
+
+            self.dino_encoder = DinoFeatureEncoder(
+                model_name=str(getattr(dsrl_cfg, "dino_model", "facebook/dinov2-base")),
+                image_size=int(getattr(dsrl_cfg, "dino_image_size", 224)),
+            )
+            self.dsrl_feature_dim = int(self.dino_encoder.output_dim)
+            self.dsrl_feature_key = "dino_embedding"
+        elif self.dsrl_feature_source != "gr00t":
+            raise ValueError(f"adapter.dsrl.feature_source must be 'gr00t' or 'dino', got {self.dsrl_feature_source!r}")
+        else:
+            self.dsrl_feature_dim = int(self.backbone_feature_dim)
+            self.dsrl_feature_key = "pooled"
 
         critic_cfg = adapter_config.critic
         self.critic_type = str(critic_cfg.type).lower()
         if self.dsrl_enable:
-            # DSRL: the critic scores the steering noise x0 (full padded width).
-            # One shared noise vector per chunk unless noise_per_step is set.
-            default_critic_action_dim = self.max_action_dim
+            # DSRL: the critic scores the steering noise x0. Its width is the real
+            # action DOF when only real dims are steered (posttrain parity), else
+            # the full padded max_action_dim (RLinf parity). One shared noise
+            # vector per chunk unless noise_per_step is set.
+            default_critic_action_dim = self.dsrl_steer_dim
             default_critic_action_horizon = self.action_horizon if bool(dsrl_cfg.noise_per_step) else 1
         else:
             default_critic_action_dim = self.action_dim
@@ -252,9 +287,9 @@ class Gr00tN1d6TrainableModel(
         # train a small SAC noise actor over the flow-matching initial noise x0.
         self.init_dsrl(
             dsrl_cfg,
-            feature_dim=self.backbone_feature_dim,
+            feature_dim=self.dsrl_feature_dim,
             state_dim=self.state_horizon * self.max_state_dim,
-            noise_dim=self.max_action_dim,
+            noise_dim=self.dsrl_steer_dim,
             noise_horizon=self.action_horizon,
         )
 
@@ -361,6 +396,10 @@ class Gr00tN1d6TrainableModel(
         }
         # Stash full processor inputs for official policy.forward / get_action.
         s["_processor_inputs"] = inputs
+        # DSRL DINOv2 option: embed the raw camera frame (frozen encoder) so the
+        # actor/critic can consume it instead of GR00T's own VL features.
+        if self.dino_encoder is not None:
+            s["dino_embedding"] = self.dino_encoder(model_input.images)
         return s, raw_state_groups
 
     # ------------------------------------------------------------------
@@ -385,7 +424,43 @@ class Gr00tN1d6TrainableModel(
         )
 
     def _dsrl_actor_inputs(self, state_features: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
-        return state_features["pooled"], state_features["state"]
+        # Actor and critic share the same observation feature source (GR00T's
+        # pooled VL prefix by default, or the DINOv2 embedding when enabled).
+        return state_features[self.dsrl_feature_key], state_features["state"]
+
+    def _dsrl_build_x0(self, steering_noise: torch.Tensor, sf: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Expand the real-dim steering noise to the flow head's full-width x0.
+
+        In ``dsrl_noise_real_dims_only`` mode the actor steers only the first
+        ``action_dim`` (real DOF) columns; the remaining ``[action_dim:
+        max_action_dim]`` padding columns are filled per ``dsrl_tile_dims``:
+
+        - ``True`` (default, posttrain ``tile_dims``): tile the steered block
+          across the full ``max_action_dim`` so no column is random. The flow
+          head denoises all ``D`` dims jointly, so this keeps the decode a
+          deterministic function of the SAC action (no base-policy noise leaks
+          in) while the SAC action stays at the real DOF.
+        - ``False`` (posttrain ``fresh_base``): draw the padding fresh from
+          ``N(0, 1)`` each call, so a standard-normal action reproduces the base
+          policy's native distribution there (non-reproducible decode when
+          ``max_action_dim >> action_dim``).
+
+        Outside real-dims mode the actor already spans the full padded width and
+        is used verbatim (RLinf parity).
+        """
+        if not self.dsrl_noise_real_dims_only:
+            return steering_noise
+        if self.dsrl_tile_dims:
+            repeats = (self.max_action_dim + self.dsrl_steer_dim - 1) // self.dsrl_steer_dim
+            return steering_noise.repeat(1, 1, repeats)[..., : self.max_action_dim].contiguous()
+        vl = sf["backbone_features"]
+        x0 = torch.randn(
+            (vl.shape[0], self.action_horizon, self.max_action_dim),
+            dtype=steering_noise.dtype,
+            device=steering_noise.device,
+        )
+        x0[..., : self.dsrl_steer_dim] = steering_noise
+        return x0
 
     def freeze_action_io(self) -> None:
         ah = self.action_head
@@ -477,11 +552,13 @@ class Gr00tN1d6TrainableModel(
             # DSRL: sample steering noise from the small SAC actor and let the
             # frozen flow head integrate it deterministically into an action.
             steering_noise, log_probs, _ = self.dsrl_forward_actor(state_features, deterministic=eval)
+            x0 = self._dsrl_build_x0(steering_noise, state_features)
             full_action, _ = self._denoise(
-                state_features, noise_scale=0.0, requires_grad=False, return_log_prob=False, x0=steering_noise
+                state_features, noise_scale=0.0, requires_grad=False, return_log_prob=False, x0=x0
             )
-            # The SAC action space is the steering noise, so that is what the
-            # replay/critic see under ``full_action``.
+            # The SAC action space is the steering noise (real dims only when
+            # dsrl_noise_real_dims_only is set), so that is what the replay/critic
+            # see under ``full_action``.
             replay_action = steering_noise.detach().float()
         else:
             override = obs.meta_info.get("rollout_noise_scale", None) if obs.meta_info else None
@@ -583,6 +660,8 @@ class Gr00tN1d6TrainableModel(
         }
         if image_mask is not None:
             out["image_mask"] = image_mask
+        if "dino_embedding" in s:
+            out["dino_embedding"] = s["dino_embedding"].to(device)
         if self.config.critic.privileged_obs and "priv_obs" in s:
             out["priv_obs"] = s["priv_obs"].to(device, dtype=dtype)
         return out

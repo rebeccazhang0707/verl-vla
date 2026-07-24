@@ -30,7 +30,7 @@ HORIZON = 5
 
 
 def _make_actor(**config_overrides) -> DSRLNoiseActor:
-    config = DSRLSteeringConfig(hidden_dims=[16, 16], feature_latent_dim=8, state_latent_dim=4, **config_overrides)
+    config = DSRLSteeringConfig(d_model=16, nhead=4, num_encoder_layers=1, **config_overrides)
     return DSRLNoiseActor(
         feature_dim=FEATURE_DIM,
         state_dim=STATE_DIM,
@@ -50,7 +50,7 @@ def test_sample_shapes_and_bounds():
 
 
 def test_shared_noise_is_broadcast_across_horizon():
-    actor = _make_actor()
+    actor = _make_actor(noise_per_step=False)
     noise, _ = actor.sample(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
     torch.testing.assert_close(noise, noise[:, :1].expand_as(noise))
 
@@ -60,7 +60,9 @@ def test_deterministic_sample_is_tanh_mean_with_zero_logprob():
     features, state = torch.randn(4, FEATURE_DIM), torch.randn(4, STATE_DIM)
     noise, log_prob = actor.sample(features, state, deterministic=True)
     mean, _ = actor(features, state)
-    torch.testing.assert_close(noise[:, 0], torch.tanh(mean))
+    # Shared (non-per-step) actor emits one latent [B, 1, D] broadcast over the
+    # horizon; the deterministic action is tanh(mean).
+    torch.testing.assert_close(noise[:, 0], torch.tanh(mean[:, 0]))
     assert torch.all(log_prob == 0)
 
 
@@ -85,8 +87,8 @@ def test_sample_is_reparameterized():
     assert noise.requires_grad
     assert log_prob.requires_grad
     (noise.sum() + log_prob.sum()).backward()
-    assert actor.mean_head.weight.grad is not None
-    assert actor.log_std_head.weight.grad is not None
+    assert actor.mean_processor[-1].weight.grad is not None
+    assert actor.log_std_processor[-1].weight.grad is not None
 
 
 def test_state_flattening_and_dim_check():
@@ -110,16 +112,16 @@ def test_bfloat16_inputs_produce_float32_outputs():
 
 
 def test_gr00t_adapter_config_parses_and_roundtrips_dsrl():
-    cfg = Gr00tAdapterConfig(dsrl={"enabled": True, "hidden_dims": [64, 64], "noise_bound": 1.5})
+    cfg = Gr00tAdapterConfig(dsrl={"enabled": True, "d_model": 128, "noise_bound": 1.5})
     assert cfg.dsrl.enabled is True
-    assert cfg.dsrl.hidden_dims == [64, 64]
+    assert cfg.dsrl.d_model == 128
     assert cfg.dsrl.noise_bound == 1.5
     payload = cfg.to_dict()
     assert payload["dsrl"]["enabled"] is True
     # Reload from the serialized payload (adapter_config.json roundtrip).
     reloaded = Gr00tAdapterConfig(**payload)
     assert reloaded.dsrl.enabled is True
-    assert reloaded.dsrl.hidden_dims == [64, 64]
+    assert reloaded.dsrl.d_model == 128
 
 
 def test_gr00t_adapter_config_dsrl_defaults_off():

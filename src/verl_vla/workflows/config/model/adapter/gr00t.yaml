@@ -59,7 +59,10 @@ critic:
   # Whether to construct the critic for SAC training.
   enabled: true
 
-  # Critic architecture. cross_attn pools action tokens with learned queries.
+  # Critic architecture:
+  #   cross_attn (default): MLP ensemble over cross-attn-pooled VL prefix + action.
+  #   transformer: posttrain-style Transformer sequence critic over
+  #     [obs_token, action_1..K] (DSRL launcher selects this).
   type: cross_attn
 
   # Number of Q-value heads produced by the critic.
@@ -75,32 +78,62 @@ critic:
   layernorm: false
 
   # Projection width for pooled critic features (0 disables the projection).
+  # cross_attn / mean_pool critics only.
   pool_proj_dim: 0
+
+  # Transformer critic geometry (type=transformer; posttrain reference critic).
+  transformer_d_model: 128
+  transformer_nhead: 8
+  transformer_num_layers: 1
+  transformer_dropout: 0.0
+  transformer_activation: gelu
+  transformer_action_embedding_dim: 128
+  transformer_pooling: attention   # first | attention | weighted_mean | mean
 
 # DSRL latent-noise steering ---------------------------------------------------
 
 # DSRL (arXiv:2506.15799): freeze the WHOLE VLA and train a small SAC noise
 # actor over the flow-matching initial noise x0. The steering noise (not the
-# model action) becomes the SAC action stored in replay under full_action, and
-# the critic defaults switch to action_dim=max_action_dim, action_horizon=1.
-# Mutually exclusive with flow_sde_enable.
+# model action) becomes the SAC action stored in replay under full_action. The
+# actor is a Transformer chunking policy matching the posttrain reference DSRL
+# actor; with the defaults below it steers only the real action DOF per flow
+# step. Mutually exclusive with flow_sde_enable.
 dsrl:
 
   # Master switch for DSRL noise steering.
   enabled: false
 
-  # MLP trunk widths of the noise actor.
-  hidden_dims: [256, 256, 256]
+  # Observation feature source for the noise actor + Transformer critic:
+  #   gr00t (default, recommended): the frozen VLA's own mean-pooled VL prefix,
+  #         aligned with the flow head the noise steers.
+  #   dino (posttrain parity): an independent frozen DINOv2 embedding of the
+  #        camera frame (see dino_model / dino_image_size).
+  feature_source: gr00t
+  dino_model: facebook/dinov2-base
+  dino_image_size: 224
 
-  # Projection width of the frozen pooled backbone features (2048 -> this).
-  feature_latent_dim: 128
+  # Transformer geometry of the noise actor (posttrain reference actor).
+  d_model: 256
+  nhead: 8
+  num_encoder_layers: 1
+  transformer_dropout: 0.0
+  transformer_activation: gelu
 
-  # Projection width of the raw processor state.
-  state_latent_dim: 64
+  # true (GR00T/posttrain parity): an independent latent per flow horizon step.
+  # false: one shared latent broadcast over the chunk (single-token transformer).
+  noise_per_step: true
 
-  # false (RLinf parity): one shared noise vector broadcast over the chunk.
-  # true: an independent noise vector per horizon step (larger action space).
-  noise_per_step: false
+  # true (posttrain parity): steer only the real action DOF (action_dim); the
+  # padding columns of x0 are not free SAC dims. false steers the full padded
+  # 128-wide x0. Keeps the SAC action space at the real DOF.
+  noise_real_dims_only: true
+
+  # How the x0 padding columns [action_dim:max_action_dim] are filled (real-dims
+  # mode). true (default, posttrain tile_dims): tile the steered block across the
+  # full width so the decode is deterministic and fully controlled by the actor
+  # (fixes the base-noise leak when max_action_dim >> action_dim, e.g. GR1 128 vs
+  # 26). false (posttrain fresh_base): draw padding fresh N(0,1) each call.
+  tile_dims: true
 
   # tanh bound of the steering noise; x0 lives in [-noise_bound, noise_bound].
   noise_bound: 1.0

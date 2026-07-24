@@ -10,6 +10,7 @@ import torch
 
 from .base import CriticBackend
 from .group import Gr00tCriticGroup
+from .transformer import Gr00tTransformerCriticGroup
 
 
 def _build_critic_group(model, *, pooling: str) -> Gr00tCriticGroup:
@@ -39,6 +40,62 @@ class CrossAttentionCriticBackend(CriticBackend):
 
     def init(self, model) -> None:
         model.critic = _build_critic_group(model, pooling="attn")
+
+    def forward(
+        self,
+        model,
+        a: dict[str, torch.Tensor],
+        state_features: dict[str, torch.Tensor],
+        task_ids: torch.Tensor | None = None,
+        *,
+        use_target_network: bool = False,
+        method: Literal["cat", "min"] = "cat",
+        requires_grad: bool = False,
+    ) -> torch.Tensor:
+        del task_ids
+        return model.critic(
+            a=a,
+            state_features=state_features,
+            use_target_network=use_target_network,
+            method=method,
+            requires_grad=requires_grad,
+        )
+
+    def get_critic_parameters(self, model) -> list[torch.nn.Parameter]:
+        return model.critic.get_critic_parameters()
+
+    @torch.no_grad()
+    def update_target_network(self, model, tau: float) -> None:
+        model.critic.update_target_network(tau)
+
+
+class TransformerCriticBackend(CriticBackend):
+    """posttrain-style Transformer sequence critic over [obs_token, actions].
+
+    Used by DSRL: the observation token is GR00T's frozen feature (``pooled`` or,
+    when the DINOv2 option is on, ``dino_embedding``) + raw state, and the action
+    tokens are the steering noise. Keeps the CriticBackend contract intact.
+    """
+
+    uses_task_ids = False
+
+    def init(self, model) -> None:
+        config = model.config.critic
+        obs_dim = int(model.dsrl_feature_dim) + int(model.state_horizon) * int(model.max_state_dim)
+        model.critic = Gr00tTransformerCriticGroup(
+            head_num=int(config.head_num),
+            obs_dim=obs_dim,
+            action_horizon=int(model.critic_action_horizon),
+            action_dim=int(model.critic_action_dim),
+            d_model=int(config.transformer_d_model),
+            nhead=int(config.transformer_nhead),
+            num_encoder_layers=int(config.transformer_num_layers),
+            dropout=float(config.transformer_dropout),
+            activation=str(config.transformer_activation),
+            action_embedding_dim=int(config.transformer_action_embedding_dim),
+            pooling_strategy=str(config.transformer_pooling),
+        )
+        model.critic.feature_key = str(model.dsrl_feature_key)
 
     def forward(
         self,

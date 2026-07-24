@@ -12,15 +12,18 @@ suite/id). A shared single critic is therefore enough; do not add multitask
 backends unless a true multi-task Arena recipe lands.
 """
 
-from .backends import CrossAttentionCriticBackend, MeanPoolCriticBackend
+from .backends import CrossAttentionCriticBackend, MeanPoolCriticBackend, TransformerCriticBackend
 from .base import CriticBackend
 from .group import Gr00tCriticGroup
 from .mlp import CriticMLP
+from .transformer import Gr00tTransformerCriticGroup
 
 __all__ = [
     "CriticBackend",
     "CriticMLP",
     "CrossAttentionCriticBackend",
     "Gr00tCriticGroup",
+    "Gr00tTransformerCriticGroup",
     "MeanPoolCriticBackend",
+    "TransformerCriticBackend",
 ]
