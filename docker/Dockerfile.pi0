@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         cmake \
+        ffmpeg \
         git \
         libgl1 \
         libglib2.0-0 \
@@ -35,28 +36,7 @@ RUN python3 -m pip install --requirement requirements-lerobot.txt
 RUN python3 -m pip install --no-deps lerobot==0.4.4
 RUN python3 -m pip install ".[pi0,libero]"
 
-# The PyPI source distribution omits LIBERO's scene and object assets. Fetch
-# the assets from a pinned revision of the official repository so environment
-# creation never depends on an implicit first-run download.
-ARG LIBERO_ASSETS_COMMIT=8f1084e3132a39270c3a13ebe37270a43ece2a01
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
-ARG LIBERO_ASSETS_URL=https://codeload.github.com/Lifelong-Robot-Learning/LIBERO/tar.gz/${LIBERO_ASSETS_COMMIT}
-ARG LIBERO_ASSETS_SHA256=05ffcf8349b2e7ef31b038451253d76ca757debbf88c3a0c1de569ca38a80b14
-RUN curl --fail --location \
-        --retry 5 --retry-all-errors \
-        --connect-timeout 20 \
-        --output /tmp/libero-source.tar.gz \
-        "${LIBERO_ASSETS_URL}" \
-    && echo "${LIBERO_ASSETS_SHA256}  /tmp/libero-source.tar.gz" | sha256sum --check --strict \
-    && rm -rf /usr/local/lib/python3.10/dist-packages/libero/libero/assets \
-    && tar -xzf /tmp/libero-source.tar.gz \
-        --strip-components=3 \
-        -C /usr/local/lib/python3.10/dist-packages/libero/libero \
-        "LIBERO-${LIBERO_ASSETS_COMMIT}/libero/libero/assets" \
-    && rm /tmp/libero-source.tar.gz
-
+RUN python3 scripts/install_libero_assets.py
 RUN python3 scripts/install_checks/check_libero.py
 
 CMD ["/bin/bash", "-lc", "python3 -m pip install --no-deps -e . && exec /bin/bash"]

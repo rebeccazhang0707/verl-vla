@@ -27,6 +27,10 @@ class TeleopServerConfig:
     ssl_certfile: str | None = None
     ssl_keyfile: str | None = None
 
+    def __post_init__(self):
+        if bool(self.ssl_certfile) != bool(self.ssl_keyfile):
+            raise ValueError("ssl_certfile and ssl_keyfile must be configured together.")
+
 
 @dataclass(frozen=True)
 class KeyboardTeleopConfig:
@@ -103,4 +107,6 @@ class TeleopConfig:
             devices = tuple(self.devices)
         if "keyboard" in devices and "lerobot" in devices:
             raise ValueError("keyboard and lerobot teleop devices cannot be enabled together.")
+        if "xr_controller" in devices and not self.server.ssl_certfile:
+            raise ValueError("xr_controller teleoperation requires server.ssl_certfile and server.ssl_keyfile.")
         object.__setattr__(self, "devices", devices)

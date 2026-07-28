@@ -84,7 +84,8 @@ def run_replay(config) -> None:
     cluster.start()
     try:
         server_cfg = config.cluster.env.env_worker.teleop.server
-        print(f"Replay viewer: https://localhost:{int(server_cfg.base_port)}")
+        scheme = "https" if server_cfg.ssl_certfile and server_cfg.ssl_keyfile else "http"
+        print(f"Replay viewer: {scheme}://localhost:{int(server_cfg.base_port)}")
         while True:
             for episode, payload in zip(episodes, episode_payloads, strict=True):
                 print(

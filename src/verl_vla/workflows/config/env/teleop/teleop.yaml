@@ -66,15 +66,14 @@ server:
   # Uvicorn log level for each observation server.
   log_level: warning
 
-  # TLS certificate for browser/WebXR access.
-  ssl_certfile: /file_system/liujincheng/Projects/verl-vla/certs/teleop.crt
+  # TLS certificate required when the WebXR controller is enabled.
+  ssl_certfile: null
 
-  # TLS private key for browser/WebXR access.
-  ssl_keyfile: /file_system/liujincheng/Projects/verl-vla/certs/teleop.key
+  # TLS private key required when the WebXR controller is enabled.
+  ssl_keyfile: null
 
 
 # Human intervention input devices enabled in the browser and backend.
 devices:
 
   - keyboard
-  - xr_controller
