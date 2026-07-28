@@ -265,9 +265,10 @@ DAgger post-training iteration.
 
 ## Next steps
 
-This end-to-end loop represents the core verl-vla workflow. From here, you can
-explore additional environments, models, and training algorithms supported by
-the framework.
+This end-to-end loop represents the core verl-vla workflow. Continue with the
+[Framework Overview](../framework-overview/index.md) to learn how the system is
+organized, then explore additional environments, models, and training
+algorithms supported by the framework.
 
 ## Acknowledgements
 
