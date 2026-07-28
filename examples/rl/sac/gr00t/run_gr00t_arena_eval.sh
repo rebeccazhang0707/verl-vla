@@ -14,8 +14,8 @@
 # Must run inside the GR00T docker (isaaclab_arena:cuda_gr00t_gn16), NOT
 # verl-vla-arena. Launch it from the host with:
 #
-#   ARENA_TASK=gr1 INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh \
-#     examples/gr00t_arena_sac/run_docker.sh
+#   ARENA_TASK=gr1 INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_eval.sh \
+#     examples/rl/sac/gr00t/run_docker.sh
 #
 # See README.md for the full path / variable reference.
 #
@@ -39,7 +39,7 @@ set -euo pipefail
 set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 cd "$REPO_ROOT"
 
 # Isaac Sim's wrapped interpreter inside the GR00T docker.

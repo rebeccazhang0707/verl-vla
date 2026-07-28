@@ -18,9 +18,9 @@
 # Must run inside the GR00T docker (isaaclab_arena:cuda_gr00t_gn16). Launch from
 # the host with:
 #
-#   ARENA_TASK=gr1 INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
+#   ARENA_TASK=gr1 INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_sac.sh \
 #     OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
-#     examples/gr00t_arena_sac/run_docker.sh
+#     examples/rl/sac/gr00t/run_docker.sh
 #
 # See README.md for the full path / variable reference.
 #
@@ -31,7 +31,7 @@ set -euo pipefail
 set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-/isaac-sim/python.sh}"

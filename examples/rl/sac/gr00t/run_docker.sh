@@ -21,22 +21,22 @@
 # Usage
 # ─────────────────────────────────────────────────────────────────────────────
 #   # GR00T GR1 fridge eval (defaults):
-#   examples/gr00t_arena_sac/run_docker.sh
+#   examples/rl/sac/gr00t/run_docker.sh
 #
 #   # GR00T LIBERO spatial task 3 eval:
-#   INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh ARENA_TASK=libero \
+#   INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_eval.sh ARENA_TASK=libero \
 #     GROOT_MODEL_PATH=/models/checkpoint-10000 \
-#     examples/gr00t_arena_sac/run_docker.sh
+#     examples/rl/sac/gr00t/run_docker.sh
 #
 #   # GR00T GR1 SAC train:
-#   INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh ARENA_TASK=gr1 \
+#   INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_sac.sh ARENA_TASK=gr1 \
 #     GROOT_MODEL_PATH=/models/checkpoint-10000 \
 #     OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
-#     examples/gr00t_arena_sac/run_docker.sh
+#     examples/rl/sac/gr00t/run_docker.sh
 #
 #   # Just (re)start the container / drop into a shell:
-#   examples/gr00t_arena_sac/run_docker.sh --shell
-#   examples/gr00t_arena_sac/run_docker.sh --no-run
+#   examples/rl/sac/gr00t/run_docker.sh --shell
+#   examples/rl/sac/gr00t/run_docker.sh --no-run
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # Common overrides (env vars) — see README.md for the full table
@@ -58,7 +58,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOST_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
+HOST_REPO="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 MODE="run"
 case "${1:-}" in
@@ -98,7 +98,7 @@ CONTAINER_NAME="${CONTAINER_NAME:-isaaclab_arena-cuda_gr00t_gn16}"
 WORKDIR="${WORKDIR:-/eval}"
 # INNER_SCRIPT selects the eval / train script run inside the container.
 # EVAL_SCRIPT is still honoured as a deprecated alias for backward compatibility.
-INNER_SCRIPT="${INNER_SCRIPT:-${EVAL_SCRIPT:-examples/gr00t_arena_sac/run_gr00t_arena_eval.sh}}"
+INNER_SCRIPT="${INNER_SCRIPT:-${EVAL_SCRIPT:-examples/rl/sac/gr00t/run_gr00t_arena_eval.sh}}"
 
 # Checkpoint parent on the host -> /models. Put your GR00T HF-format export dir(s)
 # under <repo>/checkpoints/ (e.g. <repo>/checkpoints/checkpoint-10000), or override.

@@ -1,7 +1,7 @@
 # GR00T Arena SAC Post-Training & Eval
 
 Everything you need to run **GR00T N1.6** policies on **IsaacLab-Arena** tasks —
-policy evaluation and SAC post-training — from the host, in one Docker image.
+policy evaluation and SAC training — from the host, in one Docker image.
 
 Two tasks are supported, selected with `ARENA_TASK`:
 
@@ -181,37 +181,37 @@ Defaults assume the checkpoint is at `./checkpoints/checkpoint-10000`. Override
 ### GR1 fridge task eval (verified default)
 
 ```bash
-examples/gr00t_arena_sac/run_docker.sh
+examples/rl/sac/gr00t/run_docker.sh
 ```
 
 ### LIBERO spatial task 3 eval
 
 ```bash
-INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_eval.sh \
+INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_eval.sh \
 ARENA_TASK=libero \
 MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
-  examples/gr00t_arena_sac/run_docker.sh
+  examples/rl/sac/gr00t/run_docker.sh
 ```
 
 ### GR1 fridge task SAC training
 
 ```bash
-INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
+INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_sac.sh \
 ARENA_TASK=gr1 \
 GROOT_MODEL_PATH=/models/checkpoint-10000 \
 OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_sac \
-  examples/gr00t_arena_sac/run_docker.sh
+  examples/rl/sac/gr00t/run_docker.sh
 ```
 
 ### LIBERO SAC training (use a separate container)
 
 ```bash
-INNER_SCRIPT=examples/gr00t_arena_sac/run_gr00t_arena_sac.sh \
+INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_sac.sh \
 ARENA_TASK=libero \
 MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
 OUTPUT_ROOT=/eval/outputs/arena_gr00t_libero_sac \
 CONTAINER_NAME=isaaclab_arena-cuda_gr00t_gn16_sac \
-  examples/gr00t_arena_sac/run_docker.sh
+  examples/rl/sac/gr00t/run_docker.sh
 ```
 
 > SAC reconstructs complete episodes per environment lane before adding them to
@@ -222,8 +222,8 @@ CONTAINER_NAME=isaaclab_arena-cuda_gr00t_gn16_sac \
 ### Start a container / shell only
 
 ```bash
-examples/gr00t_arena_sac/run_docker.sh --no-run   # (re)start GR00T container only
-examples/gr00t_arena_sac/run_docker.sh --shell    # GR00T interactive shell
+examples/rl/sac/gr00t/run_docker.sh --no-run   # (re)start GR00T container only
+examples/rl/sac/gr00t/run_docker.sh --shell    # GR00T interactive shell
 ```
 
 Extra Hydra overrides append to any inner script and are forwarded via `"$@"`,
@@ -231,7 +231,7 @@ e.g. inside `--shell`:
 
 ```bash
 GROOT_MODEL_PATH=/models/checkpoint-10000 \
-  bash examples/gr00t_arena_sac/run_gr00t_arena_eval.sh max_episodes=1
+  bash examples/rl/sac/gr00t/run_gr00t_arena_eval.sh max_episodes=1
 ```
 
 ---

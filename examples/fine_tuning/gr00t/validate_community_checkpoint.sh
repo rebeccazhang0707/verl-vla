@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 DATA_ROOT=${DATA_ROOT:-/data}
 MODEL_REPO=${MODEL_REPO:-0xAnkitSingh/GR00T-N1.6-LIBERO}
@@ -36,4 +36,4 @@ export ACTION_CHUNK_SIZE=${ACTION_CHUNK_SIZE:-8}
 export EXPERIMENT_NAME=${EXPERIMENT_NAME:-gr00t_n1d6_community_libero_spatial}
 
 cd "$REPO_ROOT"
-exec bash examples/gr00t_sft/run_gr00t_libero_eval.sh
+exec bash examples/fine_tuning/gr00t/run_gr00t_libero_eval.sh

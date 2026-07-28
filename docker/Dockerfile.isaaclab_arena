@@ -127,7 +127,7 @@ RUN if [ "$INSTALL_GROOT" = "true" ]; then \
   fi
 
 # verl runtime for verl_vla's SAC / RECAP entrypoints (previously bootstrapped at
-# runtime by verl-vla's examples/gr00t_arena_sac launch scripts). verl 0.7.1
+# runtime by verl-vla's GR00T RL launch scripts). verl 0.7.1
 # declares numpy<2.0, which conflicts with what this image ships — so install
 # verl with --no-deps and pull only its missing lightweight imports, with a
 # constraints file pinning torch / transformers / numpy to the versions already

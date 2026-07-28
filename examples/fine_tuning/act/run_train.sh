@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 cd "$REPO_ROOT"
 
 vvla-train-sft \
-  --config-dir "./examples/act_sft" \
+  --config-dir "./examples/fine_tuning/act" \
   --config-name act_sft \
   cluster.actor_rollout_ref.model.path="./assets/hf_models/act_libero" \
   cluster.actor_rollout_ref.model.adapter.processor_dataset_root="./outputs/record/lerobot/local/libero_spatial" \

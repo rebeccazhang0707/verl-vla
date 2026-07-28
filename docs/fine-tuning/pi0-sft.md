@@ -24,7 +24,7 @@ including the LIBERO assets required for OSMesa rendering.
 ## Start training
 
 ```bash
-bash examples/pi05_sft/run_train.sh
+bash examples/fine_tuning/pi05/run_train.sh
 ```
 
 > **Optional: LoRA fine-tuning**
@@ -33,7 +33,7 @@ bash examples/pi05_sft/run_train.sh
 > overrides to the same launcher:
 >
 > ```bash
-> bash examples/pi05_sft/run_train.sh \
+> bash examples/fine_tuning/pi05/run_train.sh \
 >   cluster.actor_rollout_ref.model.lora.rank=32 \
 >   cluster.actor_rollout_ref.model.lora.alpha=32 \
 >   cluster.actor_rollout_ref.model.lora.target_modules=all-linear
@@ -123,7 +123,7 @@ The evaluation launcher reads the latest saved checkpoint and runs the full
 LIBERO Spatial benchmark:
 
 ```bash
-bash examples/pi05_sft/run_eval.sh
+bash examples/fine_tuning/pi05/run_eval.sh
 ```
 
 The reference run evaluated all 10 tasks with 10 trials per task:

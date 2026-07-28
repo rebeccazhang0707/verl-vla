@@ -59,7 +59,7 @@ def test_pi05_sft_example_composes_through_training_entrypoint():
 def test_gr00t_sft_example_composes_through_training_entrypoint():
     config = _compose_sft_config(
         "--config-path",
-        str(REPO_ROOT / "examples/gr00t_sft"),
+        str(REPO_ROOT / "examples/fine_tuning/gr00t"),
         "--config-name",
         "main_gr00t_sft",
         f"hydra.searchpath=[file://{REPO_ROOT}/src/verl_vla/workflows/config]",

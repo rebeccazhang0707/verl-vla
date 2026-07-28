@@ -206,7 +206,7 @@ WEIGHT_DECAY=1e-5 \
 SAVE_FREQ=500 \
 MAX_ACTOR_CKPT_TO_KEEP=3 \
 RESUME_DATALOADER_STATE=true \
-bash examples/gr00t_sft/run_gr00t_lerobot_sft.sh
+bash examples/fine_tuning/gr00t/run_gr00t_lerobot_sft.sh
 ```
 
 `TOTAL_EPOCHS=13` produces 10,751 steps. When
@@ -224,7 +224,7 @@ first run it downloads `nvidia/GR00T-N1.6-3B` revision
 `.data/gr00t_sft/models/gr00t_n1d6_3b`:
 
 ```bash
-bash examples/gr00t_sft/run_docker.sh
+bash examples/fine_tuning/gr00t/run_docker.sh
 ```
 
 Set `DATA_ROOT`, `NUM_GPUS`, or any of the batch-size variables before running
@@ -270,7 +270,7 @@ docker run -d \
   -e MAX_ACTOR_CKPT_TO_KEEP=3 \
   -e RESUME_DATALOADER_STATE=true \
   "$IMAGE" \
-  bash -lc 'nvidia-smi && bash examples/gr00t_sft/run_gr00t_lerobot_sft.sh'
+  bash -lc 'nvidia-smi && bash examples/fine_tuning/gr00t/run_gr00t_lerobot_sft.sh'
 
 docker logs -f gr00t_n1d6_sft
 ```
@@ -337,7 +337,7 @@ ACTION_CHUNK_SIZE=8 \
 MAX_INTERACTIONS=90 \
 MUJOCO_GL=osmesa \
 PYOPENGL_PLATFORM=osmesa \
-bash examples/gr00t_sft/run_gr00t_libero_eval.sh
+bash examples/fine_tuning/gr00t/run_gr00t_libero_eval.sh
 ```
 
 ### Docker
@@ -373,7 +373,7 @@ docker run --rm \
   -e ACTION_CHUNK_SIZE=8 \
   -e MAX_INTERACTIONS=90 \
   "$IMAGE" \
-  bash -lc 'bash examples/gr00t_sft/run_gr00t_libero_eval.sh'
+  bash -lc 'bash examples/fine_tuning/gr00t/run_gr00t_libero_eval.sh'
 ```
 
 ## 7. Validate the community LIBERO checkpoint
@@ -398,7 +398,7 @@ ENV_WORKERS=1 \
 NUM_ENVS=3 \
 MUJOCO_GL=osmesa \
 PYOPENGL_PLATFORM=osmesa \
-bash examples/gr00t_sft/validate_community_checkpoint.sh
+bash examples/fine_tuning/gr00t/validate_community_checkpoint.sh
 ```
 
 ### Docker
@@ -424,7 +424,7 @@ docker run --rm \
   -e ENV_WORKERS=1 \
   -e NUM_ENVS=3 \
   "$IMAGE" \
-  bash -lc 'bash examples/gr00t_sft/validate_community_checkpoint.sh'
+  bash -lc 'bash examples/fine_tuning/gr00t/validate_community_checkpoint.sh'
 ```
 
 A successful validation prints the following metrics:

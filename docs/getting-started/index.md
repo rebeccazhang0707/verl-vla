@@ -187,7 +187,7 @@ Run from the repository root:
 
 ```bash
 vvla-train-sft \
-  --config-dir "./examples/act_sft" \
+  --config-dir "./examples/fine_tuning/act" \
   --config-name act_sft \
   cluster.actor_rollout_ref.model.path="./assets/hf_models/act_libero" \
   cluster.actor_rollout_ref.model.adapter.processor_dataset_root="./outputs/record/lerobot/local/libero_spatial" \

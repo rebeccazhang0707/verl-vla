@@ -53,7 +53,7 @@ def main() -> None:
     if commit != GR00T_N1D6_COMMIT:
         raise RuntimeError(
             f"Unsupported GR00T source commit {commit!r}; expected {GR00T_N1D6_COMMIT}. "
-            "Reinstall with the command documented in examples/gr00t_sft/README.md."
+            "Reinstall with the command documented in examples/fine_tuning/gr00t/README.md."
         )
     # The upstream VCS wheel does not currently include Eagle's non-Python
     # package data.  Fail during image construction instead of allowing

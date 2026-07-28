@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 IMAGE_NAME=${IMAGE_NAME:-verl-vla-gr00t:n1.6}
 MODEL_REPO_ID=${MODEL_REPO_ID:-nvidia/GR00T-N1.6-3B}
@@ -149,4 +149,4 @@ exec docker run --rm -it \
   -e MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP}" \
   -e RESUME_DATALOADER_STATE=true \
   "${IMAGE_NAME}" \
-  -lc 'exec bash examples/gr00t_sft/run_gr00t_lerobot_sft.sh'
+  -lc 'exec bash examples/fine_tuning/gr00t/run_gr00t_lerobot_sft.sh'
