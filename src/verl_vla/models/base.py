@@ -189,14 +189,13 @@ class SupportSFTTraining:
         raise NotImplementedError("Subclasses must implement sft_loss method.")
 
 
-class TrainableVLAModelMixin:
-    """Shared boundary for trainable adapters that contain one native policy."""
+class TrainableVLAModelBase(nn.Module):
+    """Base class for trainable VLA models that contain one native policy."""
 
     policy: nn.Module
 
-    def init_trainable_model(self, *, policy: nn.Module) -> None:
-        if not isinstance(self, nn.Module):
-            raise TypeError("TrainableVLAModelMixin requires an nn.Module trainable model")
+    def __init__(self, *, policy: nn.Module) -> None:
+        super().__init__()
         self.policy = policy
 
     @property

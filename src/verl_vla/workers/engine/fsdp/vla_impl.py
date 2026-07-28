@@ -129,10 +129,10 @@ class VLAFSDPEngine(FSDPEngine):
     def _build_lora_module(self, module):
         """Apply PEFT to the native policy without freezing VLA auxiliary modules."""
 
-        from verl_vla.models.base import TrainableVLAModelMixin
+        from verl_vla.models.base import TrainableVLAModelBase
 
-        if not isinstance(module, TrainableVLAModelMixin):
-            raise TypeError(f"LoRA requires a TrainableVLAModelMixin policy wrapper, got {type(module).__name__}")
+        if not isinstance(module, TrainableVLAModelBase):
+            raise TypeError(f"LoRA requires a TrainableVLAModelBase policy wrapper, got {type(module).__name__}")
         if not self.model_config.lora.get("merge", False):
             raise ValueError("VLA LoRA requires model.lora.merge=True for native rollout weight synchronization")
 

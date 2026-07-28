@@ -32,7 +32,7 @@ from verl.utils.device import get_device_name
 
 from verl_vla.utils.scalar_schedule import ScheduledScalar
 
-from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelMixin
+from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelBase
 from .adapter_config import PI0AdapterConfig
 from .critic import (
     CrossAttentionCriticBackend,
@@ -80,15 +80,11 @@ def load_pi0_norm_stats(path: str | os.PathLike[str]) -> tuple[dict, dict]:
 
 
 class PI0TrainableModel(
-    nn.Module,
-    TrainableVLAModelMixin,
+    TrainableVLAModelBase,
     SupportSACTraining,
     SupportSFTTraining,
 ):
     def __init__(self, config: PI0AdapterConfig, policy: PI0Policy | None = None):
-        super().__init__()
-        self.config = config
-        SupportSFTTraining.__init__(self, config)
         if policy is None:
             policy = PI0Policy(
                 max_state_dim=int(getattr(config, "max_state_dim", 32)),
@@ -99,7 +95,9 @@ class PI0TrainableModel(
                 use_cache=bool(getattr(config, "use_cache", True)),
                 pi05_enabled=bool(getattr(config, "pi05_enabled", False)),
             )
-        self.init_trainable_model(policy=policy)
+        super().__init__(policy=policy)
+        self.config = config
+        SupportSFTTraining.__init__(self, config)
         norm_stats_path = getattr(config, "norm_stats_path", None)
         if hasattr(config, "norm_stats_path"):
             delattr(config, "norm_stats_path")

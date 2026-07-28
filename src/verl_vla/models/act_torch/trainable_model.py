@@ -23,12 +23,12 @@ import torch
 from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot.processor import PolicyProcessorPipeline
 from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
-from torch import Tensor, nn
+from torch import Tensor
 from torch.distributed.fsdp import register_fsdp_forward_method
 from typing_extensions import override
 from verl.protocol import DataProto
 
-from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelMixin
+from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelBase
 from .adapter_config import ACTAdapterConfig
 from .critic import CRITIC_BACKENDS
 from .policy import get_act_policy_classes
@@ -37,7 +37,7 @@ from .policy.base import ActOutput
 logger = logging.getLogger(__name__)
 
 
-class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, SupportSFTTraining):
+class ACTTrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTraining):
     def __init__(
         self,
         policy: ACTPolicy,
@@ -47,11 +47,10 @@ class ACTTrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, S
         adapter_config: Mapping | None = None,
         model_path: str | Path | None = None,
     ):
-        super().__init__()
+        super().__init__(policy=policy)
         config = ACTAdapterConfig(model_path=model_path, **dict(adapter_config or {}))
         SupportSFTTraining.__init__(self, config)
         self.config = config
-        self.init_trainable_model(policy=policy)
         self.preprocessor = preprocessor
         self.postprocessor = postprocessor
 

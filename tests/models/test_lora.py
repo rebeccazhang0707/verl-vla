@@ -12,7 +12,7 @@ import torch
 from torch import nn
 from verl.utils.fsdp_utils import normalize_peft_param_name
 
-from verl_vla.models.base import TrainableVLAModelMixin
+from verl_vla.models.base import TrainableVLAModelBase
 from verl_vla.workers.engine.fsdp.native_policy_checkpoint_manager import _save_lora_adapter
 
 
@@ -30,10 +30,9 @@ class _TinyPolicy(nn.Module):
         torch.save(self.state_dict() if state_dict is None else state_dict, output_dir / "policy.pt")
 
 
-class _TinyTrainableModel(nn.Module, TrainableVLAModelMixin):
+class _TinyTrainableModel(TrainableVLAModelBase):
     def __init__(self):
-        super().__init__()
-        self.init_trainable_model(policy=_TinyPolicy())
+        super().__init__(policy=_TinyPolicy())
         self.critic = nn.Linear(4, 1)
 
 

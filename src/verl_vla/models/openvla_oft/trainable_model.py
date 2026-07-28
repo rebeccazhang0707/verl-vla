@@ -6,18 +6,15 @@
 
 from __future__ import annotations
 
-from torch import nn
-
-from verl_vla.models.base import TrainableVLAModelMixin
+from verl_vla.models.base import TrainableVLAModelBase
 
 from .modeling_prismatic import OpenVLAForActionPrediction
 
 
-class OpenVLATrainableModel(nn.Module, TrainableVLAModelMixin):
+class OpenVLATrainableModel(TrainableVLAModelBase):
     def __init__(self, policy: OpenVLAForActionPrediction):
-        super().__init__()
+        super().__init__(policy=policy)
         self.config = policy.config
-        self.init_trainable_model(policy=policy)
 
     def forward(self, *args, **kwargs):
         return self.policy(*args, **kwargs)

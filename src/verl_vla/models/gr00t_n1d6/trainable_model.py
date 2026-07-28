@@ -28,7 +28,7 @@ from transformers.feature_extraction_utils import BatchFeature
 from transformers.modeling_utils import no_init_weights
 from verl import DataProto
 
-from verl_vla.models.base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelMixin
+from verl_vla.models.base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelBase
 
 from .adapter_config import Gr00tAdapterConfig
 from .compat import apply_gr00t_compat_patches
@@ -82,14 +82,13 @@ def _cfg_get(obj: Any, name: str, default=None):
     return default if val is None else val
 
 
-class Gr00tN1d6TrainableModel(nn.Module, TrainableVLAModelMixin, SupportSACTraining, SupportSFTTraining):
+class Gr00tN1d6TrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTraining):
     def __init__(self, policy: Gr00tN1d6, adapter_config: Gr00tAdapterConfig | None = None):
-        super().__init__()
+        super().__init__(policy=policy)
         if adapter_config is None:
             adapter_config = Gr00tAdapterConfig(model_path=getattr(policy.config, "_name_or_path", None))
         SupportSFTTraining.__init__(self, adapter_config)
         self.adapter_config = adapter_config
-        self.init_trainable_model(policy=policy)
         # verl saves ``model.config`` as native Hugging Face metadata. Keep the
         # framework settings separate so the exported GR00T directory remains
         # directly loadable by Transformers.
