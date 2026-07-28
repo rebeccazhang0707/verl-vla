@@ -26,7 +26,7 @@ from typing_extensions import override
 
 from verl_vla.recorder import MultiRecorder
 from verl_vla.teleop import TeleopController
-from verl_vla.utils.envs.rate_limiter import pace_calls
+from verl_vla.utils.envs.rate_limiter import pace_calls, reset_call_rate
 
 
 class BaseEnv(gym.Env):
@@ -170,6 +170,7 @@ class BaseEnv(gym.Env):
         self.reset_recorder_envs(env_ids)
         self.publish_reset_obs_to_teleop(obs, env_ids=env_ids)
         self._confirm_before_record(env_ids)
+        reset_call_rate(self, "mask_step")
         return obs, {}
 
     @override
@@ -565,6 +566,7 @@ class BaseEnv(gym.Env):
         self.reset_recorder_envs(env_ids[reset_local_ids])
         self.publish_reset_obs_to_teleop(reset_obs, env_ids=env_ids[reset_local_ids])
         self._confirm_before_record(env_ids[reset_local_ids])
+        reset_call_rate(self, "mask_step")
         return step_result
 
     def _slice_latest_obs(self, env_ids):

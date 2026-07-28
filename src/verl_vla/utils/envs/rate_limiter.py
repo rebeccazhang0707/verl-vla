@@ -23,6 +23,13 @@ _RATE_WARNING_INTERVAL_S = 5.0
 _RATE_WARNING_TOLERANCE = 0.02
 
 
+def reset_call_rate(instance, method_name: str) -> None:
+    """Start a new pacing window for a decorated instance method."""
+    state_attribute = f"_call_rate_state_{method_name}"
+    if hasattr(instance, state_attribute):
+        delattr(instance, state_attribute)
+
+
 @dataclass
 class _CallRateState:
     target_hz: float
