@@ -1,6 +1,6 @@
 # verl-vla
 
-[![Documentation Status](https://readthedocs.org/projects/verl-vla/badge/?version=latest)](https://verl-vla.readthedocs.io/en/latest/) [![CI](https://img.shields.io/github/actions/workflow/status/verl-project/verl-vla/sanity.yml?branch=main&label=CI)](https://github.com/verl-project/verl-vla/actions/workflows/sanity.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](https://www.python.org/)
+[![Documentation Status](https://readthedocs.org/projects/verl-vla/badge/?version=latest)](https://verl-vla.readthedocs.io/en/latest/)&nbsp;[![CI](https://img.shields.io/github/actions/workflow/status/verl-project/verl-vla/sanity.yml?branch=main&label=CI)](https://github.com/verl-project/verl-vla/actions/workflows/sanity.yml)&nbsp;[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)&nbsp;[![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](https://www.python.org/)
 
 **A unified post-training framework for vision-language-action policies, built
 on top of [verl](https://github.com/verl-project/verl).**
