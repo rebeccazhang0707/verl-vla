@@ -79,7 +79,6 @@ class SACTrainingWorker(TrainingWorker):
         )
         self.critic_scheduler = torch.optim.lr_scheduler.ConstantLR(self.critic_optimizer, factor=1.0)
 
-        self.backup_entropy = bool(self.sac_config.get("backup_entropy", True))
         self.auto_entropy = self.sac_config.get("auto_entropy", False)
         if self.auto_entropy:
             self.target_entropy = torch.tensor(
@@ -329,8 +328,6 @@ class SACTrainingWorker(TrainingWorker):
                         is_first_micro_batch=False,
                     )
                     a1 = {"action": a1_actions}
-                    if not self.backup_entropy:
-                        log_probs_1 = None
                 else:
                     log_probs_1 = None
 

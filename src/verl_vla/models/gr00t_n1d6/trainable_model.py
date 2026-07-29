@@ -29,7 +29,7 @@ from transformers.modeling_utils import no_init_weights
 from verl import DataProto
 
 from verl_vla.models.base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelBase
-from verl_vla.models.dsrl import DSRLSteeringMixin
+from verl_vla.models.dsrl import DSRLSteering
 
 from .adapter_config import Gr00tAdapterConfig
 from .compat import apply_gr00t_compat_patches
@@ -83,9 +83,7 @@ def _cfg_get(obj: Any, name: str, default=None):
     return default if val is None else val
 
 
-class Gr00tN1d6TrainableModel(
-    DSRLSteeringMixin, TrainableVLAModelBase, SupportSACTraining, SupportSFTTraining
-):
+class Gr00tN1d6TrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTraining):
     def __init__(self, policy: Gr00tN1d6, adapter_config: Gr00tAdapterConfig | None = None):
         super().__init__(policy=policy)
         if adapter_config is None:
@@ -128,12 +126,12 @@ class Gr00tN1d6TrainableModel(
         self.action_dim = int(getattr(adapter_config, "action_dim", GR1.action_dim))
         self.embodiment_id = int(getattr(adapter_config, "embodiment_id", GR1.embodiment_id))
 
-        dsrl_cfg = getattr(adapter_config, "dsrl", None)
-        self.dsrl_enable = bool(getattr(dsrl_cfg, "enabled", False))
+        dsrl_cfg = adapter_config.dsrl
+        self.dsrl = None
 
         critic_cfg = adapter_config.critic
         self.critic_type = str(critic_cfg.type).lower()
-        if self.dsrl_enable:
+        if dsrl_cfg.enabled:
             # DSRL: the critic scores the steering noise x0 (full padded width).
             # One shared noise vector per chunk unless noise_per_step is set.
             default_critic_action_dim = self.max_action_dim
@@ -224,15 +222,20 @@ class Gr00tN1d6TrainableModel(
                 critic_cfg.pooling,
             )
 
-        # DSRL latent-noise steering (arXiv:2506.15799): freeze the whole VLA and
-        # train a small SAC noise actor over the flow-matching initial noise x0.
-        self.init_dsrl(
-            dsrl_cfg,
-            feature_dim=self.backbone_feature_dim,
-            state_dim=self.state_horizon * self.max_state_dim,
-            noise_dim=self.max_action_dim,
-            noise_horizon=self.action_horizon,
-        )
+        if dsrl_cfg.enabled:
+            if self.flow_sde_enable:
+                raise ValueError("DSRL noise steering and Flow-SDE are mutually exclusive; set flow_sde_enable=False.")
+            if not adapter_config.critic.enabled:
+                raise ValueError("DSRL requires the SAC critic; set adapter.critic.enabled=True.")
+            self.dsrl = DSRLSteering(
+                dsrl_cfg,
+                feature_dim=self.backbone_feature_dim,
+                state_dim=self.state_horizon * self.max_state_dim,
+                noise_dim=self.max_action_dim,
+                noise_horizon=self.action_horizon,
+            )
+            self.policy.requires_grad_(False)
+            self.policy.eval()
 
         self.freeze_vision_tower_enabled = bool(getattr(adapter_config, "freeze_vision_tower", True))
         if self.freeze_vision_tower_enabled and self.adapter_config.critic.enabled:
@@ -244,6 +247,12 @@ class Gr00tN1d6TrainableModel(
     @property
     def device(self):
         return next(self.policy.parameters()).device
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if mode and self.dsrl is not None:
+            self.policy.eval()
+        return self
 
     @property
     def action_head(self):
@@ -393,8 +402,9 @@ class Gr00tN1d6TrainableModel(
     def sac_init(self):
         if self.adapter_config.critic.enabled and self.critic is None and self.critic_api is not None:
             self.critic_api.init(self)
-        if self.dsrl_enable:
-            self.freeze_policy_for_dsrl()
+        if self.dsrl is not None:
+            self.policy.requires_grad_(False)
+            self.policy.eval()
         if self.freeze_vision_tower_enabled:
             self.freeze_vision_tower()
         for method in (
@@ -450,17 +460,22 @@ class Gr00tN1d6TrainableModel(
         s, raw_state_groups = self._prepare_inputs(obs, tokenizer, training=False)
         state_features = self._state_features_impl(s)
 
-        if self.dsrl_enable:
+        steering_noise = None
+        if self.dsrl is not None:
             # DSRL: sample steering noise from the small SAC actor and let the
             # frozen flow head integrate it deterministically into an action.
-            steering_noise, log_probs, _ = self.dsrl_forward_actor(state_features, deterministic=eval)
-            full_action, _ = self._denoise(
-                state_features, noise_scale=0.0, requires_grad=False, return_log_prob=False, x0=steering_noise
-            )
-            # The SAC action space is the steering noise, so that is what the
-            # replay/critic see under ``full_action``.
-            replay_action = steering_noise.detach().float()
+            features, state = self._dsrl_actor_inputs(state_features)
+            steering_noise, log_probs, _ = self.dsrl.sample(features, state, deterministic=eval)
+            initial_noise = steering_noise
+            noise_scale = 0.0
+            return_log_prob = False
         else:
+            features = state_features["backbone_features"]
+            initial_noise = torch.randn(
+                (features.shape[0], self.action_horizon, self.max_action_dim),
+                dtype=features.dtype,
+                device=features.device,
+            )
             override = obs.meta_info.get("rollout_noise_scale", None) if obs.meta_info else None
             if eval:
                 noise_scale = 0.0
@@ -470,17 +485,23 @@ class Gr00tN1d6TrainableModel(
                 noise_scale = self.flow_sde_rollout_noise_scale if self.flow_sde_enable else 0.0
             return_log_prob = self.flow_sde_enable and noise_scale > 0.0
 
-            full_action, log_probs = self._denoise(
-                state_features, noise_scale=noise_scale, requires_grad=False, return_log_prob=return_log_prob
-            )
-            replay_action = full_action.detach().float()
+        full_action, flow_log_probs = self._denoise(
+            state_features,
+            initial_noise=initial_noise,
+            noise_scale=noise_scale,
+            requires_grad=False,
+            return_log_prob=return_log_prob,
+        )
+        if self.dsrl is None:
+            log_probs = flow_log_probs
 
         full_action_norm = full_action.detach().float()
         decoded_flat = self._get_adapter().decode_actions_flat(full_action_norm.cpu().numpy(), raw_state_groups)
         decoded = torch.as_tensor(decoded_flat, dtype=torch.float32, device=full_action_norm.device)
         return output_cls.from_model_output(
             {
-                "full_action": replay_action,
+                "full_action": full_action_norm,
+                "steering_noise": None if steering_noise is None else steering_noise.detach().float(),
                 "decoded_action": decoded,
                 "log_probs": log_probs,
                 "num_action_chunks": self.num_action_chunks,
@@ -495,8 +516,11 @@ class Gr00tN1d6TrainableModel(
         tokenizer: Optional[torch.nn.Module] = None,
     ) -> torch.Tensor:
         state_features = self.sac_forward_state_features(obs, tokenizer)
+        critic_actions = {"full_action": actions.full_action}
+        if actions.steering_noise is not None:
+            critic_actions["steering_noise"] = actions.steering_noise
         q_values = self.sac_forward_critic(
-            {"full_action": actions.full_action},
+            critic_actions,
             state_features,
             use_target_network=False,
             method="min",
@@ -609,31 +633,40 @@ class Gr00tN1d6TrainableModel(
         self,
         sf: dict[str, torch.Tensor],
         *,
+        initial_noise: torch.Tensor,
         noise_scale: float,
         requires_grad: bool,
         return_log_prob: bool,
-        x0: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         vl_embeds = sf["backbone_features"]
-        batch_size = vl_embeds.shape[0]
         device = vl_embeds.device
         dtype = vl_embeds.dtype
-        if x0 is None:
-            x0 = torch.randn((batch_size, self.action_horizon, self.max_action_dim), dtype=dtype, device=device)
-        else:
-            # DSRL steering noise replaces the Gaussian prior as the flow start.
-            x0 = x0.to(dtype=dtype, device=device)
+        initial_noise = initial_noise.to(dtype=dtype, device=device)
 
         if self.sac_action_train_all:
             return self._run_flow(
-                sf, x0, noise_scale=noise_scale, requires_grad=requires_grad, return_log_prob=return_log_prob
+                sf,
+                initial_noise,
+                noise_scale=noise_scale,
+                requires_grad=requires_grad,
+                return_log_prob=return_log_prob,
             )
 
         x_train, log_probs = self._run_flow(
-            sf, x0, noise_scale=noise_scale, requires_grad=requires_grad, return_log_prob=return_log_prob
+            sf,
+            initial_noise,
+            noise_scale=noise_scale,
+            requires_grad=requires_grad,
+            return_log_prob=return_log_prob,
         )
         with torch.no_grad():
-            x_base, _ = self._run_flow(sf, x0, noise_scale=0.0, requires_grad=False, return_log_prob=False)
+            x_base, _ = self._run_flow(
+                sf,
+                initial_noise,
+                noise_scale=0.0,
+                requires_grad=False,
+                return_log_prob=False,
+            )
         mask = self.sac_action_train_mask.view(1, 1, -1)
         x = torch.where(mask, x_train, x_base)
         return x, log_probs
@@ -731,17 +764,25 @@ class Gr00tN1d6TrainableModel(
         noise_scale: Optional[float] = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], dict[str, float]]:
         del task_ids
-        if self.dsrl_enable:
+        if self.dsrl is not None:
             del is_first_micro_batch, noise_scale
-            return self.dsrl_forward_actor(state_features)
+            features, state = self._dsrl_actor_inputs(state_features)
+            return self.dsrl.sample(features, state)
 
         resolved_noise_scale = (
             (self.flow_sde_train_noise_scale if self.flow_sde_enable else 0.0)
             if noise_scale is None
             else float(noise_scale)
         )
+        features = state_features["backbone_features"]
+        initial_noise = torch.randn(
+            (features.shape[0], self.action_horizon, self.max_action_dim),
+            dtype=features.dtype,
+            device=features.device,
+        )
         actions, log_probs = self._denoise(
             state_features,
+            initial_noise=initial_noise,
             noise_scale=resolved_noise_scale,
             requires_grad=True,
             return_log_prob=self.flow_sde_enable and resolved_noise_scale > 0.0,
@@ -773,6 +814,8 @@ class Gr00tN1d6TrainableModel(
     ) -> torch.Tensor:
         if self.critic_api is None:
             raise RuntimeError("Critic is not enabled; set adapter.critic.enabled=True")
+        if self.dsrl is not None:
+            a = self.dsrl.select_critic_noise(a)
         return self.critic_api.forward(
             self,
             a=a,
@@ -789,8 +832,8 @@ class Gr00tN1d6TrainableModel(
         return self.critic_api.get_critic_parameters(self)
 
     def sac_get_named_actor_parameters(self) -> list[tuple[str, torch.nn.Parameter]]:
-        if self.dsrl_enable:
-            return self.dsrl_named_actor_parameters()
+        if self.dsrl is not None:
+            return self.dsrl.named_actor_parameters()
         actor_params = []
         for name, p in self.action_head.named_parameters():
             if p.requires_grad:
@@ -991,8 +1034,6 @@ class Gr00tN1d6TrainableModel(
 
     def export_policy(self, output_dir, *, state_dict=None):
         self.save_pretrained(output_dir, state_dict=state_dict)
-
-        self.dsrl_export_sidecar(output_dir, state_dict=state_dict)
 
 
 __all__ = ["Gr00tN1d6TrainableModel", "load_gr00t_n1d6_policy", "beta_schedule"]

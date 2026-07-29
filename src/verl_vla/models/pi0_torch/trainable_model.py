@@ -33,7 +33,7 @@ from verl.utils.device import get_device_name
 from verl_vla.utils.scalar_schedule import ScheduledScalar
 
 from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelBase
-from ..dsrl import DSRLSteeringMixin
+from ..dsrl import DSRLSteering
 from .adapter_config import PI0AdapterConfig
 from .critic import (
     CrossAttentionCriticBackend,
@@ -81,7 +81,6 @@ def load_pi0_norm_stats(path: str | os.PathLike[str]) -> tuple[dict, dict]:
 
 
 class PI0TrainableModel(
-    DSRLSteeringMixin,
     TrainableVLAModelBase,
     SupportSACTraining,
     SupportSFTTraining,
@@ -167,15 +166,21 @@ class PI0TrainableModel(
             self.critic_api = CRITIC_BACKENDS[self.critic_type]
             self.critic_api.init(self)
 
-        # DSRL latent-noise steering (arXiv:2506.15799): freeze the whole VLA and
-        # train a small SAC noise actor over the flow-matching initial noise x0.
-        self.init_dsrl(
-            getattr(config, "dsrl", None),
-            feature_dim=self.config.critic.prefix_embed_dim,
-            state_dim=len(self.state_norm_stats["mean"]),
-            noise_dim=self.policy.max_action_dim,
-            noise_horizon=self.policy.n_action_steps,
-        )
+        self.dsrl = None
+        if config.dsrl.enabled:
+            if self.flow_sde_enable:
+                raise ValueError("DSRL noise steering and Flow-SDE are mutually exclusive; set flow_sde_enable=False.")
+            if not config.critic.enabled:
+                raise ValueError("DSRL requires the SAC critic; set adapter.critic.enabled=True.")
+            self.dsrl = DSRLSteering(
+                config.dsrl,
+                feature_dim=config.critic.prefix_embed_dim,
+                state_dim=len(self.state_norm_stats["mean"]),
+                noise_dim=self.policy.max_action_dim,
+                noise_horizon=self.policy.n_action_steps,
+            )
+            self.policy.requires_grad_(False)
+            self.policy.eval()
 
     def _get_pi0_embodiment_classes(self):
         return get_pi0_embodiment_classes(self.embodiment)
@@ -185,6 +190,12 @@ class PI0TrainableModel(
         self.state_unnormalize_transform.to(device)
         self.action_normalize_transform.to(device)
         self.action_unnormalize_transform.to(device)
+        return self
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if mode and self.dsrl is not None:
+            self.policy.eval()
         return self
 
     def forward(
@@ -231,25 +242,8 @@ class PI0TrainableModel(
         env_obs: DataProto,
         tokenizer,
         eval: bool = False,
-    ) -> tuple[Pi0Output, dict, dict]:
-        """Run one forward pass from raw inputs to final action sequence.
-
-        Args:
-            env_obs: The environment observations as DataProto.
-            tokenizer: The tokenizer used for prompt tokenization.
-
-        Returns:
-            A tuple of (pi0_output, s, a):
-                - pi0_output: The Pi0Output containing the predicted actions.
-                - s: Dictionary of tensors representing the states, with keys
-                    - "images": torch.Tensor of shape (B, n_images, C, H, W)
-                    - "image_masks": torch.Tensor of shape (B, n_images)
-                    - "lang_tokens": torch.Tensor of shape (B, L)
-                    - "lang_masks": torch.Tensor of shape (B, L)
-                    - "states": torch.Tensor of shape (B, state_dim)
-                - a: Dictionary of tensors representing actions, with key:
-                    - "full_action": torch.Tensor of shape (B, action_steps, action_dim)
-        """
+    ) -> Pi0Output:
+        """Run one forward pass from environment observations to actions."""
 
         pi0_input_cls, pi0_output_cls = self._get_pi0_embodiment_classes()
         pi0_input = pi0_input_cls.from_env_obs(env_obs)
@@ -260,43 +254,41 @@ class PI0TrainableModel(
         lang_tokens, lang_masks = self.prompt_tokenizer_transform.call_batch(
             {"task": pi0_input.task, "observation.state": state}, tokenizer
         )
+        prefix_features = self.policy.embed_prefix(
+            images=images,
+            img_masks=pi0_input.img_masks,
+            lang_tokens=lang_tokens,
+            lang_masks=lang_masks,
+        )
+        state_features = (prefix_features, state)
+        task_ids = torch.tensor(env_obs.non_tensor_batch["task_id"], device=state.device, dtype=torch.long)
 
         steering_noise = None
-        if self.dsrl_enable:
+        if self.dsrl is not None:
             # DSRL: sample steering noise from the small SAC actor and let the
             # frozen flow head integrate it deterministically into an action.
-            prefix_features = self.policy.embed_prefix(
-                images=images,
-                img_masks=pi0_input.img_masks,
-                lang_tokens=lang_tokens,
-                lang_masks=lang_masks,
+            features, dsrl_state = self._dsrl_actor_inputs(state_features)
+            steering_noise, rollout_log_probs, _ = self.dsrl.sample(
+                features,
+                dsrl_state,
+                deterministic=eval,
             )
-            steering_noise, rollout_log_probs, _ = self.dsrl_forward_actor((prefix_features, state), deterministic=eval)
-            pred_action, _ = self._sample_actions_flow_sde(
-                state_features=(prefix_features, state),
-                noise_scale=0.0,
-                requires_grad=False,
-                return_log_prob=False,
-                task_ids=torch.tensor(env_obs.non_tensor_batch["task_id"], device=state.device, dtype=torch.long),
-                initial_noise=steering_noise,
-            )
-        elif self.flow_sde_enable and not eval:
-            prefix_features = self.policy.embed_prefix(
-                images=images,
-                img_masks=pi0_input.img_masks,
-                lang_tokens=lang_tokens,
-                lang_masks=lang_masks,
-            )
-            pred_action, rollout_log_probs = self._sample_actions_flow_sde(
-                state_features=(prefix_features, state),
-                noise_scale=self.flow_sde_rollout_noise_scale,
-                requires_grad=False,
-                return_log_prob=True,
-                task_ids=torch.tensor(env_obs.non_tensor_batch["task_id"], device=state.device, dtype=torch.long),
-            )
+            initial_noise = steering_noise
         else:
-            pred_action = self.policy.sample_actions(images, pi0_input.img_masks, lang_tokens, lang_masks, state=state)
-            rollout_log_probs = torch.zeros(pred_action.shape[0], device=pred_action.device, dtype=torch.float32)
+            shape = (state.shape[0], self.policy.n_action_steps, self.policy.max_action_dim)
+            initial_noise = self.policy.sample_noise(shape, state.device)
+
+        noise_scale = self.flow_sde_rollout_noise_scale if self.flow_sde_enable and not eval else 0.0
+        pred_action, flow_log_probs = self._sample_actions_flow_sde(
+            state_features=state_features,
+            initial_noise=initial_noise,
+            noise_scale=noise_scale,
+            requires_grad=False,
+            return_log_prob=self.flow_sde_enable and not eval,
+            task_ids=task_ids,
+        )
+        if self.dsrl is None:
+            rollout_log_probs = flow_log_probs
 
         # Output transforms
         pi0_output = pi0_output_cls.from_model_output(
@@ -306,26 +298,10 @@ class PI0TrainableModel(
                 "action_chunk_size": self.action_chunk_size,
             }
         )
-        s = {
-            "states": state,
-            "images": torch.stack(images, dim=1),
-            "image_masks": torch.stack(pi0_input.img_masks, dim=1),
-            "lang_tokens": lang_tokens,
-            "lang_masks": lang_masks,
-        }
-        a = {
-            "full_action": pred_action,
-            "log_probs": rollout_log_probs,
-        }
         if steering_noise is not None:
-            # The SAC action space is the steering noise: store it under
-            # ``full_action`` for the replay/critic; the env still steps with
-            # the decoded chunk in ``pi0_output.action``.
-            steering_noise = steering_noise.detach().float()
-            pi0_output.full_action = steering_noise
-            a["full_action"] = steering_noise
+            pi0_output.steering_noise = steering_noise.detach().float()
 
-        return pi0_output, s, a
+        return pi0_output
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
@@ -391,7 +367,6 @@ class PI0TrainableModel(
         """Export PI0 weights together with its normalization statistics."""
 
         self.save_pretrained(output_dir, state_dict=state_dict)
-        self.dsrl_export_sidecar(output_dir, state_dict=state_dict)
 
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
         # Preserve complete adapter checkpoints, including critic/target state.
@@ -421,7 +396,9 @@ class PI0TrainableModel(
         state_features: tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         prefix_features, states = state_features
-        pooled = self._mean_pool_prefix(prefix_features[0], prefix_features[1])
+        prefix_embs, prefix_pad_masks, _ = prefix_features
+        prefix_mask = prefix_pad_masks.to(dtype=prefix_embs.dtype).unsqueeze(-1)
+        pooled = (prefix_embs * prefix_mask).sum(dim=1) / prefix_mask.sum(dim=1).clamp_min(1.0)
         return pooled, states
 
     @override
@@ -577,11 +554,11 @@ class PI0TrainableModel(
     def _sample_actions_flow_sde(
         self,
         state_features: tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
+        initial_noise: torch.Tensor,
         noise_scale: float,
         requires_grad: bool,
         return_log_prob: bool,
         task_ids: torch.Tensor | None = None,
-        initial_noise: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         add noise to the action sampling process using Flow-SDE method.
@@ -600,12 +577,7 @@ class PI0TrainableModel(
         )
 
         past_key_values = self._build_kv_cache_from_prefix(prefix_features)
-        actions_shape = (batch_size, self.policy.n_action_steps, self.policy.max_action_dim)
-        if initial_noise is None:
-            x_t = torch.randn(actions_shape, device=device, dtype=prefix_embs.dtype)
-        else:
-            # DSRL steering noise replaces the Gaussian prior at t=1.
-            x_t = initial_noise.to(device=device, dtype=prefix_embs.dtype)
+        x_t = initial_noise.to(device=device, dtype=prefix_embs.dtype)
 
         timesteps = torch.linspace(1.0, 0.0, self.policy.num_steps + 1, dtype=torch.float32, device=device)
         step_log_probs: list[torch.Tensor] = []
@@ -669,11 +641,6 @@ class PI0TrainableModel(
 
         return x_t, log_probs
 
-    @staticmethod
-    def _mean_pool_prefix(prefix_embs: torch.Tensor, prefix_pad_masks: torch.Tensor) -> torch.Tensor:
-        prefix_mask = prefix_pad_masks.to(dtype=prefix_embs.dtype).unsqueeze(-1)
-        return (prefix_embs * prefix_mask).sum(dim=1) / prefix_mask.sum(dim=1).clamp_min(1.0)
-
     def _build_kv_cache_from_prefix(
         self,
         prefix_features: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -699,6 +666,9 @@ class PI0TrainableModel(
     def sac_init(self):
         """Initialize SAC-related components."""
 
+        if self.dsrl is not None:
+            self.policy.requires_grad_(False)
+            self.policy.eval()
         self.freeze_vision_tower()
         forward_methods = [
             "sft_loss",
@@ -717,8 +687,7 @@ class PI0TrainableModel(
         tokenizer: torch.nn.Module | None = None,
         eval: bool = False,
     ) -> Pi0Output:
-        pi0_output, _, _ = self.sample_actions(obs, tokenizer, eval)
-        return pi0_output
+        return self.sample_actions(obs, tokenizer, eval)
 
     @torch.no_grad()
     def sac_get_critic_value(
@@ -733,8 +702,8 @@ class PI0TrainableModel(
         if self.critic_api.uses_task_ids:
             task_ids = torch.tensor(obs.non_tensor_batch["task_id"], device=actions.action.device, dtype=torch.long)
         a = {"action": actions.action}
-        if getattr(actions, "full_action", None) is not None:
-            a["full_action"] = actions.full_action
+        if actions.steering_noise is not None:
+            a["steering_noise"] = actions.steering_noise
         critic_q_values = self.sac_forward_critic(
             a=a,
             state_features=state_features,
@@ -757,12 +726,18 @@ class PI0TrainableModel(
         noise_scale: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None, dict[str, float]]:
         actor_metrics: dict[str, float] = {}
-        if self.dsrl_enable:
-            return self.dsrl_forward_actor(state_features)
+        if self.dsrl is not None:
+            features, state = self._dsrl_actor_inputs(state_features)
+            return self.dsrl.sample(features, state)
+        prefix_features, _ = state_features
+        batch_size = prefix_features[0].shape[0]
+        shape = (batch_size, self.policy.n_action_steps, self.policy.max_action_dim)
+        initial_noise = self.policy.sample_noise(shape, prefix_features[0].device)
         if self.flow_sde_enable:
             resolved_noise_scale = self.flow_sde_train_noise_scale if noise_scale is None else noise_scale
             actions, log_probs = self._sample_actions_flow_sde(
                 state_features=state_features,
+                initial_noise=initial_noise,
                 noise_scale=resolved_noise_scale,
                 requires_grad=True,
                 return_log_prob=True,
@@ -779,6 +754,7 @@ class PI0TrainableModel(
         else:
             actions, log_probs = self._sample_actions_flow_sde(
                 state_features=state_features,
+                initial_noise=initial_noise,
                 noise_scale=0.0,
                 requires_grad=True,
                 return_log_prob=False,
@@ -810,8 +786,8 @@ class PI0TrainableModel(
     ):
         if self.critic_api.uses_task_ids and task_ids is None:
             raise ValueError(f"critic_type={self.critic_type} requires task_ids for critic forward.")
-        if self.dsrl_enable:
-            a = self.dsrl_select_critic_noise(a)
+        if self.dsrl is not None:
+            a = self.dsrl.select_critic_noise(a)
         return self.critic_api.forward(
             self,
             a=a,
@@ -828,8 +804,8 @@ class PI0TrainableModel(
 
     @override
     def sac_get_named_actor_parameters(self) -> list[tuple[str, torch.nn.Parameter]]:
-        if self.dsrl_enable:
-            return self.dsrl_named_actor_parameters()
+        if self.dsrl is not None:
+            return self.dsrl.named_actor_parameters()
         named_parameters = [(name, param) for name, param in self.policy.named_parameters() if param.requires_grad]
         return named_parameters
 

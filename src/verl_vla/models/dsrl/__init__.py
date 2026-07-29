@@ -5,7 +5,7 @@
 """Model-agnostic DSRL latent-noise steering components (arXiv:2506.15799)."""
 
 from .config import DSRLSteeringConfig
-from .mixin import DSRLSteeringMixin
 from .noise_actor import DSRLNoiseActor
+from .steering import DSRLSteering
 
-__all__ = ["DSRLNoiseActor", "DSRLSteeringConfig", "DSRLSteeringMixin"]
+__all__ = ["DSRLNoiseActor", "DSRLSteering", "DSRLSteeringConfig"]
