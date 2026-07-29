@@ -3,5 +3,6 @@
 ```{toctree}
 :maxdepth: 1
 
-pi0-sft
+act/index
+pi05/index
 ```

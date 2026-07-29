@@ -115,7 +115,7 @@ watch -n 1 nvidia-smi
 
 The loss curve from a reference run is shown below:
 
-![PI0.5 LIBERO Spatial SFT loss](../_static/images/pi05-libero-spatial-sft-loss.png)
+![PI0.5 LIBERO Spatial SFT loss](../../_static/images/pi05-libero-spatial-sft-loss.png)
 
 ## Evaluate the checkpoint
 
@@ -140,5 +140,5 @@ The reference run evaluated all 10 tasks with 10 trials per task:
 | Total evaluation time | 51.69 seconds |
 
 Every task achieved a 100% success rate. The
-[complete evaluation metrics](../_static/results/pi05-libero-spatial-eval.json)
+[complete evaluation metrics](../../_static/results/pi05-libero-spatial-eval.json)
 include per-task trajectory lengths, counts, timing, and throughput.
