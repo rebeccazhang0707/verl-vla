@@ -108,6 +108,7 @@ class DSRLNoiseActor(nn.Module):
         features: torch.Tensor,
         state: torch.Tensor,
         deterministic: bool = False,
+        noise_scale: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample steering noise for the flow head.
 
@@ -122,7 +123,10 @@ class DSRLNoiseActor(nn.Module):
             pre_tanh = mean
             log_prob = torch.zeros(mean.shape[0], device=mean.device, dtype=mean.dtype)
         else:
-            normal = torch.distributions.Normal(mean, log_std.exp())
+            std = log_std.exp()
+            if noise_scale is not None:
+                std = torch.sqrt(std.square() + float(noise_scale) ** 2)
+            normal = torch.distributions.Normal(mean, std)
             pre_tanh = normal.rsample()
             squashed = torch.tanh(pre_tanh)
             log_prob = normal.log_prob(pre_tanh) - torch.log(1.0 - squashed.pow(2) + _TANH_EPS)

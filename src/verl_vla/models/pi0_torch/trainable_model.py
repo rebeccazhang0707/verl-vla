@@ -399,7 +399,7 @@ class PI0TrainableModel(
         prefix_embs, prefix_pad_masks, _ = prefix_features
         prefix_mask = prefix_pad_masks.to(dtype=prefix_embs.dtype).unsqueeze(-1)
         pooled = (prefix_embs * prefix_mask).sum(dim=1) / prefix_mask.sum(dim=1).clamp_min(1.0)
-        return pooled, states
+        return pooled, states[..., : self.dsrl.noise_actor.state_dim]
 
     @override
     def sft_init(self):
@@ -728,7 +728,11 @@ class PI0TrainableModel(
         actor_metrics: dict[str, float] = {}
         if self.dsrl is not None:
             features, state = self._dsrl_actor_inputs(state_features)
-            return self.dsrl.sample(features, state)
+            return self.dsrl.sample(
+                features,
+                state,
+                noise_scale=noise_scale,
+            )
         prefix_features, _ = state_features
         batch_size = prefix_features[0].shape[0]
         shape = (batch_size, self.policy.n_action_steps, self.policy.max_action_dim)

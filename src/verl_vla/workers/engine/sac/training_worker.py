@@ -281,7 +281,7 @@ class SACTrainingWorker(TrainingWorker):
         valid_mask = valids.unsqueeze(1)
         mse = F.mse_loss(q_predict, y, reduction="none")
         per_critic = (mse * valid_mask).sum(dim=0) / valid_mask.sum().clamp_min(1.0)
-        td_loss = per_critic.sum()
+        td_loss = per_critic.mean()
 
         critic_loss_metrics = {
             "td_loss": td_loss.detach(),
@@ -293,13 +293,14 @@ class SACTrainingWorker(TrainingWorker):
                 torch.logsumexp(q_candidates / self.cql_temperature, dim=0) * self.cql_temperature - q_predict
             )
             cql_per_critic = (cql_per_critic * valid_mask).sum(dim=0) / valid_mask.sum().clamp_min(1.0)
-            cql_loss = self.cql_alpha * cql_per_critic.sum()
+            cql_loss = self.cql_alpha * cql_per_critic.mean()
             critic_loss_metrics["cql_loss"] = cql_loss.detach()
 
             q_gap = q_policy - q_predict
             valid_q_gap = q_gap.masked_select(valid_mask.expand_as(q_gap).bool())
             if valid_q_gap.numel() > 0:
                 critic_loss_metrics["cql/q_gap_mean"] = valid_q_gap.mean().detach()
+                critic_loss_metrics["cql/q_gap_abs_mean"] = valid_q_gap.abs().mean().detach()
                 critic_loss_metrics["cql/q_gap_max"] = valid_q_gap.max().detach()
                 critic_loss_metrics["cql/q_gap_pos_ratio"] = (valid_q_gap > 0).float().mean().detach()
 

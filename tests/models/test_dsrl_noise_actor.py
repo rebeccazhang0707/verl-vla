@@ -89,6 +89,17 @@ def test_sample_is_reparameterized():
     assert actor.log_std_head.weight.grad is not None
 
 
+def test_noise_scale_increases_cql_sampling_variance():
+    actor = _make_actor()
+    features = torch.zeros(4096, FEATURE_DIM)
+    state = torch.zeros(4096, STATE_DIM)
+    torch.manual_seed(0)
+    base_noise, _ = actor.sample(features, state)
+    torch.manual_seed(0)
+    cql_noise, _ = actor.sample(features, state, noise_scale=1.0)
+    assert cql_noise[:, 0].std() > base_noise[:, 0].std()
+
+
 def test_state_flattening_and_dim_check():
     actor = _make_actor()
     noise, _ = actor.sample(torch.randn(2, FEATURE_DIM), torch.randn(2, 1, STATE_DIM))

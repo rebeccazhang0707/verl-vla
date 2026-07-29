@@ -42,8 +42,14 @@ class DSRLSteering(nn.Module):
         state: torch.Tensor,
         *,
         deterministic: bool = False,
+        noise_scale: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
-        noise, log_probs = self.noise_actor.sample(features, state, deterministic=deterministic)
+        noise, log_probs = self.noise_actor.sample(
+            features,
+            state,
+            deterministic=deterministic,
+            noise_scale=noise_scale,
+        )
         return noise, log_probs, {}
 
     def named_actor_parameters(self) -> list[tuple[str, torch.nn.Parameter]]:
