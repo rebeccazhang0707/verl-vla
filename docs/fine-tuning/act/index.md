@@ -8,5 +8,6 @@ choose among the verified recipes below.
 ```{toctree}
 :maxdepth: 1
 
+official-libero-spatial
 self-collected-libero-spatial
 ```

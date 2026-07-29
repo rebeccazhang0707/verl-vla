@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+
+cd "$REPO_ROOT"
+
+CHECKPOINT_ROOT="./outputs/train/act-sft/official-libero-spatial/checkpoints"
+LATEST_STEP="$(<"$CHECKPOINT_ROOT/latest_checkpointed_iteration.txt")"
+OUTPUT_DIR="./outputs/eval/act-sft/official-libero-spatial/step-${LATEST_STEP}"
+
+vvla-eval \
+  model/override@cluster.actor_rollout_ref.model.override_config=act \
+  model/adapter@cluster.actor_rollout_ref.model.adapter=act \
+  cluster.actor_rollout_ref.model.path="$CHECKPOINT_ROOT/global_step_${LATEST_STEP}/actor/huggingface" \
+  cluster.actor_rollout_ref.model.load_tokenizer=false \
+  cluster.env.env_worker.simulator.libero.task_suite_name=libero_spatial \
+  cluster.env.env_worker.simulator.libero.task_ids=null \
+  cluster.env.env_worker.simulator.libero.num_trials_per_task=10 \
+  cluster.resource.model.gpus_per_node=1 \
+  cluster.resource.env.device=cpu \
+  cluster.resource.env.workers_per_node=8 \
+  cluster.env.env_worker.num_envs=2 \
+  output_dir="$OUTPUT_DIR" \
+  "$@"
