@@ -1,10 +1,6 @@
 # verl-vla
 
-[![Documentation Status](https://readthedocs.org/projects/verl-vla/badge/?version=latest)](https://verl-vla.readthedocs.io/en/latest/)
-[![Sanity](https://github.com/verl-project/verl-vla/actions/workflows/sanity.yml/badge.svg)](https://github.com/verl-project/verl-vla/actions/workflows/sanity.yml)
-[![Pre-commit](https://github.com/verl-project/verl-vla/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/verl-project/verl-vla/actions/workflows/pre-commit.yml)
-[![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Documentation Status](https://readthedocs.org/projects/verl-vla/badge/?version=latest)](https://verl-vla.readthedocs.io/en/latest/) [![CI](https://img.shields.io/github/actions/workflow/status/verl-project/verl-vla/sanity.yml?branch=main&label=CI)](https://github.com/verl-project/verl-vla/actions/workflows/sanity.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](https://www.python.org/)
 
 **A unified post-training framework for vision-language-action policies, built
 on top of [verl](https://github.com/verl-project/verl).**
@@ -22,13 +18,13 @@ shown below across simulators and physical robots:
 <table>
   <tr>
     <th>Isaac Lab Arena</th>
-    <th>Piper</th>
     <th>LIBERO</th>
+    <th>Piper</th>
   </tr>
   <tr>
     <td><img src="docs/_static/images/teleop-arena.webp" alt="Isaac Lab Arena teleoperation demo" width="360" height="164"></td>
-    <td><img src="docs/_static/images/teleop-piper.webp" alt="Piper teleoperation demo" width="360" height="164"></td>
     <td><img src="docs/_static/images/teleop-libero.webp" alt="LIBERO teleoperation demo" width="360" height="164"></td>
+    <td><img src="docs/_static/images/teleop-piper.webp" alt="Piper teleoperation demo" width="360" height="164"></td>
   </tr>
 </table>
 
@@ -143,9 +139,10 @@ We sincerely thank the verl team for their foundational work and continued
 support for this project.
 
 We are grateful to [LeRobot](https://github.com/huggingface/lerobot),
+[SimpleVLA-RL](https://github.com/PRIME-RL/SimpleVLA-RL),
 [RLinf](https://github.com/RLinf/RLinf),
-[OpenPI](https://github.com/Physical-Intelligence/openpi),
 [Giga Models](https://github.com/open-gigaai/giga-models),
+[OpenPI](https://github.com/Physical-Intelligence/openpi),
 [Evo-RL](https://github.com/MINT-SJTU/Evo-RL), and
 [Evo-RLT](https://github.com/MINT-SJTU/Evo-RLT) for the ideas, implementations,
 and open-source foundations that helped shape this project. In particular,
