@@ -228,6 +228,7 @@ class LiberoGr00tOutput(Gr00tOutput):
         chunk = min(chunk, decoded.shape[1])
         output.action = decoded[:, :chunk]
         output.full_action = full_action
+        output.steering_noise = model_output.get("steering_noise")
         output.log_prob = model_output.get("log_probs")
         return output
 

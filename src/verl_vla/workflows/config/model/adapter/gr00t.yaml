@@ -15,6 +15,16 @@
 # GR00T N1.6 Arena/SAC adapter configuration.
 # These settings belong to the verl-vla adapter, not the native Hugging Face policy.
 
+# Hydra configuration composition order.
+defaults:
+
+  # Shared DSRL latent-noise steering configuration.
+  - /model/adapter/dsrl@dsrl: default
+
+  # Apply GR00T-specific settings last.
+  - _self_
+
+
 # Policy and embodiment -------------------------------------------------------
 
 # Policy I/O adapter registered under verl_vla.models.gr00t_n1d6.policy.

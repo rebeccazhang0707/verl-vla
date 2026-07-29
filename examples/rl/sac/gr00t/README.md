@@ -1,7 +1,8 @@
-# GR00T Arena SAC Post-Training & Eval
+# GR00T Arena SAC and DSRL Post-Training & Eval
 
 Everything you need to run **GR00T N1.6** policies on **IsaacLab-Arena** tasks —
-policy evaluation and SAC training — from the host, in one Docker image.
+policy evaluation, SAC training, and DSRL latent-noise steering — from the host,
+in one Docker image.
 
 Two tasks are supported, selected with `ARENA_TASK`:
 
@@ -14,8 +15,7 @@ Two tasks are supported, selected with `ARENA_TASK`:
 
 ## Hardware requirements
 
-- **NVIDIA GPU with recent driver** (CUDA 12.8 runtime). No `cuda128-compat` mount
-  is needed — a modern host driver already satisfies the image.
+- **NVIDIA GPU with recent driver** (CUDA >=12.8 runtime).
 - **≥ 2 GPUs for eval and SAC.** The env-loop cluster runs the Isaac Sim **env
   worker** and the GR00T **model/rollout worker** as separate Ray workers, each
   reserving its own GPU. A single-GPU host fails at Ray resource allocation
@@ -40,6 +40,7 @@ run_docker.sh   →   (re)creates the GR00T container + mounts   →   runs an i
 | `run_docker.sh` | GR00T container launcher. Mounts image/repo/Arena/models, runs the inner script named by `INNER_SCRIPT`. |
 | `run_gr00t_arena_eval.sh` | GR00T rollout through the shared `eval` workflow. `ARENA_TASK=gr1\|libero`. |
 | `run_gr00t_arena_sac.sh` | GR00T SAC training. `ARENA_TASK=gr1\|libero`. |
+| `run_gr00t_arena_dsrl.sh` | DSRL training over the frozen GR00T policy's initial flow noise. `ARENA_TASK=gr1\|libero`. |
 
 Inner scripts are meant to run *inside* the container, but `run_docker.sh`
 launches them for you — you normally never call them directly.
@@ -219,6 +220,26 @@ CONTAINER_NAME=isaaclab_arena-cuda_gr00t_gn16_sac \
 > only `10 × 16 = 160`, so incomplete suffixes remain buffered across windows.
 > One-slot terminal segments are discarded as non-auto-reset padding.
 
+### GR1 fridge task DSRL training
+
+```bash
+INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_dsrl.sh \
+ARENA_TASK=gr1 \
+GROOT_MODEL_PATH=/models/checkpoint-10000 \
+OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_dsrl \
+  examples/rl/sac/gr00t/run_docker.sh
+```
+
+### LIBERO DSRL training
+
+```bash
+INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_dsrl.sh \
+ARENA_TASK=libero TASK_SUITE=libero_spatial TASK_ID=3 \
+MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
+OUTPUT_ROOT=/eval/outputs/arena_gr00t_libero_dsrl \
+  examples/rl/sac/gr00t/run_docker.sh
+```
+
 ### Start a container / shell only
 
 ```bash
@@ -369,5 +390,23 @@ Outputs land under `<repo>/outputs/…` on the host (the repo is bind-mounted).
 `SAVE_FREQ` (500), `INITIAL_ALPHA` (0.01), `ALPHA_TYPE` (softplus),
 `AUTO_ENTROPY` (False), `CRITIC_TAU` (0.01), `RESUME_MODE`/`RESUME_FROM_PATH`,
 `PROJECT_NAME`, `EXPERIMENT_NAME`, `TRAINER_LOGGER` (`[console]`).
+
+### DSRL
+
+[DSRL](https://arxiv.org/abs/2506.15799) freezes the complete VLA and trains a
+small SAC actor over the flow-matching initial noise. The existing SAC critic
+scores that steering noise; replay stores it separately from the normalized
+model action and decoded environment action.
+
+`run_gr00t_arena_dsrl.sh` exposes `NOISE_ACTOR_LR` (3e-4), `CRITIC_LR`
+(3e-4), `CRITIC_TAU` (0.005), `AUTO_ENTROPY` (True), `TARGET_ENTROPY`
+(-64.0), `CRITIC_WARMUP_STEPS` (100), `EMA_DECAY` (null),
+`CRITIC_POOL_PROJ_DIM` (0), `CRITIC_LAYERNORM` (True), and
+`ACTOR_POSITIVE_SAMPLE_RATIO` (0.8).
+
+DSRL is mutually exclusive with Flow-SDE, TD3+BC, and offline RLPD prefill:
+those paths use environment actions rather than steering noise. The full verl
+checkpoint contains the DSRL actor and critic, while the native Hugging Face
+export remains an unchanged upstream policy.
 
 ---

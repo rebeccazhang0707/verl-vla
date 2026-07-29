@@ -14,6 +14,16 @@
 
 # PI0 LIBERO adapter configuration.
 
+# Hydra configuration composition order.
+defaults:
+
+  # Shared DSRL latent-noise steering configuration.
+  - /model/adapter/dsrl@dsrl: default
+
+  # Apply PI0-specific settings last.
+  - _self_
+
+
 # Select the LIBERO policy path in the model implementation.
 embodiment: libero
 

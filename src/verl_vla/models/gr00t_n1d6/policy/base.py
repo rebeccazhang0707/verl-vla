@@ -89,12 +89,15 @@ class Gr00tOutput(ModelOutput):
                      is the differentiable action space the SAC actor/critic operate in
                      (decoding is non-differentiable), stored in replay under
                      ``full_action`` so the critic sees the same space it is trained on.
+        steering_noise: optional DSRL latent SAC action that seeds the frozen flow
+                        head, (B, action_horizon, max_action_dim).
         log_prob:    optional per-sample Flow-SDE log-prob, (B,).
     """
 
     def __init__(self):
         self.action: Optional[torch.Tensor] = None
         self.full_action: Optional[torch.Tensor] = None
+        self.steering_noise: Optional[torch.Tensor] = None
         self.log_prob: Optional[torch.Tensor] = None
 
     @classmethod
@@ -105,6 +108,8 @@ class Gr00tOutput(ModelOutput):
         tensor_batch = {"action": self.action}
         if self.full_action is not None:
             tensor_batch["full_action"] = self.full_action
+        if self.steering_noise is not None:
+            tensor_batch["steering_noise"] = self.steering_noise
         if self.log_prob is not None:
             tensor_batch["log_prob"] = self.log_prob
         return DataProto.from_dict(tensors=tensor_batch)

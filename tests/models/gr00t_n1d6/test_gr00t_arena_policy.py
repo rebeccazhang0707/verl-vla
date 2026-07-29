@@ -137,16 +137,25 @@ def test_output_from_model_output_chunks_and_carries_full_action():
 
 def test_output_to_data_proto_keys():
     full_action = torch.randn(B, 16, 128)
+    steering_noise = torch.randn(B, 16, 128)
     decoded = torch.randn(B, 16, 26)
     output = ArenaGr00tOutput.from_model_output(
-        {"full_action": full_action, "decoded_action": decoded, "log_probs": torch.randn(B), "num_action_chunks": 16}
+        {
+            "full_action": full_action,
+            "steering_noise": steering_noise,
+            "decoded_action": decoded,
+            "log_probs": torch.randn(B),
+            "num_action_chunks": 16,
+        }
     )
     proto = output.to_data_proto()
     assert "action" in proto.batch.keys()
     assert "full_action" in proto.batch.keys()
+    assert "steering_noise" in proto.batch.keys()
     assert "log_prob" in proto.batch.keys()
     assert proto.batch["action"].shape == (B, 16, 26)
     assert proto.batch["full_action"].shape == (B, 16, 128)
+    assert torch.equal(proto.batch["steering_noise"], steering_noise)
 
 
 # ---------------------------------------------------------------------------
@@ -166,22 +175,29 @@ def test_full_action_survives_replay_plumbing():
     """
     batch, decoded_chunk, decoded_dim, full_horizon, max_action_dim = 2, 16, 26, 50, 128
     full_action = torch.randn(batch, full_horizon, max_action_dim)
+    steering_noise = torch.randn(batch, full_horizon, max_action_dim)
     decoded = torch.randn(batch, decoded_chunk, decoded_dim)
     rollout = ArenaGr00tOutput.from_model_output(
-        {"full_action": full_action, "decoded_action": decoded, "num_action_chunks": decoded_chunk}
+        {
+            "full_action": full_action,
+            "steering_noise": steering_noise,
+            "decoded_action": decoded,
+            "num_action_chunks": decoded_chunk,
+        }
     ).to_data_proto()
 
-    # Env-loop namespacing: one rollout step -> keys "action.action" / "action.full_action".
+    # Env-loop namespacing preserves both the model action and DSRL latent action.
     stacked = stack_dataproto_with_padding([rollout], "action")
-    assert set(stacked) == {"action.action", "action.full_action"}
+    assert set(stacked) == {"action.action", "action.full_action", "action.steering_noise"}
     data = DataProto.from_dict(tensors=stacked)
 
     # Rollout slot -> t0/t1 transition fields, then flatten (B, steps, ...) -> (B*steps, ...).
     data = flatten_trajectories(add_transition_prefixes(data))
 
     a0 = get_dataproto_from_prefix(data, "t0.action.").batch
-    assert "full_action" in a0.keys() and "action" in a0.keys()
-    # The critic-space selection (a.get("full_action", a["action"])) must land on the
-    # NORMALISED full_action, not the decoded env action.
+    assert {"action", "full_action", "steering_noise"} <= set(a0.keys())
+    # The normalized model action and DSRL steering noise remain distinct from
+    # the decoded environment action throughout replay transport.
     assert a0["full_action"].shape[-1] == max_action_dim
     assert not torch.equal(a0["full_action"], a0["action"])
+    assert torch.equal(a0["steering_noise"], steering_noise.reshape(-1, full_horizon, max_action_dim))
