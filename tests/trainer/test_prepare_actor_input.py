@@ -36,6 +36,7 @@ def make_rollout(
     num_lanes: int,
     num_steps: int,
     *,
+    num_substeps: int = NUM_SUBSTEPS,
     t0: int = 0,
     terminated: set[tuple[int, int]] = frozenset(),
     truncated: set[tuple[int, int]] = frozenset(),
@@ -49,10 +50,10 @@ def make_rollout(
     image = (lanes * 1000 + times).unsqueeze(-1).unsqueeze(-1).expand(num_lanes, num_steps, 2, 2).clone()
     action = torch.stack([lanes, times, torch.full_like(times, 0.5)], dim=-1)  # [B, S, 3]
 
-    terminated_steps = torch.zeros(num_lanes, num_steps, NUM_SUBSTEPS, dtype=torch.bool)
+    terminated_steps = torch.zeros(num_lanes, num_steps, num_substeps, dtype=torch.bool)
     truncated_steps = torch.zeros_like(terminated_steps)
     success_steps = torch.zeros_like(terminated_steps)
-    reward_steps = torch.zeros(num_lanes, num_steps, NUM_SUBSTEPS, dtype=torch.float32)
+    reward_steps = torch.zeros(num_lanes, num_steps, num_substeps, dtype=torch.float32)
     reward_steps[:, :, 0] = lanes * 100 + times
 
     for lane, step in terminated:
@@ -139,6 +140,25 @@ def test_prepare_actor_input_emits_complete_episodes_with_episode_success():
     np.testing.assert_array_equal(
         out.non_tensor_batch["t0.obs.task"], np.array(["task-0"] * 4 + ["task-1"] * 3, dtype=object)
     )
+
+
+@pytest.mark.parametrize("done_key", ["next.terminated", "next.truncated"])
+def test_prepare_actor_input_ignores_rewards_after_first_done_substep(done_key: str):
+    rollout = make_rollout(
+        1,
+        2,
+        num_substeps=3,
+        success={(0, 1)},
+    )
+    rollout.batch["next.reward"].zero_()
+    rollout.batch["next.reward"][0, 1] = torch.tensor([0.25, 0.75, 9.0])
+    rollout.batch[done_key][0, 1] = torch.tensor([False, True, True])
+
+    out = make_trainer()._prepare_actor_input(rollout)
+
+    assert out is not None
+    out = sort_by_lane_time(out)
+    torch.testing.assert_close(out.batch["info.rewards"], torch.tensor([0.0, 1.0]))
 
 
 def test_prepare_actor_input_discards_single_slot_done_segments():

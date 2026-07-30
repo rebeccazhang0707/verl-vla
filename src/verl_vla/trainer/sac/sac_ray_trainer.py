@@ -29,7 +29,6 @@ from verl_vla.utils.data import (
     _build_sac_transition_masks,
     add_transition_prefixes,
     flatten_trajectories,
-    reduce_substep_dims,
 )
 from verl_vla.utils.rlpd import (
     iter_rlpd_replay_prefill_batches,
@@ -47,11 +46,17 @@ def prepare_sac_actor_input(
     global_steps: int,
 ) -> DataProto:
     """Convert a complete raw episode into SAC transitions."""
-    terminated_steps = reduce_substep_dims(episode.batch["next.terminated"].bool(), reduction="any")
-    truncated_steps = reduce_substep_dims(episode.batch["next.truncated"].bool(), reduction="any")
+    terminated_substeps = episode.batch["next.terminated"].bool()
+    truncated_substeps = episode.batch["next.truncated"].bool()
+    reward_substeps = episode.batch["next.reward"].float()
+    done_substeps = terminated_substeps | truncated_substeps
+
+    valid_reward_substeps = (done_substeps.cumsum(dim=2) - done_substeps.long()) == 0
+    reward_steps = (reward_substeps * valid_reward_substeps).sum(dim=2)
+    terminated_steps = terminated_substeps.any(dim=2)
+    truncated_steps = truncated_substeps.any(dim=2)
     done_steps = terminated_steps | truncated_steps
-    success_steps = reduce_substep_dims(episode.batch["next.success"].bool(), reduction="any")
-    reward_steps = reduce_substep_dims(episode.batch["next.reward"].float(), reduction="sum")
+    success_steps = episode.batch["next.success"].bool().any(dim=2)
     del episode.batch["next.terminated"]
     del episode.batch["next.truncated"]
     del episode.batch["next.success"]
