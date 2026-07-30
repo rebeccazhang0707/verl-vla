@@ -113,6 +113,10 @@ verl-vla uses EGL by default for GPU-accelerated headless rendering:
 MUJOCO_GL=egl
 ```
 
+If EGL rendering appears on a different physical GPU from the one selected by
+`CUDA_VISIBLE_DEVICES`, apply the
+[robosuite EGL device-selection patch](../../troubleshooting/simulators/libero/index.md).
+
 When running LIBERO without a GPU, select a CPU environment resource and
 OSMesa in the launch command:
 
