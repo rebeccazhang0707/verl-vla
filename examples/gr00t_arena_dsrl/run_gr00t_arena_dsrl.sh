@@ -109,6 +109,7 @@ case "$ARENA_TASK" in
     EXTRA_OVERRIDES+=(
       "cluster.env.env_worker.simulator.arena.libero.libero_task_suite=$TASK_SUITE"
       "cluster.env.env_worker.simulator.arena.libero.libero_task_id=$TASK_ID"
+      "cluster.env.env_worker.recorder.video.fps=20"
     )
     ;;
   *)
@@ -280,6 +281,7 @@ export PYTHONPATH="/opt/groot_deps:$REPO_ROOT/src:/workspaces/isaaclab_arena:${P
   "cluster.checkpoint.resume_mode=${RESUME_MODE:-disable}" \
   "cluster.checkpoint.resume_from_path=${RESUME_FROM_PATH:-null}" \
   "cluster.checkpoint.default_local_dir=$OUTPUT_ROOT/checkpoints" \
+  "cluster.checkpoint.max_actor_ckpt_to_keep=${MAX_CKPT_TO_KEEP:-null}" \
   "trainer.project_name=$PROJECT_NAME" \
   "trainer.experiment_name=$EXPERIMENT_NAME" \
   "trainer.logger=$TRAINER_LOGGER" \
