@@ -35,12 +35,23 @@ feature_latent_dim: 128
 # Projection width of the normalized robot state (actor_type=mlp).
 state_latent_dim: 64
 
-# Transformer geometry of the noise actor (actor_type=transformer).
+# Token width of the noise-actor Transformer (actor_type=transformer).
 d_model: 256
+
+# Attention heads of the noise-actor Transformer; must divide d_model.
 nhead: 8
+
+# Transformer encoder depth of the noise actor.
 num_encoder_layers: 1
+
+# Dropout inside the noise-actor Transformer encoder. Kept at 0 so deterministic
+# (eval) steering noise stays reproducible without an explicit eval() toggle.
 transformer_dropout: 0.0
+
+# Activation of the noise-actor Transformer encoder: relu or gelu.
 transformer_activation: gelu
+
+# Dropout applied to the noise actor's positional encoding.
 positional_dropout: 0.0
 
 # Initial bias of the zero-weight log-std head, i.e. the initial policy std
@@ -59,27 +70,3 @@ noise_per_step: false
 
 # Tanh bound of the steering noise.
 noise_bound: 1.0
-
-# GR00T-only steering options --------------------------------------------------
-
-# Observation feature source for the noise actor and the transformer critic:
-#   gr00t (default, recommended): the frozen VLA's own mean-pooled VL prefix,
-#     aligned with the flow head the noise steers.
-#   dino (posttrain parity): an independent frozen DINOv2 embedding of the
-#     camera frame.
-feature_source: gr00t
-dino_model: facebook/dinov2-base
-dino_image_size: 224
-
-# True (posttrain parity) steers only the real action DOF (action_dim); the
-# padding columns of x0 are not free SAC dims, so the SAC action space stays at
-# the real DOF. False (default) steers the full padded max_action_dim.
-noise_real_dims_only: false
-
-# How the x0 padding columns [action_dim:max_action_dim] are filled when
-# noise_real_dims_only is set. True (default, posttrain tile_dims) tiles the
-# steered block across the full width so the decode is deterministic and fully
-# controlled by the actor. False (posttrain fresh_base) draws the padding fresh
-# from N(0, 1) each call, which leaks base-policy noise into the decode when
-# max_action_dim >> action_dim (e.g. GR1's 128 vs 26).
-tile_dims: true
