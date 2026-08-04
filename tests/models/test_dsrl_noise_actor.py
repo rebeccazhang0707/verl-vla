@@ -19,7 +19,12 @@ from __future__ import annotations
 import pytest
 import torch
 
-from verl_vla.models.dsrl import DSRLNoiseActor, DSRLSteeringConfig
+from verl_vla.models.dsrl import (
+    DSRLNoiseActor,
+    DSRLSteering,
+    DSRLSteeringConfig,
+    DSRLTransformerNoiseActor,
+)
 from verl_vla.models.gr00t_n1d6.adapter_config import Gr00tAdapterConfig
 from verl_vla.models.pi0_torch.adapter_config import PI0AdapterConfig
 
@@ -32,6 +37,19 @@ HORIZON = 5
 def _make_actor(**config_overrides) -> DSRLNoiseActor:
     config = DSRLSteeringConfig(hidden_dims=[16, 16], feature_latent_dim=8, state_latent_dim=4, **config_overrides)
     return DSRLNoiseActor(
+        feature_dim=FEATURE_DIM,
+        state_dim=STATE_DIM,
+        noise_dim=NOISE_DIM,
+        noise_horizon=HORIZON,
+        config=config,
+    )
+
+
+def _make_transformer_actor(**config_overrides) -> DSRLTransformerNoiseActor:
+    values = {"actor_type": "transformer", "d_model": 16, "nhead": 4, "num_encoder_layers": 1}
+    values.update(config_overrides)
+    config = DSRLSteeringConfig(**values)
+    return DSRLTransformerNoiseActor(
         feature_dim=FEATURE_DIM,
         state_dim=STATE_DIM,
         noise_dim=NOISE_DIM,
@@ -118,6 +136,106 @@ def test_bfloat16_inputs_produce_float32_outputs():
     )
     assert noise.dtype == torch.float32
     assert log_prob.dtype == torch.float32
+
+
+def test_transformer_actor_sample_shapes_and_bounds():
+    actor = _make_transformer_actor()
+    noise, log_prob = actor.sample(torch.randn(3, FEATURE_DIM), torch.randn(3, STATE_DIM))
+    assert noise.shape == (3, HORIZON, NOISE_DIM)
+    assert log_prob.shape == (3,)
+    assert noise.dtype == torch.float32
+    assert noise.abs().max() <= 1.0
+
+
+def test_transformer_actor_shared_noise_is_broadcast_across_horizon():
+    actor = _make_transformer_actor(noise_per_step=False)
+    noise, _ = actor.sample(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
+    torch.testing.assert_close(noise, noise[:, :1].expand_as(noise))
+
+
+def test_transformer_actor_per_step_noise_differs_across_horizon():
+    actor = _make_transformer_actor(noise_per_step=True)
+    noise, log_prob = actor.sample(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
+    assert noise.shape == (2, HORIZON, NOISE_DIM)
+    assert log_prob.shape == (2,)
+    # Per-step latents must not be broadcast copies of one shared vector.
+    assert not torch.equal(noise[:, 0], noise[:, 1])
+
+
+def test_transformer_actor_deterministic_sample_is_tanh_mean_with_zero_logprob():
+    actor = _make_transformer_actor()
+    features, state = torch.randn(4, FEATURE_DIM), torch.randn(4, STATE_DIM)
+    noise, log_prob = actor.sample(features, state, deterministic=True)
+    mean, _ = actor(features, state)
+    # The shared (non-per-step) actor emits one latent [B, 1, D] broadcast over
+    # the horizon; the deterministic action is tanh(mean).
+    torch.testing.assert_close(noise[:, 0], torch.tanh(mean[:, 0]))
+    assert torch.all(log_prob == 0)
+
+
+def test_transformer_actor_log_std_head_starts_at_log_std_init():
+    actor = _make_transformer_actor(log_std_init=-1.5)
+    _, log_std = actor(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
+    torch.testing.assert_close(log_std, torch.full_like(log_std, -1.5))
+
+
+def test_transformer_actor_sample_is_reparameterized():
+    actor = _make_transformer_actor()
+    noise, log_prob = actor.sample(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
+    assert noise.requires_grad
+    assert log_prob.requires_grad
+    (noise.sum() + log_prob.sum()).backward()
+    assert actor.mean_processor[-1].weight.grad is not None
+    assert actor.log_std_processor[-1].weight.grad is not None
+
+
+def test_transformer_actor_noise_scale_increases_sampling_variance():
+    actor = _make_transformer_actor()
+    features = torch.zeros(4096, FEATURE_DIM)
+    state = torch.zeros(4096, STATE_DIM)
+    torch.manual_seed(0)
+    base_noise, _ = actor.sample(features, state)
+    torch.manual_seed(0)
+    scaled_noise, _ = actor.sample(features, state, noise_scale=1.0)
+    assert scaled_noise[:, 0].std() > base_noise[:, 0].std()
+
+
+def test_transformer_actor_rejects_indivisible_d_model():
+    with pytest.raises(ValueError, match="divisible"):
+        _make_transformer_actor(d_model=18, nhead=4)
+
+
+def _make_steering(**config_overrides) -> DSRLSteering:
+    return DSRLSteering(
+        DSRLSteeringConfig(**config_overrides),
+        feature_dim=FEATURE_DIM,
+        state_dim=STATE_DIM,
+        noise_dim=NOISE_DIM,
+        noise_horizon=HORIZON,
+    )
+
+
+def test_steering_defaults_to_the_mlp_actor():
+    steering = _make_steering(hidden_dims=[16, 16], feature_latent_dim=8, state_latent_dim=4)
+    assert steering.actor_type == "mlp"
+    assert isinstance(steering.noise_actor, DSRLNoiseActor)
+
+
+def test_steering_selects_the_transformer_actor():
+    steering = _make_steering(actor_type="transformer", d_model=16, nhead=4)
+    assert steering.actor_type == "transformer"
+    assert isinstance(steering.noise_actor, DSRLTransformerNoiseActor)
+    noise, log_prob, metrics = steering.sample(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
+    assert noise.shape == (2, HORIZON, NOISE_DIM)
+    assert log_prob.shape == (2,)
+    assert metrics == {}
+    # Actor parameters are exported under the shared checkpoint prefix.
+    assert all(name.startswith("dsrl.noise_actor.") for name, _ in steering.named_actor_parameters())
+
+
+def test_steering_rejects_unknown_actor_type():
+    with pytest.raises(ValueError, match="actor_type"):
+        _make_steering(actor_type="rnn")
 
 
 def test_gr00t_adapter_config_parses_and_roundtrips_dsrl():

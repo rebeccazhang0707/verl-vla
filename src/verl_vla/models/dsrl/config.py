@@ -10,6 +10,11 @@ the whole VLA frozen and trains a small SAC policy over the *initial noise*
 embedded by both the GR00T and pi0/pi05 adapter configs under the ``dsrl`` key;
 model-derived dimensions (feature/state/noise widths, action horizon) are
 resolved by each trainable model at build time, not stored here.
+
+``actor_type`` selects the noise-actor architecture: the default ``mlp`` trunk,
+or the ``transformer`` chunking actor that mirrors the posttrain reference DSRL
+actor (``modules/transformer/actor.py``). Each architecture reads its own block
+of fields below and ignores the other's.
 """
 
 from __future__ import annotations
@@ -26,12 +31,30 @@ class DSRLSteeringConfig:
         # resolves from the model (backbone feature dim / processor state dim).
         "feature_dim": None,
         "state_dim": None,
+        # Noise-actor architecture: "mlp" (default) or "transformer" (posttrain
+        # reference chunking actor).
+        "actor_type": "mlp",
+        # -- actor_type=mlp ------------------------------------------------
         # MLP trunk widths of the noise actor.
         "hidden_dims": [256, 256, 256],
         # Width the (frozen) backbone feature vector is projected to.
         "feature_latent_dim": 128,
         # Width the raw robot state is projected to.
         "state_latent_dim": 64,
+        # -- actor_type=transformer ----------------------------------------
+        # Transformer geometry of the noise actor (posttrain reference actor).
+        "d_model": 256,
+        "nhead": 8,
+        "num_encoder_layers": 1,
+        # posttrain uses 0.1, but relies on eval() mode to disable it; the online
+        # rollout here samples the actor without a guaranteed eval() toggle, so we
+        # default to 0.0 to keep deterministic (eval) steering noise reproducible.
+        "transformer_dropout": 0.0,
+        "transformer_activation": "gelu",
+        "positional_dropout": 0.0,
+        # Initial bias of the (zero-weight) log-std head -> initial std.
+        "log_std_init": 0.0,
+        # ------------------------------------------------------------------
         # False (RLinf parity): one noise vector shared by every step of the
         # action chunk. True: an independent noise vector per horizon step.
         "noise_per_step": False,
