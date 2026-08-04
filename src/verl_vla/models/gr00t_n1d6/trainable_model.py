@@ -33,7 +33,7 @@ from verl_vla.models.dsrl import DSRLSteering
 
 from .adapter_config import Gr00tAdapterConfig
 from .compat import apply_gr00t_compat_patches
-from .critic import CrossAttentionCriticBackend, MeanPoolCriticBackend
+from .critic import CrossAttentionCriticBackend, MeanPoolCriticBackend, TransformerCriticBackend
 from .gr00t_adapter import GR00TN16Adapter
 from .policy import get_gr00t_policy_classes
 from .utils import GR1, GR00TDim, extract_critic_state_dict, normalize_adapter_state_dict
@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 CRITIC_BACKENDS = {
     "cross_attn": CrossAttentionCriticBackend(),
     "mean_pool": MeanPoolCriticBackend(),
+    "transformer": TransformerCriticBackend(),
 }
 
 _BETA_PATCH_LOCK = Lock()
@@ -131,13 +132,13 @@ class Gr00tN1d6TrainableModel(TrainableVLAModelBase, SupportSACTraining, Support
 
         critic_cfg = adapter_config.critic
         self.critic_type = str(critic_cfg.type).lower()
+        # Under DSRL the critic scores the steering noise x0 instead of the
+        # action: same width (the real action DOF, see _dsrl_build_x0), but one
+        # shared noise vector per chunk unless noise_per_step is set.
+        default_critic_action_dim = self.action_dim
         if dsrl_cfg.enabled:
-            # DSRL: the critic scores the steering noise x0 (full padded width).
-            # One shared noise vector per chunk unless noise_per_step is set.
-            default_critic_action_dim = self.max_action_dim
             default_critic_action_horizon = self.action_horizon if bool(dsrl_cfg.noise_per_step) else 1
         else:
-            default_critic_action_dim = self.action_dim
             default_critic_action_horizon = self.num_action_chunks
         self.critic_action_dim = int(
             critic_cfg.action_dim if critic_cfg.action_dim is not None else default_critic_action_dim
@@ -231,7 +232,7 @@ class Gr00tN1d6TrainableModel(TrainableVLAModelBase, SupportSACTraining, Support
                 dsrl_cfg,
                 feature_dim=self.backbone_feature_dim,
                 state_dim=self.state_horizon * self.max_state_dim,
-                noise_dim=self.max_action_dim,
+                noise_dim=self.action_dim,
                 noise_horizon=self.action_horizon,
             )
             self.policy.requires_grad_(False)
@@ -371,7 +372,26 @@ class Gr00tN1d6TrainableModel(TrainableVLAModelBase, SupportSACTraining, Support
         )
 
     def _dsrl_actor_inputs(self, state_features: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        # Same observation the Transformer critic scores against.
         return state_features["pooled"], state_features["state"]
+
+    def _dsrl_build_x0(self, steering_noise: torch.Tensor) -> torch.Tensor:
+        """Expand the real-dim steering noise to the flow head's full-width x0.
+
+        GR00T pads actions to ``max_action_dim`` (GR1: 128 vs 26 real DOF), so
+        the SAC action is kept at the real DOF (posttrain parity) and the padding
+        columns ``[action_dim:max_action_dim]`` are tiled from the steered block
+        rather than left random. The flow head denoises all ``max_action_dim``
+        dims jointly, so tiling keeps the decode a deterministic function of the
+        SAC action -- none of the base policy's own sampling noise leaks in --
+        while the SAC action space stays at the robot's DOF.
+
+        (posttrain's ``fresh_base`` alternative, drawing the padding from
+        ``N(0, 1)`` each call, is deliberately not offered: with
+        ``max_action_dim >> action_dim`` it makes the decode irreproducible.)
+        """
+        repeats = (self.max_action_dim + self.action_dim - 1) // self.action_dim
+        return steering_noise.repeat(1, 1, repeats)[..., : self.max_action_dim].contiguous()
 
     def freeze_action_io(self) -> None:
         ah = self.action_head
@@ -466,7 +486,9 @@ class Gr00tN1d6TrainableModel(TrainableVLAModelBase, SupportSACTraining, Support
             # frozen flow head integrate it deterministically into an action.
             features, state = self._dsrl_actor_inputs(state_features)
             steering_noise, log_probs, _ = self.dsrl.sample(features, state, deterministic=eval)
-            initial_noise = steering_noise
+            # The SAC action stays the (possibly real-dims-only) steering noise;
+            # only the flow seed is widened to the head's padded x0.
+            initial_noise = self._dsrl_build_x0(steering_noise)
             noise_scale = 0.0
             return_log_prob = False
         else:
