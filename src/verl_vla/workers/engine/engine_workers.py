@@ -241,6 +241,69 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
         output = self.rollout.generate_sequences(prompts=prompts)
         return output.to("cpu")
 
+    def _dsrl_actor_param_names(self) -> set[str] | None:
+        """Names of the only parameters a DSRL run actually updates.
+
+        DSRL freezes the whole VLA and trains a small noise actor, so every sync
+        after the first re-ships ~3B unchanged parameters to the rollout workers.
+        Returns None whenever that does not provably hold -- not a DSRL run, an
+        unexpected module layout, or the kill switch -- so the caller falls back
+        to the full sync.
+        """
+        if os.environ.get("DSRL_FULL_WEIGHT_SYNC", "0") == "1":
+            return None
+        engine = getattr(self.actor, "engine", None)
+        module = getattr(engine, "module", None)
+        model = getattr(module, "_fsdp_wrapped_module", module)
+        steering = getattr(model, "dsrl", None)
+        if steering is None:
+            return None
+        try:
+            names = {name for name, _ in steering.named_actor_parameters()}
+        except Exception:
+            logger.warning("[dsrl] could not enumerate noise-actor parameters; falling back to a full sync")
+            return None
+        return names or None
+
+    def _filter_dsrl_actor_weights(self, per_tensor_param):
+        """Ship only the DSRL noise actor once the rollout workers hold the VLA.
+
+        The rollout module is built with ``load_format=dummy``, so the first sync
+        must still carry every tensor; only later ones are narrowed.
+
+        Note this drops the tensors before they are sent, not before they are
+        gathered -- ``get_per_tensor_param`` still all-gathers each shard.
+        """
+        names = self._dsrl_actor_param_names()
+        if names is None:
+            return per_tensor_param
+        if not getattr(self, "_dsrl_base_sync_done", False):
+            self._dsrl_base_sync_done = True
+            logger.info("[dsrl] first weight sync: shipping the full model to the rollout workers")
+            return per_tensor_param
+
+        prefix = "_fsdp_wrapped_module."
+
+        def _actor_only():
+            sent = 0
+            for name, param in per_tensor_param:
+                if name.replace(prefix, "") in names:
+                    sent += 1
+                    yield name, param
+            if sent:
+                logger.info("[dsrl] incremental weight sync: %d noise-actor tensors", sent)
+            else:
+                # Nothing matched: the rollout policy would silently stop tracking
+                # training. Loud, because the run would otherwise look healthy.
+                logger.error(
+                    "[dsrl] incremental weight sync matched 0 of %d expected tensors; "
+                    "the rollout policy is NOT being updated. Set DSRL_FULL_WEIGHT_SYNC=1 to "
+                    "restore the full sync and report the name mismatch.",
+                    len(names),
+                )
+
+        return _actor_only()
+
     @register(dispatch_mode=Dispatch.ONE_TO_ALL, blocking=False)
     async def update_weights(self, global_steps: int = None):
         # Rollout-only worker: receive weights from checkpoint engine
@@ -254,6 +317,7 @@ class VLAActorRolloutRefWorker(ActorRolloutRefWorker):
             if not hasattr(self, "checkpoint_engine"):
                 return
             per_tensor_param, _ = self.actor.engine.get_per_tensor_param()
+            per_tensor_param = self._filter_dsrl_actor_weights(per_tensor_param)
             await self.checkpoint_engine.send_weights(per_tensor_param)
             return
 
