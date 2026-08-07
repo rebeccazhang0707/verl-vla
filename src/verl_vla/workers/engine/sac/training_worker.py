@@ -446,6 +446,7 @@ class SACTrainingWorker(TrainingWorker):
 
         if "empty_batch" not in data.meta_info:
             self._add_data_to_replay_pool(self.replay_pool, data)
+            self.replay_pool.save(self.actor_config.replay.save_dir)
 
         critic_batches, critic_replay_sample_info = self._sample_rlpd_batch(
             positive_sample_ratio=float(self.actor_config.replay.critic_positive_sample_ratio)
@@ -551,7 +552,7 @@ class SACTrainingWorker(TrainingWorker):
         if not skip_critic_update:
             self.engine.module.sac_update_target_network(critic_target_tau)
 
-        if global_steps % self.actor_config.replay.save_interval == 0:
+        if "empty_batch" in data.meta_info and global_steps % self.actor_config.replay.save_interval == 0:
             self.replay_pool.save(self.actor_config.replay.save_dir)
 
         critic_rewards = torch.cat([batch.batch["info.rewards"] for batch in critic_batches])

@@ -23,6 +23,7 @@ from lerobot.utils.constants import ACTION
 from verl import DataProto
 
 from verl_vla.models.act_torch import ACTTrainableModel
+from verl_vla.models.act_torch.policy import LiberoActOutput
 
 
 def _libero_policy() -> ACTPolicy:
@@ -121,21 +122,59 @@ def test_act_sft_padding_matches_native_lerobot_reduction() -> None:
     torch.testing.assert_close(model.sft_metrics["l1_loss"], torch.tensor(0.75))
 
 
-def test_act_rollout_initializes_without_critic() -> None:
+def test_act_sft_treats_rollout_action_chunks_as_fully_valid() -> None:
     model = _model()
+    model.policy.model.forward = lambda batch: (torch.zeros_like(batch[ACTION]), (None, None))
+
+    loss = model.sft_loss(
+        _observations(),
+        None,
+        {"action": torch.ones(2, 2, 7)},
+        torch.ones(2),
+    )
+
+    torch.testing.assert_close(loss, torch.tensor(1.0))
+
+
+def test_act_rollout_initializes_without_critic() -> None:
+    model = _model(adapter_config={"sac_rollout_noise_scale": 0.1})
+    model.eval()
 
     model.sac_init()
-    output = model.sac_sample_actions(_observations(), eval=True)
+    observations = _observations()
+    eval_output = model.sac_sample_actions(observations, eval=True)
+    rollout_output = model.sac_sample_actions(observations, eval=False)
 
-    assert output.action.shape == (2, 2, 7)
+    assert eval_output.action.shape == (2, 2, 7)
+    assert eval_output.log_prob is None
+    assert not torch.equal(eval_output.action, rollout_output.action)
     assert not hasattr(model, "critic_backend")
+
+
+def test_act_sac_freezes_the_configured_vision_tower() -> None:
+    model = _model(adapter_config={"freeze_vision_tower": True})
+
+    model.sac_init()
+
+    assert all(not parameter.requires_grad for parameter in model.policy.model.backbone.parameters())
+
+
+def test_act_rollout_transports_environment_actions_as_float32() -> None:
+    output = LiberoActOutput.from_model_output(
+        {
+            "full_action": torch.zeros(2, 2, 7, dtype=torch.bfloat16),
+            "action_chunk_size": 2,
+        }
+    )
+
+    assert output.to_data_proto().batch["action"].dtype == torch.float32
 
 
 def test_act_sac_actor_and_critic_forward_for_batched_images() -> None:
     model = _model(
         adapter_config={
             "critic": {"enabled": True, "prefix_embed_dim": 32, "hidden_dims": [16]},
-            "sac_action_noise_scale": 0.0,
+            "sac_train_noise_scale": 0.0,
         },
     )
 
@@ -143,7 +182,36 @@ def test_act_sac_actor_and_critic_forward_for_batched_images() -> None:
     actions, log_probs, metrics = model.sac_forward_actor(features)
     q_values = model.sac_forward_critic({"action": actions}, features, method="cat", requires_grad=True)
 
+    assert all(feature.shape[0] == 2 for feature in features)
     assert actions.shape == (2, 2, 7)
     assert log_probs is None
     assert metrics == {}
     assert q_values.shape == (2, 2)
+
+
+def test_act_sac_critic_detaches_state_features_but_preserves_action_gradient() -> None:
+    model = _model(
+        adapter_config={
+            "critic": {"enabled": True, "prefix_embed_dim": 32, "hidden_dims": [16]},
+            "sac_train_noise_scale": 0.0,
+        },
+    )
+    prefix, states, positions = model.sac_forward_state_features(_observations(), None)
+    detached_features = (
+        prefix.detach().requires_grad_(),
+        states.detach().requires_grad_(),
+        positions.detach(),
+    )
+    actions = torch.zeros(2, 2, 7, requires_grad=True)
+
+    q_values = model.sac_forward_critic(
+        {"action": actions},
+        detached_features,
+        method="min",
+        requires_grad=False,
+    )
+    q_values.sum().backward()
+
+    assert detached_features[0].grad is None
+    assert detached_features[1].grad is None
+    assert actions.grad is not None

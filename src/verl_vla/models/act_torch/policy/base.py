@@ -41,7 +41,7 @@ class ActOutput:
     def from_model_output(cls, model_output) -> "ActOutput": ...
 
     def to_data_proto(self) -> DataProto:
-        tensor_batch = {"action": self.action}
+        tensor_batch = {"action": self.action.float()}
         if self.log_prob is not None:
             tensor_batch["log_prob"] = self.log_prob
         return DataProto.from_dict(tensors=tensor_batch)

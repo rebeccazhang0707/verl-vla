@@ -165,6 +165,7 @@ class ACTTrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTra
 
         encoder_in_tokens = torch.stack(encoder_in_tokens, axis=0)
         encoder_in_pos_embed = torch.stack(encoder_in_pos_embed, axis=0)
+        encoder_in_pos_embed = encoder_in_pos_embed.expand(-1, batch_size, -1)
 
         encoder_out = model.encoder(encoder_in_tokens, pos_embed=encoder_in_pos_embed)
 
@@ -284,9 +285,14 @@ class ACTTrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTra
                 f"ACT action batch must have shape (batch, {expected_shape[0]}, {expected_shape[1]}), "
                 f"got {tuple(action_tensor.shape)}"
             )
-        if action_mask is None or tuple(action_mask.shape) != tuple(action_tensor.shape[:2]):
-            actual_shape = None if action_mask is None else tuple(action_mask.shape)
-            raise ValueError(f"ACT action mask must have shape {tuple(action_tensor.shape[:2])}, got {actual_shape}")
+        if action_mask is None:
+            # Environment rollouts always contain a complete ACT action chunk.
+            # Only dataset batches carry padding metadata.
+            action_mask = torch.ones(action_tensor.shape[:2], device=action_tensor.device, dtype=torch.bool)
+        elif tuple(action_mask.shape) != tuple(action_tensor.shape[:2]):
+            raise ValueError(
+                f"ACT action mask must have shape {tuple(action_tensor.shape[:2])}, got {tuple(action_mask.shape)}"
+            )
 
         with torch.no_grad():
             act_input = act_input_cls.from_env_obs(obs)
@@ -319,6 +325,9 @@ class ACTTrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTra
 
     @override
     def sac_init(self):
+        if getattr(self.config, "freeze_vision_tower", True):
+            self.freeze_vision_tower()
+
         forward_methods = ["sac_sample_actions"]
         if not self.config.sac_enable:
             for method in forward_methods:
@@ -349,8 +358,19 @@ class ACTTrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTra
         tokenizer: Optional[torch.nn.Module] = None,
         eval: bool = False,
     ) -> ModelOutput:
-        act_output, _, _ = self.sample_actions(obs, tokenizer, validate=eval)
-        return act_output
+        state_features = self.sac_forward_state_features(obs, tokenizer)
+        actions, _, _ = self.sac_forward_actor(
+            state_features,
+            noise_scale=0.0 if eval else self.config.sac_rollout_noise_scale,
+        )
+        _, act_output_cls = self._get_act_policy_classes()
+        return act_output_cls.from_model_output(
+            {
+                "full_action": actions,
+                "log_probs": None,
+                "action_chunk_size": self.policy.config.n_action_steps,
+            }
+        )
 
     @torch.no_grad()
     @override
@@ -395,7 +415,7 @@ class ACTTrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTra
         return self.critic_api.forward(
             self,
             a=a,
-            state_features=(prefix_embs, states),
+            state_features=(prefix_embs.detach(), states.detach()),
             task_ids=task_ids,
             use_target_network=use_target_network,
             method=method,
@@ -436,7 +456,7 @@ class ACTTrainableModel(TrainableVLAModelBase, SupportSACTraining, SupportSFTTra
 
         actions = actions[:, : self.policy.config.n_action_steps, :]
 
-        resolved_noise_scale = self.config.sac_action_noise_scale if noise_scale is None else noise_scale
+        resolved_noise_scale = self.config.sac_train_noise_scale if noise_scale is None else noise_scale
         if resolved_noise_scale > 0:
             noise = torch.randn_like(actions) * resolved_noise_scale
             actions = actions + noise

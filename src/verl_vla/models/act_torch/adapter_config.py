@@ -31,11 +31,8 @@ class ACTCriticConfig:
 class ACTAdapterConfig:
     DEFAULTS = {
         "policy_type": "libero",
-        "sac_action_noise_scale": 0.1,
-        "sac_action_noise_schedule_enabled": False,
-        "sac_action_noise_schedule_initial": None,
-        "sac_action_noise_schedule_final": None,
-        "sac_action_noise_schedule_method": "cos",
+        "sac_rollout_noise_scale": 0.1,
+        "sac_train_noise_scale": 0.0,
         "freeze_vision_tower": True,
     }
 

@@ -32,20 +32,13 @@ critic:
   # Hidden-layer dimensions for the critic.
   hidden_dims: [1024, 512, 256]
 
-# SAC action-noise scale.
-sac_action_noise_scale: 0.1
+# Gaussian exploration noise applied in normalized action space during online
+# rollout. Evaluation remains deterministic.
+sac_rollout_noise_scale: 0.1
 
-# Whether SAC action-noise scheduling is enabled.
-sac_action_noise_schedule_enabled: False
-
-# Initial SAC scheduled action-noise value.
-sac_action_noise_schedule_initial: null
-
-# Final SAC scheduled action-noise value.
-sac_action_noise_schedule_final: null
-
-# SAC action-noise schedule method.
-sac_action_noise_schedule_method: cos
+# Noise applied to actor and Bellman-target actions during training. Keep this
+# at zero for entropy-free deterministic actor updates.
+sac_train_noise_scale: 0.0
 
 # Whether to freeze the vision tower during training.
 freeze_vision_tower: True
