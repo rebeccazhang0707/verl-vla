@@ -48,9 +48,6 @@ lerobot-teleop = [
 openvla-oft = [
     "timm==0.9.16",
 ]
-piper = [
-    "opencv-python-headless==5.0.0.93",
-]
 pi0 = [
     "diffusers==0.35.1",
     "onnx-ir",

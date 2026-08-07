@@ -17,10 +17,8 @@ import os
 from io import BytesIO
 from typing import Any, Optional
 
-import imageio
 import numpy as np
 import torch
-import torchvision.transforms.functional as F
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -253,6 +251,8 @@ def save_rollout_video(rollout_images: list[np.ndarray], output_dir: str, video_
         video_name: Name of the output video file
         fps: Frames per second for the video
     """
+    import imageio
+
     os.makedirs(output_dir, exist_ok=True)
     mp4_path = os.path.join(output_dir, f"{video_name}.mp4")
     video_writer = imageio.get_writer(mp4_path, fps=fps)
@@ -295,6 +295,8 @@ def resize_image(img: np.ndarray, resize_size: tuple[int, int]) -> np.ndarray:
 
 
 def center_crop_image(image: Image.Image) -> Image.Image:
+    import torchvision.transforms.functional as F
+
     crop_scale = 0.9
     orig_w, orig_h = image.size
     image_tensor = F.to_tensor(image)

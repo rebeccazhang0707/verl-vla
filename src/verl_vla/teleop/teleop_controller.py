@@ -190,7 +190,7 @@ class TeleopController:
         }
 
     def _record_start_key_label(self) -> str:
-        if "xr_controller" in self.input_devices and self.env_type != "piper":
+        if "xr_controller" in self.input_devices:
             return "Enter or A/X"
         return "Enter"
 
@@ -214,7 +214,6 @@ class TeleopController:
             return XRControllerDevice(
                 XRControllerDeviceCfg(
                     max_events=self.teleop_cfg.xr_controller.max_events,
-                    record_controller_buttons=self.env_type != "piper",
                 )
             )
         if device_type == "gamepad":

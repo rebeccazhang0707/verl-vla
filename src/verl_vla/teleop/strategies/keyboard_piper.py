@@ -31,7 +31,7 @@ _KEY_TO_AXIS = {
 
 
 class PiperKeyboardStrategy(InterventionStrategyBase):
-    """Map keyboard input to the ROS backend's fixed dual-Piper action."""
+    """Map keyboard input to the configured Piper arms."""
 
     env_type = "piper"
     device_type = "keyboard"
@@ -39,10 +39,11 @@ class PiperKeyboardStrategy(InterventionStrategyBase):
     def __init__(self, cfg: KeyboardTeleopConfig | None = None, *, simulator_cfg: Any):
         cfg = cfg or KeyboardTeleopConfig()
         super().__init__(cfg)
-        if int(simulator_cfg.action_dim) != 14:
-            raise ValueError(f"Dual-Piper action_dim must be 14, got {simulator_cfg.action_dim}")
-        self._position_step = float(simulator_cfg.keyboard_position_step)
-        self._rotation_step = float(simulator_cfg.keyboard_rotation_step)
+        self._arm_names = tuple(arm.name for arm in simulator_cfg.arms)
+        self._action_dim = int(simulator_cfg.action_dim)
+        self._position_step = float(cfg.pos_sensitivity)
+        self._rotation_step = float(cfg.rot_sensitivity)
+        self._gripper_step = float(simulator_cfg.gripper_width_step)
         self._active_arm = 0
 
     @override
@@ -58,21 +59,21 @@ class PiperKeyboardStrategy(InterventionStrategyBase):
     @override
     def apply_action(self, action: Any, device: DeviceBase) -> Any:
         action_array = np.asarray(action)
-        if action_array.shape != (14,):
-            raise ValueError(f"Dual-Piper action must have shape [14], got {action_array.shape}")
+        if action_array.shape != (self._action_dim,):
+            raise ValueError(f"Piper action must have shape [{self._action_dim}], got {action_array.shape}")
         return self.get_action(device).astype(action_array.dtype, copy=False)
 
     @override
     def get_action(self, device: DeviceBase) -> np.ndarray:
         keys = self._keys(device)
         self._select_arm(keys)
-        command = np.zeros(14, dtype=np.float32)
+        command = np.zeros(self._action_dim, dtype=np.float32)
         offset = self._active_arm * 7
         for key in keys & _KEY_TO_AXIS.keys():
             axis, sign = _KEY_TO_AXIS[key]
             scale = self._position_step if axis < 3 else self._rotation_step
             command[offset + axis] += sign * scale
-        command[offset + 6] = float("O" in keys) - float("K" in keys)
+        command[offset + 6] = (float("O" in keys) - float("K" in keys)) * self._gripper_step
         return command
 
     @override
@@ -80,7 +81,7 @@ class PiperKeyboardStrategy(InterventionStrategyBase):
         command = self.get_action(device)
         return {
             "strategy": "piper:keyboard",
-            "active_arm": "left" if self._active_arm == 0 else "right",
+            "active_arm": self._arm_names[self._active_arm],
             "command": command.astype(float).tolist(),
             "unit": "m/rad delta",
             "key_bindings": self.key_bindings(),
@@ -88,7 +89,7 @@ class PiperKeyboardStrategy(InterventionStrategyBase):
 
     def key_bindings(self) -> dict[str, str]:
         return {
-            "1 / 2": "select left / right arm",
+            "1 / 2": "select first / second configured arm",
             "W/S": "+x / -x",
             "A/D": "+y / -y",
             "Q/E": "+z / -z",
@@ -105,5 +106,5 @@ class PiperKeyboardStrategy(InterventionStrategyBase):
     def _select_arm(self, keys: set[str]) -> None:
         if "1" in keys:
             self._active_arm = 0
-        elif "2" in keys:
+        elif "2" in keys and len(self._arm_names) == 2:
             self._active_arm = 1

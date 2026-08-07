@@ -2,41 +2,90 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 
-# Dual Piper X environment backed exclusively by QuestArm ROS.
-
 # Target class instantiated from this configuration.
 _target_: verl_vla.envs.piper.config.PiperConfig
 
 # Simulator backend selected by EnvWorker.
 simulator_type: piper
 
-# SocketCAN channels for the physical left and right arms, in that order.
-can_channels:
+# Physical arms in flat action/state order. Keep one item for single-arm
+# operation or both for dual-arm operation.
+arms:
 
-  - can_right
-  - can_left
+  # First logical teleoperation hand.
+  - name: left
 
-# Conda initialization script used by the managed QuestArm subprocess. An empty
-# path discovers a standard Miniconda or Anaconda installation.
-ros_conda_sh: ''
+    # SocketCAN interface connected to this arm.
+    can_channel: can_right
 
-# Conda environment containing ROS Humble and QuestArm dependencies.
-ros_conda_env: vt
+    # AgileX driver and URDF model: piper, piper_h, piper_l, or piper_x.
+    model: piper_x
 
-# QuestArm workspace setup script. An empty path discovers setup.sh's default.
-questarm_setup_path: ''
+    # Reset pose in joint radians; null captures startup feedback instead.
+    initial_joint_angles: [0.00001745, -0.00797615, 0.01717404, 0.58512163, 0.04897394, -0.02546435]
 
-# Scale applied to QuestArm WebXR position deltas.
-position_scale: 1.25
+  # Second logical teleoperation hand.
+  - name: right
 
-# Scale applied to QuestArm WebXR rotation deltas.
-rotation_scale: 1.25
+    # SocketCAN interface connected to this arm.
+    can_channel: can_left
 
-# Per-step keyboard translation delta in meters.
-keyboard_position_step: 0.02
+    # AgileX driver and URDF model: piper, piper_h, piper_l, or piper_x.
+    model: piper_x
 
-# Per-step keyboard rotation delta in radians.
-keyboard_rotation_step: 0.10
+    # Reset pose in joint radians; null captures startup feedback instead.
+    initial_joint_angles: [0.03780383, 0.01403245, 0.01569051, 0.81677918, 0.01125737, 0.29810224]
+
+# V4L2 camera observations. Any number may be listed; [] disables cameras.
+cameras:
+
+  # Stable observation and LeRobot feature name.
+  - name: dabai_00md
+
+    # V4L2 device path.
+    device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16200MD-video-index0
+
+    # Captured image width in pixels.
+    width: 320
+
+    # Captured image height in pixels.
+    height: 240
+
+    # V4L2 input pixel format converted to RGB8 by ROS.
+    pixel_format: YUYV
+
+  # Stable observation and LeRobot feature name.
+  - name: dabai_035j
+
+    # V4L2 device path.
+    device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N162035J-video-index0
+
+    # Captured image width in pixels.
+    width: 320
+
+    # Captured image height in pixels.
+    height: 240
+
+    # V4L2 input pixel format converted to RGB8 by ROS.
+    pixel_format: YUYV
+
+  # Stable observation and LeRobot feature name.
+  - name: dabai_02mr
+
+    # V4L2 device path.
+    device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16202MR-video-index0
+
+    # Captured image width in pixels.
+    width: 320
+
+    # Captured image height in pixels.
+    height: 240
+
+    # V4L2 input pixel format converted to RGB8 by ROS.
+    pixel_format: YUYV
+
+# Task string published in observations and recordings.
+task_description: Teleoperate the Piper arms.
 
 # QuestArm IK position objective weight.
 ik_position_weight: 5.0
@@ -44,24 +93,14 @@ ik_position_weight: 5.0
 # QuestArm IK smoothing objective weight.
 ik_smooth_weight: 0.5
 
-# Optional initial joint pose in radians as [left arm, right arm]. When null,
-# PiperEnv captures both arms' joint positions when the ROS backend starts.
-initial_joint_angles:
-
-  - [0.00001745, -0.00797615, 0.01717404, 0.58512163, 0.04897394, -0.02546435]
-  - [0.03780383, 0.01403245, 0.01569051, 0.81677918, 0.01125737, 0.29810224]
-
-# Duration in seconds of the smooth joint trajectory used during reset.
+# Duration in seconds of the smooth joint reset trajectory.
 reset_duration_s: 3.0
 
-# Maximum time in seconds to wait for both arms to reach their reset targets.
+# Maximum time in seconds to wait for reset targets.
 reset_timeout_s: 15.0
 
 # Per-joint reset completion tolerance in radians.
 reset_joint_tolerance: 0.03
-
-# Task string published in observations and recordings.
-task_description: Teleoperate the Piper arms.
 
 # Maximum gripper opening width in meters.
 gripper_open_width: 0.1
@@ -69,34 +108,8 @@ gripper_open_width: 0.1
 # Minimum gripper opening width in meters.
 gripper_close_width: 0.0
 
-# Relative gripper width change per teleop step in meters.
+# Relative gripper width change per keyboard step in meters.
 gripper_width_step: 0.005
 
-# Gripper force passed through ROS to agx_arm_ctrl.
+# Gripper force passed to agx_arm_ctrl.
 gripper_force: 1.0
-
-# V4L2 camera device for each published image stream.
-camera_devices:
-
-  - /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16200MD-video-index0
-  - /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N162035J-video-index0
-  - /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16202MR-video-index0
-
-# Observation image name for each configured camera.
-camera_names:
-
-  - dabai_00md
-  - dabai_035j
-  - dabai_02mr
-
-# Captured image height in pixels.
-image_height: 240
-
-# Captured image width in pixels.
-image_width: 320
-
-# Requested camera capture rate in frames per second.
-camera_fps: 20
-
-# Requested camera pixel format.
-camera_fourcc: MJPG

@@ -16,6 +16,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from typing_extensions import override
+
 from verl_vla.recorder.strategies.arena import ArenaLeRobotStrategy
 
 
@@ -26,17 +30,24 @@ class PiperLeRobotStrategy(ArenaLeRobotStrategy):
         self,
         *,
         camera_names: tuple[str, ...],
-        image_shape: tuple[int, int, int],
+        image_shapes: dict[str, tuple[int, int, int]],
         state_dim: int,
         action_dim: int,
         fps: int,
         robot_type: str | None = "piper",
     ) -> None:
+        self.image_shapes = {name: tuple(shape) for name, shape in image_shapes.items()}
         super().__init__(
             camera_names=camera_names,
-            image_shape=image_shape,
             state_dim=state_dim,
             action_dim=action_dim,
             fps=fps,
             robot_type=robot_type,
         )
+
+    @override
+    def features(self) -> dict[str, dict[str, Any]]:
+        features = super().features()
+        for name, shape in self.image_shapes.items():
+            features[f"observation.images.{name}"]["shape"] = shape
+        return features

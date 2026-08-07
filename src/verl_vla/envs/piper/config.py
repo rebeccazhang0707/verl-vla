@@ -1,16 +1,6 @@
 # Copyright 2026 Bytedance Ltd. and/or its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 from __future__ import annotations
 
@@ -19,26 +9,66 @@ from dataclasses import dataclass, field
 import numpy as np
 from verl.base_config import BaseConfig
 
+_PIPER_MODELS = {"piper", "piper_h", "piper_l", "piper_x"}
+_ARM_NAMES = {"left", "right"}
+
+
+@dataclass
+class PiperArmConfig:
+    """One physical Piper and its logical teleoperation hand."""
+
+    name: str
+    can_channel: str
+    model: str = "piper_x"
+    initial_joint_angles: list[float] | None = None
+
+    def __post_init__(self) -> None:
+        if self.name not in _ARM_NAMES:
+            raise ValueError(f"Piper arm name must be left or right, got {self.name!r}")
+        if self.model not in _PIPER_MODELS:
+            raise ValueError(f"Unsupported Piper model {self.model!r}; choose from {sorted(_PIPER_MODELS)}")
+        if not self.can_channel:
+            raise ValueError("Piper can_channel must not be empty")
+        if self.initial_joint_angles is not None:
+            angles = np.asarray(self.initial_joint_angles, dtype=float)
+            if angles.shape != (6,) or not np.all(np.isfinite(angles)):
+                raise ValueError(f"{self.name} initial_joint_angles must contain six finite values")
+
+
+@dataclass
+class PiperCameraConfig:
+    """One V4L2 camera exposed as a named observation."""
+
+    name: str
+    device: str
+    width: int = 640
+    height: int = 480
+    pixel_format: str = "YUYV"
+
+    def __post_init__(self) -> None:
+        if not self.name or not self.device:
+            raise ValueError("Piper camera name and device must not be empty")
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError(f"Piper camera dimensions must be positive, got {self.width}x{self.height}")
+
 
 @dataclass
 class PiperConfig(BaseConfig):
-    """Dual Piper X environment backed exclusively by QuestArm ROS."""
+    """One- or two-arm Piper environment backed exclusively by QuestArm ROS."""
 
     simulator_type: str = "piper"
-    can_channels: list[str] = field(default_factory=lambda: ["can0", "can1"])
-    action_dim: int = field(default=14, init=False)
-    state_dim: int = field(default=28, init=False)
+    arms: list[PiperArmConfig] = field(
+        default_factory=lambda: [
+            PiperArmConfig(name="left", can_channel="can0"),
+            PiperArmConfig(name="right", can_channel="can1"),
+        ]
+    )
+    cameras: list[PiperCameraConfig] = field(default_factory=list)
+    action_dim: int = field(init=False)
+    state_dim: int = field(init=False)
     task_description: str = "Teleoperate the Piper arms."
-    ros_conda_sh: str = ""
-    ros_conda_env: str = "vt"
-    questarm_setup_path: str = ""
-    position_scale: float = 1.25
-    rotation_scale: float = 1.25
-    keyboard_position_step: float = 0.02
-    keyboard_rotation_step: float = 0.10
     ik_position_weight: float = 5.0
     ik_smooth_weight: float = 0.5
-    initial_joint_angles: list[list[float]] | None = None
     reset_duration_s: float = 3.0
     reset_timeout_s: float = 15.0
     reset_joint_tolerance: float = 0.03
@@ -46,51 +76,32 @@ class PiperConfig(BaseConfig):
     gripper_close_width: float = 0.0
     gripper_width_step: float = 0.005
     gripper_force: float = 1.0
-    camera_devices: list[str] = field(default_factory=lambda: ["/dev/video0", "/dev/video2", "/dev/video4"])
-    camera_names: list[str] = field(default_factory=lambda: ["front", "side", "wrist"])
-    image_height: int = 480
-    image_width: int = 640
-    camera_fps: int = 20
-    camera_fourcc: str = "MJPG"
 
-    def __post_init__(self):
-        if len(self.can_channels) != 2:
-            raise ValueError(f"QuestArm Piper requires exactly two CAN channels, got {self.can_channels}")
-        if (
-            min(
-                self.position_scale,
-                self.rotation_scale,
-                self.keyboard_position_step,
-                self.keyboard_rotation_step,
-            )
-            <= 0
-        ):
-            raise ValueError("Piper teleop scales must be positive")
+    def __post_init__(self) -> None:
+        arms = [arm if isinstance(arm, PiperArmConfig) else PiperArmConfig(**dict(arm)) for arm in self.arms]
+        cameras = [
+            camera if isinstance(camera, PiperCameraConfig) else PiperCameraConfig(**dict(camera))
+            for camera in self.cameras
+        ]
+        object.__setattr__(self, "arms", arms)
+        object.__setattr__(self, "cameras", cameras)
+        if not 1 <= len(arms) <= 2:
+            raise ValueError(f"Piper WebXR/keyboard teleoperation supports one or two arms, got {len(arms)}")
+        arm_names = [arm.name for arm in arms]
+        if len(set(arm_names)) != len(arm_names):
+            raise ValueError(f"Piper arm names must be unique, got {arm_names}")
+        camera_names = [camera.name for camera in cameras]
+        if len(set(camera_names)) != len(camera_names):
+            raise ValueError(f"Piper camera names must be unique, got {camera_names}")
+        object.__setattr__(self, "action_dim", 7 * len(arms))
+        object.__setattr__(self, "state_dim", 14 * len(arms))
         if self.ik_position_weight <= 0 or self.ik_smooth_weight < 0:
             raise ValueError("IK position weight must be positive and smooth weight must be non-negative")
-        if self.initial_joint_angles is not None:
-            initial_joint_angles = np.asarray(self.initial_joint_angles, dtype=float)
-            if initial_joint_angles.shape != (2, 6):
-                raise ValueError(f"initial_joint_angles must have shape [2, 6], got {initial_joint_angles.shape}")
-            if not np.all(np.isfinite(initial_joint_angles)):
-                raise ValueError("initial_joint_angles must contain only finite values")
-        if self.reset_duration_s <= 0:
-            raise ValueError(f"reset_duration_s must be positive, got {self.reset_duration_s}")
-        if self.reset_timeout_s <= self.reset_duration_s:
-            raise ValueError(
-                f"reset_timeout_s must be greater than reset_duration_s, got "
-                f"{self.reset_timeout_s} and {self.reset_duration_s}"
-            )
+        if self.reset_duration_s <= 0 or self.reset_timeout_s <= self.reset_duration_s:
+            raise ValueError("reset_timeout_s must be greater than the positive reset_duration_s")
         if self.reset_joint_tolerance <= 0:
-            raise ValueError(f"reset_joint_tolerance must be positive, got {self.reset_joint_tolerance}")
+            raise ValueError("reset_joint_tolerance must be positive")
         if self.gripper_close_width > self.gripper_open_width:
             raise ValueError("gripper_close_width must not exceed gripper_open_width")
-        if self.gripper_width_step <= 0:
-            raise ValueError(f"gripper_width_step must be positive, got {self.gripper_width_step}")
-        if self.gripper_force < 0:
-            raise ValueError(f"gripper_force must be non-negative, got {self.gripper_force}")
-        if len(self.camera_devices) != len(self.camera_names):
-            raise ValueError(
-                f"camera_devices and camera_names must have the same length, got "
-                f"{len(self.camera_devices)} and {len(self.camera_names)}"
-            )
+        if self.gripper_width_step <= 0 or self.gripper_force < 0:
+            raise ValueError("gripper_width_step must be positive and gripper_force non-negative")

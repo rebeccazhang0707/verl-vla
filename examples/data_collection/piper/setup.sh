@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install the isolated QuestArm ROS runtime used by PiperEnv.
+# Install verl-vla and its Piper ROS runtime into one Conda environment.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-ROS_ENV_NAME="${PIPER_ROS_CONDA_ENV:-vt}"
+PIPER_ENV_NAME="verl-vla-piper"
 DATA_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}"
-QUESTARM_ROOT="${PIPER_QUESTARM_ROOT:-$DATA_ROOT/verl-vla/QuestArmTeleop}"
+QUESTARM_ROOT="$DATA_ROOT/verl-vla/QuestArmTeleop"
 
 ROS_CHANNELS=(
   "https://mirrors.ustc.edu.cn/anaconda/cloud/conda-forge"
@@ -15,9 +16,11 @@ ROS_CHANNELS=(
 ROS_PACKAGES=(
   "python=3.11"
   "ros-humble-desktop"
+  "ros-humble-camera-info-manager=3.1.10"
   "colcon-common-extensions"
   "compilers"
   "cmake"
+  "ffmpeg"
   "ninja"
   "pkg-config"
   "pinocchio=3.2.0"
@@ -37,6 +40,8 @@ AGX_ARM_URDF_URL="https://github.com/agilexrobotics/agx_arm_urdf.git"
 AGX_ARM_URDF_COMMIT="9ffe0cdb26b8bb03b84a648f3cd119822049f2e7"
 PYAGXARM_URL="https://github.com/agilexrobotics/pyAgxArm.git"
 PYAGXARM_COMMIT="799b8412fbe8b9156bc9892d3dbeb2df7e98be71"
+V4L2_CAMERA_URL="https://gitlab.com/boldhearts/ros2_v4l2_camera.git"
+V4L2_CAMERA_COMMIT="22d6ce190f5caebd20cc35a2635c05b49008f447"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -59,7 +64,7 @@ checkout_repo() {
     git clone --filter=blob:none "$url" "$destination"
   fi
 
-  if [[ -n "$(git -C "$destination" status --porcelain --untracked-files=no)" ]]; then
+  if [[ -n "$(git -C "$destination" status --porcelain --untracked-files=no --ignore-submodules=all)" ]]; then
     echo "Refusing to change a repository with tracked modifications: $destination" >&2
     exit 1
   fi
@@ -68,53 +73,25 @@ checkout_repo() {
   git -C "$destination" checkout --detach "$commit"
 }
 
+require_command conda
 require_command git
-
-if [[ -n "${PIPER_CONDA_BASE:-}" && -x "$PIPER_CONDA_BASE/bin/conda" ]]; then
-  CONDA_BASE="$PIPER_CONDA_BASE"
-elif command -v conda >/dev/null 2>&1; then
-  CONDA_BASE="$(conda info --base)"
-elif [[ -n "${CONDA_EXE:-}" && -x "$CONDA_EXE" ]]; then
-  CONDA_BASE="$(dirname "$(dirname "$CONDA_EXE")")"
-elif [[ -x "$HOME/miniconda3/bin/conda" ]]; then
-  CONDA_BASE="$HOME/miniconda3"
-elif [[ -x "$HOME/anaconda3/bin/conda" ]]; then
-  CONDA_BASE="$HOME/anaconda3"
-else
-  echo "Miniconda/Conda is required. Install it before running this script." >&2
-  exit 1
-fi
 
 channel_args=()
 for channel in "${ROS_CHANNELS[@]}"; do
   channel_args+=("-c" "$channel")
 done
 
-MICROMAMBA="$CONDA_BASE/bin/micromamba"
-if [[ -x "$MICROMAMBA" ]]; then
-  if "$MICROMAMBA" env list -r "$CONDA_BASE" | awk '{print $1}' | grep -Fxq "$ROS_ENV_NAME"; then
-    "$MICROMAMBA" install -y -r "$CONDA_BASE" -n "$ROS_ENV_NAME" \
-      --override-channels "${channel_args[@]}" "${ROS_PACKAGES[@]}"
-  else
-    "$MICROMAMBA" create -y -r "$CONDA_BASE" -n "$ROS_ENV_NAME" \
-      --override-channels "${channel_args[@]}" "${ROS_PACKAGES[@]}"
-  fi
-  run_in_ros_env() {
-    "$MICROMAMBA" run -r "$CONDA_BASE" -n "$ROS_ENV_NAME" "$@"
-  }
+CONDA="$(conda info --base)/bin/conda"
+if "$CONDA" env list | awk '{print $1}' | grep -Fxq "$PIPER_ENV_NAME"; then
+  "$CONDA" install -y -n "$PIPER_ENV_NAME" \
+    --override-channels "${channel_args[@]}" "${ROS_PACKAGES[@]}"
 else
-  CONDA="$CONDA_BASE/bin/conda"
-  if "$CONDA" env list | awk '{print $1}' | grep -Fxq "$ROS_ENV_NAME"; then
-    "$CONDA" install -y -n "$ROS_ENV_NAME" \
-      --override-channels "${channel_args[@]}" "${ROS_PACKAGES[@]}"
-  else
-    "$CONDA" create -y -n "$ROS_ENV_NAME" \
-      --override-channels "${channel_args[@]}" "${ROS_PACKAGES[@]}"
-  fi
-  run_in_ros_env() {
-    "$CONDA" run -n "$ROS_ENV_NAME" "$@"
-  }
+  "$CONDA" create -y -n "$PIPER_ENV_NAME" \
+    --override-channels "${channel_args[@]}" "${ROS_PACKAGES[@]}"
 fi
+run_in_piper_env() {
+  "$CONDA" run -n "$PIPER_ENV_NAME" "$@"
+}
 
 checkout_repo "$QUESTARM_URL" "$QUESTARM_COMMIT" "$QUESTARM_ROOT"
 checkout_repo "$AGX_ARM_ROS_URL" "$AGX_ARM_ROS_COMMIT" "$QUESTARM_ROOT/src/agx_arm_ros"
@@ -123,38 +100,57 @@ checkout_repo \
   "$AGX_ARM_URDF_COMMIT" \
   "$QUESTARM_ROOT/src/agx_arm_ros/src/agx_arm_description/agx_arm_urdf"
 checkout_repo "$PYAGXARM_URL" "$PYAGXARM_COMMIT" "$QUESTARM_ROOT/.deps/pyAgxArm"
+checkout_repo "$V4L2_CAMERA_URL" "$V4L2_CAMERA_COMMIT" "$QUESTARM_ROOT/src/v4l2_camera"
 
-run_in_ros_env python -m pip install --no-deps "$QUESTARM_ROOT/.deps/pyAgxArm"
+run_in_piper_env python -m pip install \
+  "https://mirrors.aliyun.com/pytorch-wheels/cpu/torch-2.7.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl" \
+  "https://mirrors.aliyun.com/pytorch-wheels/cpu/torchvision-0.22.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl"
+run_in_piper_env env CC=cc CXX=c++ python -m pip install \
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+  --extra-index-url https://download.pytorch.org/whl/cpu \
+  --requirement "$PROJECT_ROOT/requirements-lerobot.txt"
+run_in_piper_env python -m pip install \
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+  --no-deps "lerobot==0.4.4"
+run_in_piper_env python -m pip install \
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+  -e "$PROJECT_ROOT"
+run_in_piper_env python -m pip install --no-deps "$QUESTARM_ROOT/.deps/pyAgxArm"
 
-run_in_ros_env bash -c '
+run_in_piper_env bash -c '
   set -euo pipefail
   workspace="$1"
   cd "$workspace"
-  CC=cc CXX=c++ colcon --log-base log build \
+  CC=cc CXX=c++ CXXFLAGS="-Wno-array-bounds -Wno-stringop-overflow" colcon --log-base log build \
     --base-paths src \
     --build-base build \
     --install-base install \
-    --packages-select agx_arm_msgs agx_arm_description agx_arm_ctrl oculus_reader \
+    --packages-select agx_arm_msgs agx_arm_description agx_arm_ctrl oculus_reader v4l2_camera \
     --cmake-args -G Ninja
 ' _ "$QUESTARM_ROOT"
 
-run_in_ros_env bash -c '
+run_in_piper_env bash -c '
   set -euo pipefail
+  set +u
   source "$1/install/setup.bash"
-  python -c "import casadi, pinocchio, pyAgxArm, rclpy"
-  for package in agx_arm_ctrl agx_arm_description agx_arm_msgs oculus_reader; do
+  set -u
+  python -c "import av, casadi, lerobot, pinocchio, pyAgxArm, rclpy, torchcodec, verl_vla"
+  for package in agx_arm_ctrl agx_arm_description agx_arm_msgs oculus_reader v4l2_camera; do
     ros2 pkg prefix "$package" >/dev/null
   done
 ' _ "$QUESTARM_ROOT"
 
 cat <<EOF
 
-Piper ROS environment is ready.
+The unified verl-vla Piper environment is ready.
 
-Run teleoperation with:
+Activate it once in each terminal:
+  conda activate $PIPER_ENV_NAME
+
+Then run keyboard teleoperation with:
   $SCRIPT_DIR/run.sh
 
-The default installation paths are discovered automatically. If you installed
-to custom paths, override ros_conda_sh, ros_conda_env, or questarm_setup_path
-through the Piper Hydra configuration when launching.
+Record a LeRobot dataset with:
+  $SCRIPT_DIR/run.sh record
+
 EOF

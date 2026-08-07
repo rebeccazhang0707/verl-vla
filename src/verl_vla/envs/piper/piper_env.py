@@ -14,131 +14,18 @@
 
 from __future__ import annotations
 
-import logging
-import threading
-import time
 from typing import Any
 
-import cv2
 import gymnasium as gym
 import numpy as np
 from typing_extensions import override
 
 from verl_vla.envs.base import BaseEnv
-from verl_vla.envs.piper.questarm_ros import QuestArmRosBackend
-
-logger = logging.getLogger(__name__)
-
-
-class _PiperCameraStream:
-    def __init__(self, device: str, *, width: int, height: int, fps: int, fourcc: str):
-        self.device = str(device)
-        self.width = int(width)
-        self.height = int(height)
-        self.fps = int(fps)
-        self.fourcc = str(fourcc)
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._frame: np.ndarray | None = None
-        self._capture: cv2.VideoCapture | None = None
-        self._thread = threading.Thread(target=self._loop, name=f"piper-camera-{self.device}", daemon=True)
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def read_latest(self) -> np.ndarray | None:
-        with self._lock:
-            return None if self._frame is None else self._frame.copy()
-
-    def close(self) -> None:
-        self._stop.set()
-        if self._capture is not None:
-            self._capture.release()
-        self._thread.join(timeout=1)
-
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            if self._capture is None or not self._capture.isOpened():
-                self._capture = self._open_capture()
-                if self._capture is None:
-                    time.sleep(0.5)
-                    continue
-
-            ok, frame = self._capture.read()
-            if ok and frame is not None:
-                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                with self._lock:
-                    self._frame = image
-            else:
-                time.sleep(0.02)
-
-    def _open_capture(self) -> cv2.VideoCapture | None:
-        capture = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
-        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self.fourcc))
-        capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        capture.set(cv2.CAP_PROP_FPS, self.fps)
-        if capture.isOpened():
-            return capture
-        capture.release()
-        logger.warning("Failed to open Piper camera: %s", self.device)
-        return None
-
-
-class _PiperCameraSystem:
-    def __init__(self, cfg):
-        self.cfg = cfg
-        self._streams: list[_PiperCameraStream] = []
-        self._last_images = self._blank_images()
-
-    def open(self) -> None:
-        self._streams = []
-        for device in self.cfg.camera_devices:
-            camera = _PiperCameraStream(
-                str(device),
-                width=int(self.cfg.image_width),
-                height=int(self.cfg.image_height),
-                fps=int(self.cfg.camera_fps),
-                fourcc=str(self.cfg.camera_fourcc),
-            )
-            camera.start()
-            self._streams.append(camera)
-            time.sleep(0.25)
-        self._wait_for_frames(timeout=6.0)
-
-    def close(self) -> None:
-        for camera in self._streams:
-            camera.close()
-        self._streams = []
-
-    def read_images(self) -> dict[str, np.ndarray]:
-        images = {}
-        for name, camera in zip(self.cfg.camera_names, self._streams, strict=False):
-            camera_name = str(name)
-            image = camera.read_latest()
-            images[camera_name] = image if image is not None else self._last_images[camera_name].copy()
-        self._last_images = images
-        return images
-
-    def _wait_for_frames(self, timeout: float) -> None:
-        deadline = time.time() + timeout
-        pending = set(str(name) for name in self.cfg.camera_names)
-        while pending and time.time() < deadline:
-            for name, camera in zip(self.cfg.camera_names, self._streams, strict=False):
-                camera_name = str(name)
-                if camera_name in pending and camera.read_latest() is not None:
-                    pending.discard(camera_name)
-            time.sleep(0.05)
-        for camera_name in sorted(pending):
-            logger.warning("Piper camera %s did not produce an initial frame", camera_name)
-
-    def _blank_images(self) -> dict[str, np.ndarray]:
-        shape = (int(self.cfg.image_height), int(self.cfg.image_width), 3)
-        return {str(name): np.zeros(shape, dtype=np.uint8) for name in self.cfg.camera_names}
+from verl_vla.envs.piper.ros_backend import PiperRosBackend
 
 
 class PiperEnv(BaseEnv):
-    """Dual Piper X environment controlled exclusively through QuestArm ROS."""
+    """Configured Piper arms controlled exclusively through QuestArm ROS."""
 
     env_type = "piper"
 
@@ -162,8 +49,7 @@ class PiperEnv(BaseEnv):
         self.state_dim = int(self.piper_cfg.state_dim)
         self.task_description = str(self.piper_cfg.task_description)
         self.task_descriptions = [self.task_description]
-        self._backend = QuestArmRosBackend(self.piper_cfg)
-        self._cameras = _PiperCameraSystem(self.piper_cfg)
+        self._backend = PiperRosBackend(self.piper_cfg)
         self._step_id = 0
         self.action_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.action_dim,), dtype=np.float32)
         self.observation_space = gym.spaces.Dict(
@@ -181,7 +67,6 @@ class PiperEnv(BaseEnv):
     @override
     def env_init(self) -> None:
         self._backend.start()
-        self._cameras.open()
 
     @override
     def env_reset(self, *, env_ids, reset_eval: bool = False):
@@ -214,21 +99,18 @@ class PiperEnv(BaseEnv):
     @override
     def env_close(self) -> None:
         self._backend.close()
-        self._cameras.close()
 
     @override
     def get_teleop_strategy_kwargs(self, device_type: str) -> dict[str, Any]:
-        return {"frame_sink": self._backend.accept_webxr_frame} if device_type == "xr_controller" else {}
+        return {"arm_rotation_reader": self._backend.read_arm_rotations} if device_type == "xr_controller" else {}
 
     @override
     def get_recorder_strategy_kwargs(self) -> dict[str, Any]:
         return {
-            "camera_names": tuple(str(name) for name in self.piper_cfg.camera_names),
-            "image_shape": (
-                int(self.piper_cfg.image_height),
-                int(self.piper_cfg.image_width),
-                3,
-            ),
+            "camera_names": tuple(camera.name for camera in self.piper_cfg.cameras),
+            "image_shapes": {
+                camera.name: (int(camera.height), int(camera.width), 3) for camera in self.piper_cfg.cameras
+            },
             "state_dim": self.state_dim,
             "action_dim": self.action_dim,
             "fps": int(self.cfg.recorder.video.fps),
@@ -253,6 +135,6 @@ class PiperEnv(BaseEnv):
 
     def _observation(self) -> dict[str, np.ndarray]:
         obs = {"observation.state": self._backend.read_state()}
-        for name, image in self._cameras.read_images().items():
+        for name, image in self._backend.read_images().items():
             obs[f"observation.images.{name}"] = image
         return obs

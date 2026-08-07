@@ -26,10 +26,10 @@ from sensor_msgs.msg import JointState
 
 
 class InitialPoseCapture(Node):
-    def __init__(self) -> None:
+    def __init__(self, arm_names: list[str]) -> None:
         super().__init__("piper_initial_pose_capture")
         self.joint_angles: dict[str, list[float]] = {}
-        for hand in ("left", "right"):
+        for hand in arm_names:
             self.create_subscription(
                 JointState,
                 f"/{hand}_arm/feedback/joint_states",
@@ -47,7 +47,8 @@ class InitialPoseCapture(Node):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--timeout", type=float, default=5.0, help="Seconds to wait for both arms")
+    parser.add_argument("--arms", nargs="+", choices=("left", "right"), default=["left", "right"])
+    parser.add_argument("--timeout", type=float, default=5.0, help="Seconds to wait for configured arms")
     return parser.parse_args()
 
 
@@ -57,19 +58,18 @@ def main() -> int:
         raise ValueError(f"timeout must be positive, got {args.timeout}")
 
     rclpy.init()
-    node = InitialPoseCapture()
+    node = InitialPoseCapture(args.arms)
     try:
         deadline = time.monotonic() + args.timeout
-        while len(node.joint_angles) != 2 and time.monotonic() < deadline:
+        while len(node.joint_angles) != len(args.arms) and time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.1)
-        missing_hands = [hand for hand in ("left", "right") if hand not in node.joint_angles]
+        missing_hands = [hand for hand in args.arms if hand not in node.joint_angles]
         if missing_hands:
             raise TimeoutError(f"Timed out waiting for joint feedback from: {', '.join(missing_hands)}")
 
-        print("initial_joint_angles:")
-        for hand in ("left", "right"):
+        for hand in args.arms:
             values = ", ".join(f"{angle:.8f}" for angle in node.joint_angles[hand])
-            print(f"  - [{values}]")
+            print(f"{hand}: [{values}]")
         return 0
     finally:
         node.destroy_node()
