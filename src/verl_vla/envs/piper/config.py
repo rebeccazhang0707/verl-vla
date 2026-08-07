@@ -18,30 +18,26 @@ from dataclasses import dataclass, field
 
 from verl.base_config import BaseConfig
 
-SUPPORTED_PIPER_ROBOT_MODELS = ("piper", "piper_h", "piper_l", "piper_x")
-
 
 @dataclass
 class PiperConfig(BaseConfig):
-    """Minimal real Piper arm environment configuration."""
+    """Dual Piper X environment backed exclusively by QuestArm ROS."""
 
     simulator_type: str = "piper"
     can_channels: list[str] = field(default_factory=lambda: ["can0", "can1"])
-    arm_names: list[str] = field(default_factory=lambda: ["left", "right"])
-    robot_models: list[str] = field(default_factory=lambda: ["piper_x", "piper_x"])
-    can_interface: str = "socketcan"
-    bitrate: int = 1_000_000
-    firmware_version: str = "v189"
-    speed_percent: int = 10
-    reset_speed_percent: int = 5
-    reset_timeout_s: float = 15.0
-    reset_poll_interval_s: float = 0.1
-    reset_joint_tolerance: float = 0.03
-    initial_joint_angles: list[list[float]] | None = None
-    action_dim: int = 14
-    state_dim: int = 28
+    action_dim: int = field(default=14, init=False)
+    state_dim: int = field(default=28, init=False)
     task_description: str = "Teleoperate the Piper arms."
-    gripper_open_width: float = 0.105
+    ros_conda_sh: str = ""
+    ros_conda_env: str = "vt"
+    questarm_setup_path: str = ""
+    position_scale: float = 1.25
+    rotation_scale: float = 1.25
+    keyboard_position_step: float = 0.02
+    keyboard_rotation_step: float = 0.10
+    ik_position_weight: float = 5.0
+    ik_smooth_weight: float = 0.5
+    gripper_open_width: float = 0.1
     gripper_close_width: float = 0.0
     gripper_width_step: float = 0.005
     gripper_force: float = 1.0
@@ -51,45 +47,28 @@ class PiperConfig(BaseConfig):
     image_width: int = 640
     camera_fps: int = 20
     camera_fourcc: str = "MJPG"
-    ik_jacobian_eps: float = 1e-4
-    max_joint_delta_per_step: float = 0.04
 
     def __post_init__(self):
-        if len(self.can_channels) != len(self.arm_names):
-            raise ValueError(
-                f"can_channels and arm_names must have the same length, got "
-                f"{len(self.can_channels)} and {len(self.arm_names)}"
+        if len(self.can_channels) != 2:
+            raise ValueError(f"QuestArm Piper requires exactly two CAN channels, got {self.can_channels}")
+        if (
+            min(
+                self.position_scale,
+                self.rotation_scale,
+                self.keyboard_position_step,
+                self.keyboard_rotation_step,
             )
-        arm_count = len(self.can_channels)
-        robot_models = list(self.robot_models)
-        if len(robot_models) != arm_count:
-            raise ValueError(f"robot_models must contain {arm_count} per-arm model names, got {len(robot_models)}")
-        unsupported_models = sorted(set(robot_models) - set(SUPPORTED_PIPER_ROBOT_MODELS))
-        if unsupported_models:
-            raise ValueError(
-                f"Unsupported Piper robot_models {unsupported_models}; expected one of "
-                f"{list(SUPPORTED_PIPER_ROBOT_MODELS)}"
-            )
-        object.__setattr__(self, "action_dim", arm_count * 7)
-        object.__setattr__(self, "state_dim", arm_count * 14)
-        if not 0 <= int(self.speed_percent) <= 100:
-            raise ValueError(f"speed_percent must be in [0, 100], got {self.speed_percent}")
-        if not 0 <= int(self.reset_speed_percent) <= 100:
-            raise ValueError(f"reset_speed_percent must be in [0, 100], got {self.reset_speed_percent}")
-        if self.reset_timeout_s <= 0:
-            raise ValueError(f"reset_timeout_s must be positive, got {self.reset_timeout_s}")
-        if self.reset_poll_interval_s <= 0:
-            raise ValueError(f"reset_poll_interval_s must be positive, got {self.reset_poll_interval_s}")
-        if self.reset_joint_tolerance <= 0:
-            raise ValueError(f"reset_joint_tolerance must be positive, got {self.reset_joint_tolerance}")
-        if self.initial_joint_angles is not None:
-            if len(self.initial_joint_angles) != arm_count:
-                raise ValueError(
-                    f"initial_joint_angles must contain {arm_count} arm targets, got {len(self.initial_joint_angles)}"
-                )
-            for arm_idx, joints in enumerate(self.initial_joint_angles):
-                if len(joints) != 6:
-                    raise ValueError(f"initial_joint_angles[{arm_idx}] must contain 6 joints, got {len(joints)}")
+            <= 0
+        ):
+            raise ValueError("Piper teleop scales must be positive")
+        if self.ik_position_weight <= 0 or self.ik_smooth_weight < 0:
+            raise ValueError("IK position weight must be positive and smooth weight must be non-negative")
+        if self.gripper_close_width > self.gripper_open_width:
+            raise ValueError("gripper_close_width must not exceed gripper_open_width")
+        if self.gripper_width_step <= 0:
+            raise ValueError(f"gripper_width_step must be positive, got {self.gripper_width_step}")
+        if self.gripper_force < 0:
+            raise ValueError(f"gripper_force must be non-negative, got {self.gripper_force}")
         if len(self.camera_devices) != len(self.camera_names):
             raise ValueError(
                 f"camera_devices and camera_names must have the same length, got "

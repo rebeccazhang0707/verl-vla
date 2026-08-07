@@ -19,6 +19,7 @@ from verl_vla.teleop.strategies.gamepad_libero import LiberoGamepadStrategy
 from verl_vla.teleop.strategies.keyboard_libero import LiberoKeyboardStrategy
 from verl_vla.teleop.strategies.keyboard_piper import PiperKeyboardStrategy
 from verl_vla.teleop.strategies.lerobot_libero import LiberoLerobotStrategy
+from verl_vla.teleop.strategies.pico_xr_piper import PiperPicoXRStrategy
 from verl_vla.teleop.strategies.xr_controller_arena import ArenaXRControllerStrategy
 from verl_vla.teleop.strategies.xr_controller_libero import LiberoXRControllerStrategy
 
@@ -47,6 +48,7 @@ _REGISTRY.register(LiberoXRControllerStrategy)
 _REGISTRY.register(ArenaXRControllerStrategy)
 _REGISTRY.register(LiberoGamepadStrategy)
 _REGISTRY.register(LiberoLerobotStrategy)
+_REGISTRY.register(PiperPicoXRStrategy)
 
 
 def get_strategy(env_type: str, device_type: str, cfg: Any, **strategy_kwargs: Any) -> InterventionStrategyBase:

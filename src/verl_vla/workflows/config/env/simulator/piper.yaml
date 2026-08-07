@@ -2,7 +2,7 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 
-# Minimal real Piper arm backend configuration.
+# Dual Piper X environment backed exclusively by QuestArm ROS.
 
 # Target class instantiated from this configuration.
 _target_: verl_vla.envs.piper.config.PiperConfig
@@ -10,57 +10,45 @@ _target_: verl_vla.envs.piper.config.PiperConfig
 # Simulator backend selected by EnvWorker.
 simulator_type: piper
 
-# SocketCAN channel for each Piper arm, in policy action order.
+# SocketCAN channels for the physical left and right arms, in that order.
 can_channels:
 
-  - can0
-  - can1
+  - can_right
+  - can_left
 
-# Human-readable name for each Piper arm.
-arm_names:
+# Conda initialization script used by the managed QuestArm subprocess. An empty
+# path discovers a standard Miniconda or Anaconda installation.
+ros_conda_sh: ''
 
-  - left
-  - right
+# Conda environment containing ROS Humble and QuestArm dependencies.
+ros_conda_env: vt
 
-# pyAgxArm model name for each Piper arm.
-robot_models:
+# QuestArm workspace setup script. An empty path discovers setup.sh's default.
+questarm_setup_path: ''
 
-  - piper_x
-  - piper_x
+# Scale applied to QuestArm WebXR position deltas.
+position_scale: 1.25
 
-# CAN interface implementation passed to pyAgxArm.
-can_interface: socketcan
+# Scale applied to QuestArm WebXR rotation deltas.
+rotation_scale: 1.25
 
-# CAN bitrate for every configured Piper arm.
-bitrate: 1000000
+# Per-step keyboard translation delta in meters.
+keyboard_position_step: 0.02
 
-# Piper firmware profile passed to pyAgxArm.
-firmware_version: v189
+# Per-step keyboard rotation delta in radians.
+keyboard_rotation_step: 0.10
 
-# Normal arm speed percentage used for teleop moves.
-speed_percent: 10
+# QuestArm IK position objective weight.
+ik_position_weight: 5.0
 
-# Arm speed percentage used while moving during reset.
-reset_speed_percent: 5
-
-# Maximum seconds to wait for reset target convergence.
-reset_timeout_s: 15.0
-
-# Seconds between reset convergence polls.
-reset_poll_interval_s: 0.1
-
-# Joint-space reset tolerance in radians.
-reset_joint_tolerance: 0.03
-
-# Optional per-arm joint targets used by reset. When null, PiperEnv captures
-# each arm's startup joint angles as the initial pose.
-initial_joint_angles: null
+# QuestArm IK smoothing objective weight.
+ik_smooth_weight: 0.5
 
 # Task string published in observations and recordings.
 task_description: Teleoperate the Piper arms.
 
 # Maximum gripper opening width in meters.
-gripper_open_width: 0.105
+gripper_open_width: 0.1
 
 # Minimum gripper opening width in meters.
 gripper_close_width: 0.0
@@ -68,37 +56,31 @@ gripper_close_width: 0.0
 # Relative gripper width change per teleop step in meters.
 gripper_width_step: 0.005
 
-# Gripper force passed to the pyAgxArm gripper command.
+# Gripper force passed through ROS to agx_arm_ctrl.
 gripper_force: 1.0
 
 # V4L2 camera device for each published image stream.
 camera_devices:
 
-  - /dev/video0
-  - /dev/video2
-  - /dev/video4
+  - /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16200MD-video-index0
+  - /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N162035J-video-index0
+  - /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16202MR-video-index0
 
 # Observation image name for each configured camera.
 camera_names:
 
-  - left_wrist
-  - right_wrist
-  - top
+  - dabai_00md
+  - dabai_035j
+  - dabai_02mr
 
 # Captured image height in pixels.
-image_height: 480
+image_height: 240
 
 # Captured image width in pixels.
-image_width: 640
+image_width: 320
 
 # Requested camera capture rate in frames per second.
 camera_fps: 20
 
 # Requested camera pixel format.
 camera_fourcc: MJPG
-
-# Finite-difference step in radians for numerical IK Jacobian columns.
-ik_jacobian_eps: 0.0001
-
-# Maximum joint update sent in one teleop step, in radians.
-max_joint_delta_per_step: 0.04

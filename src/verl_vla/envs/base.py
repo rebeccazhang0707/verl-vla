@@ -56,6 +56,7 @@ class BaseEnv(gym.Env):
             action shape ``[B, D]`` and return the standard step-result dict
             documented on ``env_step``.
         env_close(): Close simulator-specific resources.
+        get_teleop_strategy_kwargs(): Optional hook for simulator-owned teleop dependencies.
         get_recorder_strategy_kwargs(): Optional hook for recorder strategy
             configuration such as image shape.
     """
@@ -601,10 +602,23 @@ class BaseEnv(gym.Env):
 
     ### Teleop Control ###
 
+    def get_teleop_strategy_kwargs(self, device_type: str) -> dict[str, Any]:
+        """Return environment-owned dependencies for one teleop device."""
+        del device_type
+        return {}
+
     def create_teleops(self):
         teleop_cfg = self.cfg.teleop
         if not teleop_cfg.enable:
             return []
+
+        strategy_kwargs = {
+            device_type: {
+                "simulator_cfg": getattr(self.cfg.simulator, self.env_type),
+                **self.get_teleop_strategy_kwargs(device_type),
+            }
+            for device_type in teleop_cfg.devices
+        }
 
         return [
             TeleopController.create(
@@ -614,7 +628,7 @@ class BaseEnv(gym.Env):
                 env_id=env_id,
                 env_type=self.env_type,
                 device=teleop_cfg.device or "keyboard",
-                strategy_kwargs={"simulator_cfg": getattr(self.cfg.simulator, self.env_type)},
+                strategy_kwargs=strategy_kwargs,
             )
             for env_id in range(self.num_envs)
         ]

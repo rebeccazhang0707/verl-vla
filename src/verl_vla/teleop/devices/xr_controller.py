@@ -23,6 +23,7 @@ from verl_vla.teleop.devices.device_base import DeviceBase, DeviceEvent
 @dataclass(frozen=True)
 class XRControllerDeviceCfg:
     max_events: int = 256
+    record_controller_buttons: bool = True
 
 
 class XRControllerDevice(DeviceBase):
@@ -49,7 +50,8 @@ class XRControllerDevice(DeviceBase):
         with self._lock:
             if event.event_type == "xr_frame":
                 self._latest_frame = dict(event.raw)
-                self._update_record_controls_from_frame(self._latest_frame)
+                if self.cfg.record_controller_buttons:
+                    self._update_record_controls_from_frame(self._latest_frame)
                 self._frame_count += 1
             self._record_event(event)
 

@@ -21,8 +21,13 @@ from verl_vla.utils.ray_utils import ensure_ray_initialized
 def run_teleop(config):
     ensure_ray_initialized(config)
     cluster = TrainCluster(instantiate(config.cluster, _recursive_=False))
-    cluster.start()
-    print("Teleop started. Press Ctrl+C to stop.")
-    while True:
-        cluster.record(collect_dataset=False)
-        print("Teleop episode finished; resetting environment.")
+    try:
+        cluster.start()
+        print("Teleop started. Press Ctrl+C to stop.")
+        while True:
+            cluster.record(collect_dataset=False)
+            print("Teleop episode finished; resetting environment.")
+    except KeyboardInterrupt:
+        print("Teleop stopped.")
+    finally:
+        cluster.shutdown()

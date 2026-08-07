@@ -40,7 +40,7 @@ class TeleopController:
         env_id: int,
         env_type: str,
         device: str = "keyboard",
-        strategy_kwargs: dict[str, Any],
+        strategy_kwargs: dict[str, dict[str, Any]],
     ):
         self.teleop_cfg = teleop_cfg
         self.rank = rank
@@ -76,7 +76,7 @@ class TeleopController:
         env_id: int,
         env_type: str,
         device: str = "keyboard",
-        strategy_kwargs: dict[str, Any],
+        strategy_kwargs: dict[str, dict[str, Any]],
     ) -> "TeleopController | None":
         if not teleop_cfg.enable:
             return None
@@ -190,7 +190,7 @@ class TeleopController:
         }
 
     def _record_start_key_label(self) -> str:
-        if "xr_controller" in self.input_devices:
+        if "xr_controller" in self.input_devices and self.env_type != "piper":
             return "Enter or A/X"
         return "Enter"
 
@@ -211,7 +211,12 @@ class TeleopController:
         if device_type == "keyboard":
             return KeyboardDevice(KeyboardDeviceCfg())
         if device_type == "xr_controller":
-            return XRControllerDevice(XRControllerDeviceCfg(max_events=self.teleop_cfg.xr_controller.max_events))
+            return XRControllerDevice(
+                XRControllerDeviceCfg(
+                    max_events=self.teleop_cfg.xr_controller.max_events,
+                    record_controller_buttons=self.env_type != "piper",
+                )
+            )
         if device_type == "gamepad":
             return GamepadDevice(GamepadDeviceCfg(max_events=self.teleop_cfg.gamepad.max_events))
         if device_type == "lerobot":
@@ -237,12 +242,13 @@ class TeleopController:
         raise NotImplementedError(f"Teleop device {device_type} is not implemented")
 
     def _create_strategy(self, device_type: str) -> InterventionStrategyBase:
+        strategy_kwargs = self.strategy_kwargs[device_type]
         if device_type == "keyboard":
-            return get_strategy(self.env_type, device_type, self.teleop_cfg.keyboard, **self.strategy_kwargs)
+            return get_strategy(self.env_type, device_type, self.teleop_cfg.keyboard, **strategy_kwargs)
         if device_type == "xr_controller":
-            return get_strategy(self.env_type, device_type, self.teleop_cfg.xr_controller, **self.strategy_kwargs)
+            return get_strategy(self.env_type, device_type, self.teleop_cfg.xr_controller, **strategy_kwargs)
         if device_type == "gamepad":
-            return get_strategy(self.env_type, device_type, self.teleop_cfg.gamepad, **self.strategy_kwargs)
+            return get_strategy(self.env_type, device_type, self.teleop_cfg.gamepad, **strategy_kwargs)
         if device_type == "lerobot":
-            return get_strategy(self.env_type, device_type, self.teleop_cfg.lerobot, **self.strategy_kwargs)
+            return get_strategy(self.env_type, device_type, self.teleop_cfg.lerobot, **strategy_kwargs)
         raise NotImplementedError(f"Teleop strategy for device {device_type} is not implemented")
