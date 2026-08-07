@@ -163,6 +163,9 @@ class RobRaySACTrainer:
 
         rollout_times = int(self.trainer_config.rollout_times)
         rollout_interval = int(self.trainer_config.rollout_interval)
+        if rollout_interval == -1:
+            rollout_times = 0
+            rollout_interval = self.trainer_config.total_training_steps
         actor_config = self.config.cluster.actor_rollout_ref.actor
         profiler_config = OmegaConf.select(self.config, "global_profiler", default=None)
         critic_only_steps_after_rollout = int(actor_config.critic.only_steps_after_rollout)
@@ -204,8 +207,8 @@ class RobRaySACTrainer:
                     # Determine whether to perform rollout:
                     # enable at start and early warmup, disable during critic warmup phase
                     warm_rollout_steps = int(self.trainer_config.warm_rollout_steps)
-                    need_rollout = (training_step < rollout_times) or self.global_steps < warm_rollout_steps
-                    if warm_rollout_steps <= self.global_steps < actor_config.critic.warmup_steps:
+                    need_rollout = (training_step < rollout_times) or self.global_steps <= warm_rollout_steps
+                    if warm_rollout_steps < self.global_steps < actor_config.critic.warmup_steps:
                         need_rollout = False
                     actor_input = None
                     if need_rollout:

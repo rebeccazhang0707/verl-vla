@@ -1,0 +1,74 @@
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/sac@_global_
+  - override /model/override@cluster.actor_rollout_ref.model.override_config: act
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: act
+  - _self_
+
+cluster:
+  env:
+    env_loop:
+      max_interactions: 20
+
+    env_worker:
+      auto_reset: true
+      modes: [train, eval]
+      simulator:
+        libero:
+          max_episode_steps: 200
+          task_ids: [0]
+      recorder:
+        enable: true
+        recorders: [video]
+        video:
+          root: ./outputs/rl/sac/act/self-collected-libero-spatial-single-batch/videos
+
+  actor_rollout_ref:
+    model:
+      load_tokenizer: false
+      adapter:
+        sac_rollout_noise_scale: 1.0
+        critic:
+          enabled: true
+          hidden_dims: [512, 256, 128]
+
+    actor:
+      fsdp_config:
+        use_torch_compile: false
+        wrap_policy:
+          transformer_layer_cls_to_wrap:
+            - ACTEncoderLayer
+            - ACTDecoderLayer
+      optim:
+        clip_grad: 3.5
+      actor_update_interval: 1
+      td3:
+        enabled: true
+        bc_alpha: 0.5
+      critic:
+        gamma: 0.999
+        grad_clip: 10.0
+        skip_update_when_actor_update: true
+        warmup_steps: 200
+      replay:
+        online_single_size: 512
+        save_dir: ./outputs/rl/sac/act/self-collected-libero-spatial-single-batch/replay
+
+  checkpoint:
+    default_local_dir: ./outputs/rl/sac/act/self-collected-libero-spatial-single-batch/checkpoints
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      env_vars:
+        TENSORBOARD_DIR: ./outputs/rl/sac/act/self-collected-libero-spatial-single-batch/tensorboard
+
+trainer:
+  project_name: act-libero-sac
+  experiment_name: self-collected-task0-single-batch
+  rollout_interval: -1
+  warm_rollout_steps: 2
+  val_before_train: true

@@ -51,8 +51,8 @@ class SACTrainerConfig(BaseConfig):
     def __post_init__(self):
         if self.total_training_steps <= 0:
             raise ValueError(f"total_training_steps must be positive, got {self.total_training_steps}")
-        if self.rollout_interval <= 0:
-            raise ValueError(f"rollout_interval must be positive, got {self.rollout_interval}")
+        if self.rollout_interval == 0 or self.rollout_interval < -1:
+            raise ValueError(f"rollout_interval must be positive or -1, got {self.rollout_interval}")
         if self.rollout_times < 0:
             raise ValueError(f"rollout_times must be non-negative, got {self.rollout_times}")
         if self.warm_rollout_steps < 0:

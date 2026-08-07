@@ -39,7 +39,8 @@ logger: ["console"]
 # Total number of trainer update steps.
 total_training_steps: 600
 
-# Number of training steps between rollout collections.
+# Number of training steps between rollout collections. Set to -1 to disable
+# periodic rollout collection while preserving any initial warm rollout steps.
 rollout_interval: 20
 
 # Number of rollout collections inside each rollout interval window.

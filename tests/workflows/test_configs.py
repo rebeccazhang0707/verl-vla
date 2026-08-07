@@ -21,7 +21,7 @@ from hydra import compose, initialize_config_module
     [
         ("verl_vla.workflows.config.train", "ppo", {"actor_rollout_ref", "env", "trainer"}),
         ("verl_vla.workflows.config.train", "recap", {"ray_kwargs", "recap"}),
-        ("verl_vla.workflows.config.train", "sac", {"cluster", "ray_kwargs", "trainer"}),
+        ("verl_vla.workflows.config", "train/sac", {"cluster", "ray_kwargs", "trainer"}),
         ("verl_vla.workflows.config", "train/sft", {"cluster", "data", "ray_kwargs", "trainer"}),
     ],
 )
