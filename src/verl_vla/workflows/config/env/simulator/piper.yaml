@@ -44,6 +44,22 @@ ik_position_weight: 5.0
 # QuestArm IK smoothing objective weight.
 ik_smooth_weight: 0.5
 
+# Optional initial joint pose in radians as [left arm, right arm]. When null,
+# PiperEnv captures both arms' joint positions when the ROS backend starts.
+initial_joint_angles:
+
+  - [0.00001745, -0.00797615, 0.01717404, 0.58512163, 0.04897394, -0.02546435]
+  - [0.03780383, 0.01403245, 0.01569051, 0.81677918, 0.01125737, 0.29810224]
+
+# Duration in seconds of the smooth joint trajectory used during reset.
+reset_duration_s: 3.0
+
+# Maximum time in seconds to wait for both arms to reach their reset targets.
+reset_timeout_s: 15.0
+
+# Per-joint reset completion tolerance in radians.
+reset_joint_tolerance: 0.03
+
 # Task string published in observations and recordings.
 task_description: Teleoperate the Piper arms.
 

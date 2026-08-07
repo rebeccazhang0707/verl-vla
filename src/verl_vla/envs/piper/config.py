@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
 from verl.base_config import BaseConfig
 
 
@@ -37,6 +38,10 @@ class PiperConfig(BaseConfig):
     keyboard_rotation_step: float = 0.10
     ik_position_weight: float = 5.0
     ik_smooth_weight: float = 0.5
+    initial_joint_angles: list[list[float]] | None = None
+    reset_duration_s: float = 3.0
+    reset_timeout_s: float = 15.0
+    reset_joint_tolerance: float = 0.03
     gripper_open_width: float = 0.1
     gripper_close_width: float = 0.0
     gripper_width_step: float = 0.005
@@ -63,6 +68,21 @@ class PiperConfig(BaseConfig):
             raise ValueError("Piper teleop scales must be positive")
         if self.ik_position_weight <= 0 or self.ik_smooth_weight < 0:
             raise ValueError("IK position weight must be positive and smooth weight must be non-negative")
+        if self.initial_joint_angles is not None:
+            initial_joint_angles = np.asarray(self.initial_joint_angles, dtype=float)
+            if initial_joint_angles.shape != (2, 6):
+                raise ValueError(f"initial_joint_angles must have shape [2, 6], got {initial_joint_angles.shape}")
+            if not np.all(np.isfinite(initial_joint_angles)):
+                raise ValueError("initial_joint_angles must contain only finite values")
+        if self.reset_duration_s <= 0:
+            raise ValueError(f"reset_duration_s must be positive, got {self.reset_duration_s}")
+        if self.reset_timeout_s <= self.reset_duration_s:
+            raise ValueError(
+                f"reset_timeout_s must be greater than reset_duration_s, got "
+                f"{self.reset_timeout_s} and {self.reset_duration_s}"
+            )
+        if self.reset_joint_tolerance <= 0:
+            raise ValueError(f"reset_joint_tolerance must be positive, got {self.reset_joint_tolerance}")
         if self.gripper_close_width > self.gripper_open_width:
             raise ValueError("gripper_close_width must not exceed gripper_open_width")
         if self.gripper_width_step <= 0:

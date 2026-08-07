@@ -34,6 +34,8 @@ _HOST = "127.0.0.1"
 _COMMAND_PORT = 19001
 _FEEDBACK_PORT = 19002
 _START_TIMEOUT_S = 30.0
+_ARM_STATE_SIZE = 14
+_JOINT_COUNT = 6
 
 
 class QuestArmRosBackend:
@@ -51,6 +53,7 @@ class QuestArmRosBackend:
         self._command_socket: socket.socket | None = None
         self._feedback_socket: socket.socket | None = None
         self._latest_state = np.zeros(int(cfg.state_dim), dtype=np.float32)
+        self._initial_joint_angles: np.ndarray | None = None
         self._process: subprocess.Popen[str] | None = None
         self._closed = False
 
@@ -74,12 +77,39 @@ class QuestArmRosBackend:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Timed out waiting for QuestArm ROS feedback")
                 time.sleep(0.1)
+            self._initial_joint_angles = self._resolve_initial_joint_angles()
         except Exception:
             self.close()
             raise
 
     def reset(self) -> None:
-        self._send({"type": "reset"})
+        if self._initial_joint_angles is None:
+            raise RuntimeError("QuestArm ROS runtime has not captured its initial joint pose")
+        self._send(
+            {
+                "type": "reset",
+                "joint_positions": self._initial_joint_angles.astype(float).tolist(),
+                "duration_s": float(self.cfg.reset_duration_s),
+            }
+        )
+        deadline = time.monotonic() + float(self.cfg.reset_timeout_s)
+        tolerance = float(self.cfg.reset_joint_tolerance)
+        while True:
+            self._receive_feedback()
+            current_joint_angles = self._joint_angles_from_state(self._latest_state)
+            if np.allclose(current_joint_angles, self._initial_joint_angles, rtol=0.0, atol=tolerance):
+                return
+            if self._process is not None and self._process.poll() is not None:
+                raise RuntimeError(f"QuestArm ROS launch exited with code {self._process.returncode} during reset")
+            if time.monotonic() >= deadline:
+                joint_errors = np.abs(current_joint_angles - self._initial_joint_angles)
+                logger.warning(
+                    "Piper reset did not reach the initial joint pose within %.1fs; maximum joint error is %.4frad",
+                    float(self.cfg.reset_timeout_s),
+                    float(joint_errors.max()),
+                )
+                return
+            time.sleep(0.05)
 
     def apply_action(self, action: np.ndarray) -> None:
         if np.any(action != 0.0):
@@ -96,7 +126,7 @@ class QuestArmRosBackend:
         if self._closed:
             return
         try:
-            self.reset()
+            self._send({"type": "deactivate"})
         except (OSError, RuntimeError):
             pass
         self._closed = True
@@ -134,6 +164,18 @@ class QuestArmRosBackend:
                 continue
             self._latest_state = state
             received = True
+
+    @staticmethod
+    def _joint_angles_from_state(state: np.ndarray) -> np.ndarray:
+        return np.stack(
+            [state[arm_index * _ARM_STATE_SIZE : arm_index * _ARM_STATE_SIZE + _JOINT_COUNT] for arm_index in range(2)]
+        )
+
+    def _resolve_initial_joint_angles(self) -> np.ndarray:
+        configured_initial_pose = self.cfg.initial_joint_angles
+        if configured_initial_pose is not None:
+            return np.asarray(configured_initial_pose, dtype=np.float32)
+        return self._joint_angles_from_state(self._latest_state).copy()
 
     def _launch_command(self) -> str:
         launch_args = {

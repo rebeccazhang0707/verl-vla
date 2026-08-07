@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import math
 import socket
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -93,6 +94,15 @@ class HandState:
     secondary_down: bool = False
 
 
+@dataclass
+class ResetTrajectory:
+    start_joint_angles: np.ndarray
+    target_joint_angles: np.ndarray
+    start_time: float
+    duration_s: float
+    next_publish_time: float
+
+
 class QuestArmBridge(Node):
     def __init__(self) -> None:
         super().__init__("questarm_bridge")
@@ -109,6 +119,7 @@ class QuestArmBridge(Node):
         self._r_adj = xyzrpy_to_mat(0.0, 0.0, 0.0, -math.pi, 0.0, -math.pi / 2.0)
         self._ros_to_arm_mat = xyzrpy_to_mat(0.0, 0.0, 0.0, -1.5708, 0.0, -1.5708)
         self._hands = {"left": HandState(), "right": HandState()}
+        self._reset_trajectory: ResetTrajectory | None = None
         self._position_scale = float(self.get_parameter("position_scale").value)
         self._rotation_scale = float(self.get_parameter("rotation_scale").value)
         if self._position_scale <= 0.0 or self._rotation_scale <= 0.0:
@@ -127,6 +138,10 @@ class QuestArmBridge(Node):
         self._joint_publishers = {
             "left": self.create_publisher(JointState, "/left_arm/control/joint_states", 10),
             "right": self.create_publisher(JointState, "/right_arm/control/joint_states", 10),
+        }
+        self._reset_publishers = {
+            "left": self.create_publisher(JointState, "/left_arm/control/move_j", 1),
+            "right": self.create_publisher(JointState, "/right_arm/control/move_j", 1),
         }
         self.create_subscription(
             PoseStamped,
@@ -207,10 +222,16 @@ class QuestArmBridge(Node):
             elif packet_type == "action":
                 self._handle_action(packet.get("action"))
             elif packet_type == "reset":
+                self._handle_reset(packet.get("joint_positions"), packet.get("duration_s"))
+            elif packet_type == "deactivate":
+                self._reset_trajectory = None
                 self._reset_reference()
+        self._advance_reset()
         self._publish_feedback()
 
     def _handle_xr_frame(self, frame: dict) -> None:
+        if self._reset_trajectory is not None:
+            return
         controllers = frame.get("controllers", {})
         if not isinstance(controllers, dict):
             return
@@ -258,6 +279,8 @@ class QuestArmBridge(Node):
                 self._publish_target(hand, xyz, quat, stamp)
 
     def _handle_action(self, raw_action) -> None:
+        if self._reset_trajectory is not None:
+            return
         try:
             action = np.asarray(raw_action, dtype=float).reshape(2, 7)
         except (TypeError, ValueError):
@@ -289,6 +312,62 @@ class QuestArmBridge(Node):
     def _reset_reference(self) -> None:
         for state in self._hands.values():
             self._reset_hand_reference(state)
+
+    def _handle_reset(self, raw_joint_positions, raw_duration_s) -> None:
+        try:
+            joint_positions = np.asarray(raw_joint_positions, dtype=float)
+            duration_s = float(raw_duration_s)
+        except (TypeError, ValueError):
+            return
+        if (
+            joint_positions.shape != (2, 6)
+            or not np.all(np.isfinite(joint_positions))
+            or not math.isfinite(duration_s)
+            or duration_s <= 0.0
+        ):
+            return
+        current_joint_angles = [self._hands[hand].joint_positions for hand in ("left", "right")]
+        if any(positions is None for positions in current_joint_angles):
+            return
+        self._reset_reference()
+        start_joint_angles = np.stack(current_joint_angles)
+        if np.allclose(start_joint_angles, joint_positions, rtol=0.0, atol=1e-6):
+            self._publish_joint_targets(joint_positions)
+            self._reset_trajectory = None
+            return
+        self._reset_trajectory = ResetTrajectory(
+            start_joint_angles=start_joint_angles,
+            target_joint_angles=joint_positions,
+            start_time=time.monotonic(),
+            duration_s=duration_s,
+            next_publish_time=0.0,
+        )
+
+    def _advance_reset(self) -> None:
+        trajectory = self._reset_trajectory
+        if trajectory is None:
+            return
+        now = time.monotonic()
+        if now < trajectory.next_publish_time:
+            return
+        trajectory.next_publish_time = now + 1.0 / 30.0
+        progress = min((now - trajectory.start_time) / trajectory.duration_s, 1.0)
+        smooth_progress = progress * progress * (3.0 - 2.0 * progress)
+        joint_angles = trajectory.start_joint_angles + smooth_progress * (
+            trajectory.target_joint_angles - trajectory.start_joint_angles
+        )
+        self._publish_joint_targets(joint_angles)
+        if progress >= 1.0:
+            self._reset_trajectory = None
+
+    def _publish_joint_targets(self, joint_angles: np.ndarray) -> None:
+        stamp = self.get_clock().now().to_msg()
+        for hand, positions in zip(("left", "right"), joint_angles, strict=True):
+            target = JointState()
+            target.header = Header(stamp=stamp)
+            target.name = [f"joint{index}" for index in range(1, 7)]
+            target.position = positions.tolist()
+            self._reset_publishers[hand].publish(target)
 
     @staticmethod
     def _reset_hand_reference(state: HandState) -> None:

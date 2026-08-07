@@ -97,3 +97,20 @@ examples/data_collection/piper/run.sh \
 
 The shared Piper YAML contains the tested position and rotation scale `1.25`,
 IK position weight `5.0`, and smoothing weight `0.5`.
+
+Set `initial_joint_angles` in the Piper YAML to a `2 x 6` list of joint angles
+in radians when reset should return to a fixed pose. Its first row is the left
+arm and its second row is the right arm. When the value is `null`, PiperEnv
+captures both arms' positions when it starts and uses that pose for subsequent
+resets.
+
+`reset_duration_s` controls how long the smooth reset trajectory takes without
+changing the speed of normal keyboard or XR control. Its default is `3.0`
+seconds; `reset_timeout_s` must be larger than this duration.
+
+With the Piper ROS service running, print the current pose in the exact YAML
+format with:
+
+```bash
+examples/data_collection/piper/capture_initial_pose.sh
+```
