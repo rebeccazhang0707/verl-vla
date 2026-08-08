@@ -1,25 +1,38 @@
 # Fine-tune PI0.5 on LIBERO Spatial
 
 This guide shows how to fine-tune `Miical/pi05-base` on the
-`lerobot/libero_spatial_image` dataset using supervised fine-tuning (SFT). We
-provide a Docker-based launcher configured for a single node with eight NVIDIA
-GPUs. If you prefer to use a local Python environment, install the dependencies
-by following the versions and installation order in
-[`docker/Dockerfile.pi0`](https://github.com/verl-project/verl-vla/blob/main/docker/Dockerfile.pi0).
+`lerobot/libero_spatial_image` dataset using supervised fine-tuning (SFT). The
+launcher uses a repository-local `.venv` and is configured for a single node
+with eight NVIDIA GPUs.
 
-## Build the image
+## Install the environment
 
-Run from the repository root:
+The verified environment requires Python 3.10, an NVIDIA driver compatible
+with PyTorch 2.7.1, and the following Ubuntu 22.04 packages:
 
 ```bash
-docker build \
-  -f docker/Dockerfile.pi0 \
-  -t verl-vla-pi0:dev \
-  .
+sudo apt-get install build-essential cmake ffmpeg git \
+  libgl1 libglib2.0-0 libosmesa6 python3.10-dev python3.10-venv
 ```
 
-The image contains the verified PI0.5, verl-vla, LeRobot, and LIBERO runtime,
-including the LIBERO assets required for OSMesa rendering.
+Then create the environment from the repository root:
+
+```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip 'setuptools>=71,<81' wheel hf-transfer==0.1.9
+python -m pip install --requirement requirements-lerobot.txt
+python -m pip install --no-deps lerobot==0.4.4
+python -m pip install --editable '.[pi0,libero]'
+python scripts/install_libero_assets.py
+python scripts/install_checks/check_libero.py
+```
+
+LeRobot is installed without dependency resolution because LeRobot 0.4.4
+requires `rerun-sdk>=0.24`, whose Linux wheels require NumPy 2, while verl
+0.7.1 requires NumPy 1. The preceding requirements file supplies the verified
+runtime versions. Keep `.venv` activated when running the training and
+evaluation launchers.
 
 ## Start training
 
@@ -49,9 +62,10 @@ bash examples/fine_tuning/pi05/run_train.sh
 > `cluster.actor_rollout_ref.model.lora.adapter_path` and keep `lora.rank` equal
 > to the rank recorded by that adapter.
 
-The launcher uses `.data/pi05_sft` as the persistent data directory shared by
-the host and the container. Source code is bind-mounted from the repository,
-so Python changes are available without rebuilding the image.
+Models and datasets use the standard Hugging Face cache. Training artifacts
+are written under `outputs/train/pi05-sft/libero-spatial`. The repository is
+installed in editable mode, so Python changes are available without
+reinstalling the environment.
 
 On the first run, the launcher automatically:
 
@@ -60,8 +74,8 @@ On the first run, the launcher automatically:
 3. downloads the PI0.5 checkpoint from Hugging Face; and
 4. starts distributed SFT on all eight GPUs.
 
-Downloaded files and training outputs remain under `.data/pi05_sft` and are
-reused by later runs.
+Downloaded files remain in the Hugging Face cache, while normalization
+statistics and training outputs are reused from the training output directory.
 
 ## Default configuration
 
@@ -81,7 +95,7 @@ reused by later runs.
 | Warmup ratio | `0.05` |
 | Distributed strategy | FSDP2 |
 | Model dtype | BF16 |
-| Output | `.data/pi05_sft/output/pi05_libero_spatial_sft` |
+| Output | `outputs/train/pi05-sft/libero-spatial` |
 
 ## Monitor training
 
@@ -91,14 +105,23 @@ A running job reports loss and gradient metrics in the console:
 Training Progress: 1/5150 ... grad_pre=... sft_loss=...
 ```
 
-The Docker launcher also starts TensorBoard automatically. Event files are
-written to:
+Event files are written to:
 
 ```text
-.data/pi05_sft/output/pi05_libero_spatial_sft/tensorboard
+outputs/train/pi05-sft/libero-spatial/tensorboard
 ```
 
-Open the following address in a browser to view the training metrics:
+To view them, activate `.venv` in another terminal and start TensorBoard:
+
+```bash
+source .venv/bin/activate
+tensorboard \
+  --logdir outputs/train/pi05-sft/libero-spatial/tensorboard \
+  --host 0.0.0.0 \
+  --port 6006
+```
+
+Then open:
 
 ```text
 http://localhost:6006
