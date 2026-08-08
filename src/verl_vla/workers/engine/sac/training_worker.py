@@ -87,7 +87,7 @@ class SACTrainingWorker(TrainingWorker):
             self.alpha_type = self.sac_config.get("alpha_type", "softplus")
             initial_alpha = float(self.sac_config.get("initial_alpha", 1 if self.alpha_type == "exp" else 0.01))
             if self.alpha_type == "exp":
-                raw_alpha = np.log(np.exp(initial_alpha))
+                raw_alpha = np.log(initial_alpha)
             elif self.alpha_type == "softplus":
                 raw_alpha = np.log(np.exp(initial_alpha) - 1)
             else:

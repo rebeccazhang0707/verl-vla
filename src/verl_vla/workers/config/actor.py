@@ -50,6 +50,8 @@ class SACConfig(BaseConfig):
         valid_alpha_types = ["exp", "softplus"]
         if self.alpha_type not in valid_alpha_types:
             raise ValueError(f"Invalid alpha_type: {self.alpha_type}. Must be one of {valid_alpha_types}")
+        if self.auto_entropy and self.initial_alpha <= 0:
+            raise ValueError(f"initial_alpha must be positive when auto_entropy is enabled, got {self.initial_alpha}")
 
 
 @dataclass
