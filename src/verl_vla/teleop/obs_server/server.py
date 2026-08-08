@@ -117,6 +117,19 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title=f"VERL-VLA Teleop Obs env {store.env_id}")
     app.mount("/static", StaticFiles(directory=_HTML_DIR), name="teleop-static")
+    input_subscribers: set[asyncio.Queue[dict]] = set()
+
+    def input_snapshot() -> dict:
+        if latest_input_fn is not None:
+            return latest_input_fn()
+        return {device_type: device.snapshot() for device_type, device in input_devices.items()}
+
+    def publish_input_snapshot() -> None:
+        snapshot = input_snapshot()
+        for subscriber in input_subscribers:
+            if subscriber.full():
+                subscriber.get_nowait()
+            subscriber.put_nowait(snapshot)
 
     @app.get("/", response_class=HTMLResponse)
     def index():
@@ -138,9 +151,7 @@ def create_app(
 
     @app.get("/api/input/latest")
     def latest_input():
-        if latest_input_fn is not None:
-            return latest_input_fn()
-        return {device_type: device.snapshot() for device_type, device in input_devices.items()}
+        return input_snapshot()
 
     @app.get("/api/input/drain")
     def drain_input():
@@ -211,6 +222,21 @@ def create_app(
     @app.websocket("/ws/input")
     async def input_stream(websocket: WebSocket):
         await websocket.accept()
+        subscriber: asyncio.Queue[dict] = asyncio.Queue(maxsize=1)
+        input_subscribers.add(subscriber)
+        send_lock = asyncio.Lock()
+
+        async def send_input_snapshots() -> None:
+            try:
+                while True:
+                    payload = await subscriber.get()
+                    async with send_lock:
+                        await websocket.send_json(payload)
+            except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                pass
+
+        sender = asyncio.create_task(send_input_snapshots())
+        publish_input_snapshot()
         try:
             while True:
                 message = await websocket.receive_json()
@@ -240,22 +266,24 @@ def create_app(
                 payload = message.get("payload", {})
                 if message_type != "lerobot_poll":
                     input_devices[device_type].handle_event(DeviceEvent.from_payload(payload))
-                if device_type == "lerobot" and message_type in {"lerobot_poll", "lerobot_rx"}:
+                if device_type == "lerobot":
                     bridge_payload = {}
                     if hasattr(input_devices[device_type], "drain_tx_packets"):
                         bridge_payload["lerobot_tx"] = input_devices[device_type].drain_tx_packets()
-                    await websocket.send_json(bridge_payload)
+                    async with send_lock:
+                        await websocket.send_json(bridge_payload)
+                    publish_input_snapshot()
                     continue
-                if latest_input_fn is not None:
-                    payload = latest_input_fn()
-                else:
-                    payload = input_devices[device_type].snapshot()
-                if device_type == "lerobot" and hasattr(input_devices[device_type], "drain_tx_packets"):
-                    payload = dict(payload)
-                    payload["lerobot_tx"] = input_devices[device_type].drain_tx_packets()
-                await websocket.send_json(payload)
+                publish_input_snapshot()
         except WebSocketDisconnect:
             pass
+        finally:
+            input_subscribers.discard(subscriber)
+            sender.cancel()
+            try:
+                await sender
+            except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                pass
 
     return app
 
