@@ -1,0 +1,9 @@
+html.light {
+  --code-block-background: var(--gray-3);
+  --code-block-caption-background: var(--gray-4);
+}
+
+html.dark {
+  --code-block-background: var(--gray-2);
+  --code-block-caption-background: var(--gray-3);
+}

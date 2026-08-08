@@ -23,5 +23,8 @@ root_doc = "index"
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 language = "en"
 
-html_theme = "sphinx_rtd_theme"
+html_theme = "shibuya"
 html_title = "verl-vla"
+html_theme_options = {"accent_color": "blue"}
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
