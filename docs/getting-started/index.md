@@ -3,8 +3,8 @@
 This guide walks through an end-to-end workflow on a LIBERO task. You will
 verify keyboard teleoperation, record and replay demonstrations, train an ACT
 policy with supervised fine-tuning (SFT), evaluate it, and improve it further
-with reinforcement learning. The final step also shows how to collect
-additional trajectories with optional human intervention.
+with reinforcement learning. An optional DAgger workflow demonstrates how to
+collect intervention-enhanced trajectories for a subsequent fine-tuning iteration.
 
 ## Prerequisites
 
@@ -219,9 +219,9 @@ a remote machine, expose or forward port 6006 first.
 
 ## Evaluate the trained policy
 
-LIBERO task ids are zero-based, so `task_ids=[0]` selects task 1. Run 10 trials
-in parallel across 8 environments and two pipeline stages. The command resolves
-the latest exported native ACT checkpoint:
+LIBERO task ids are zero-based, so `task_ids=[0]` selects task 1. Run the full
+50-trial benchmark in parallel across 8 environments and two pipeline stages.
+The command resolves the latest exported native ACT checkpoint:
 
 ```bash
 vvla-eval \
