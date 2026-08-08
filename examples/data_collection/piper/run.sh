@@ -38,6 +38,7 @@ overrides=(
   "cluster.env.env_worker.teleop.keyboard.rot_sensitivity=0.05"
   "cluster.env.env_worker.teleop.xr_controller.pos_sensitivity=1.25"
   "cluster.env.env_worker.teleop.xr_controller.rot_sensitivity=1.25"
+  "cluster.env.env_worker.teleop.server.jpeg_quality=90"
 )
 
 if [[ "$mode" == "record" ]]; then

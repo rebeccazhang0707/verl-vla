@@ -69,8 +69,8 @@ class PiperEnv(BaseEnv):
         self._backend.start()
 
     @override
-    def env_reset(self, *, env_ids, reset_eval: bool = False):
-        del reset_eval
+    def env_reset(self, *, env_ids, reset_eval: bool = False, extra=None):
+        del reset_eval, extra
         self._validate_env_ids(env_ids)
         self._step_id = 0
         self._backend.reset()

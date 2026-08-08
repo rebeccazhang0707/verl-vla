@@ -40,7 +40,22 @@ arms:
 cameras:
 
   # Stable observation and LeRobot feature name.
-  - name: dabai_00md
+  - name: height
+
+    # V4L2 device path.
+    device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16202MR-video-index0
+
+    # Captured image width in pixels.
+    width: 320
+
+    # Captured image height in pixels.
+    height: 240
+
+    # V4L2 input pixel format converted to RGB8 by ROS.
+    pixel_format: YUYV
+
+  # Stable observation and LeRobot feature name.
+  - name: right_wrist
 
     # V4L2 device path.
     device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16200MD-video-index0
@@ -55,7 +70,7 @@ cameras:
     pixel_format: YUYV
 
   # Stable observation and LeRobot feature name.
-  - name: dabai_035j
+  - name: left_wrist
 
     # V4L2 device path.
     device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N162035J-video-index0
@@ -69,23 +84,8 @@ cameras:
     # V4L2 input pixel format converted to RGB8 by ROS.
     pixel_format: YUYV
 
-  # Stable observation and LeRobot feature name.
-  - name: dabai_02mr
-
-    # V4L2 device path.
-    device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._Dabai_DC1_CC1N16202MR-video-index0
-
-    # Captured image width in pixels.
-    width: 320
-
-    # Captured image height in pixels.
-    height: 240
-
-    # V4L2 input pixel format converted to RGB8 by ROS.
-    pixel_format: YUYV
-
 # Task string published in observations and recordings.
-task_description: Teleoperate the Piper arms.
+task_description: Put the white object into the box.
 
 # QuestArm IK position objective weight.
 ik_position_weight: 5.0
