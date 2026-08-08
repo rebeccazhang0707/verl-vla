@@ -8,14 +8,13 @@ cd "$REPO_ROOT"
 vvla-train-sac \
   --config-dir "./examples/rl/sac/act" \
   --config-name act_sac \
-  cluster.actor_rollout_ref.model.path="./outputs/train/act-sft/libero-spatial/checkpoints/global_step_4800/actor/huggingface" \
-  cluster.resource.model.gpus_per_node=2 \
-  cluster.resource.env.device=cuda \
-  cluster.resource.env.gpus_per_node=2 \
+  cluster.actor_rollout_ref.model.path="./outputs/train/act-sft/libero-spatial/checkpoints/global_step_$(cat "./outputs/train/act-sft/libero-spatial/checkpoints/latest_checkpointed_iteration.txt")/actor/huggingface" \
+  cluster.resource.model.gpus_per_node=1 \
+  cluster.resource.env.gpus_per_node=1 \
   cluster.resource.env.workers_per_node=2 \
   cluster.env.env_worker.num_envs=8 \
   cluster.actor_rollout_ref.actor.mini_batch_size=64 \
-  cluster.actor_rollout_ref.actor.micro_batch_size=4 \
+  cluster.actor_rollout_ref.actor.micro_batch_size=8 \
   cluster.actor_rollout_ref.actor.optim.lr=5e-6 \
   'trainer.logger=[console,tensorboard]' \
   trainer.total_training_steps=400 \

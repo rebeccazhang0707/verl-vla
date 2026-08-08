@@ -2,9 +2,9 @@
 
 This guide walks through an end-to-end workflow on a LIBERO task. You will
 verify keyboard teleoperation, record and replay demonstrations, train an ACT
-policy with supervised fine-tuning (SFT), and evaluate the trained policy. The
-final step also shows how to collect additional trajectories with optional
-human intervention.
+policy with supervised fine-tuning (SFT), evaluate it, and improve it further
+with reinforcement learning. The final step also shows how to collect
+additional trajectories with optional human intervention.
 
 ## Prerequisites
 
@@ -241,6 +241,8 @@ Metrics are written to
 `./outputs/eval/act-sft/libero-spatial/task-1-parallel/metrics.json`, and videos
 are written below the adjacent `videos/` directory.
 
+## Collect intervention data with DAgger (Optional)
+
 To collect 10 trajectories while watching and optionally intervening, run the
 single-environment DAgger workflow with recording enabled:
 
@@ -263,16 +265,90 @@ You can then fine-tune the policy again on the intervention-enhanced dataset.
 This closes the data collection and policy improvement loop, completing the
 DAgger post-training iteration.
 
+## Improve the policy with TD3+BC
+
+To make the effect of reinforcement learning directly observable, this guide
+includes a compact RL example that starts from the SFT policy trained above and
+further improves its task success rate. The example uses a TD3+BC-style actor
+update and a fixed batch of newly collected experience:
+
+In our reference experiment on LIBERO Spatial task 0, this workflow increased
+the policy success rate from approximately 40% to approximately 80%.
+
+- It adds action noise while collecting 64 initial trajectories to broaden the
+  policy's exploration space and expose the critic to a wider range of
+  successful and failed behavior. Evaluation remains deterministic and does
+  not use this noise.
+- It combines a Q-maximization objective with a behavior-cloning loss when
+  updating ACT. This improves actions according to the learned value function
+  while keeping the policy close to behavior represented in the replay data.
+- It trains the critic for the first 200 steps, then freezes it while updating
+  the policy. This deliberate choice keeps training stable and the workflow
+  simple for this compact example.
+- It performs no additional rollout collection after the initial batch, so the
+  policy is improved through a reproducible single-batch training run.
+
+The example uses one GPU for ACT training and one GPU for parallel LIBERO
+environments. Start it from the repository root; the command loads the latest
+SFT checkpoint produced above:
+
+```bash
+vvla-train-sac \
+  --config-dir "./examples/rl/sac/act" \
+  --config-name act_sac \
+  cluster.actor_rollout_ref.model.path="./outputs/train/act-sft/libero-spatial/checkpoints/global_step_$(cat "./outputs/train/act-sft/libero-spatial/checkpoints/latest_checkpointed_iteration.txt")/actor/huggingface" \
+  cluster.resource.model.gpus_per_node=1 \
+  cluster.resource.env.gpus_per_node=1 \
+  cluster.resource.env.workers_per_node=2 \
+  cluster.env.env_worker.num_envs=8 \
+  cluster.actor_rollout_ref.actor.mini_batch_size=64 \
+  cluster.actor_rollout_ref.actor.micro_batch_size=8 \
+  cluster.actor_rollout_ref.actor.optim.lr=5e-6 \
+  'trainer.logger=[console,tensorboard]' \
+  trainer.total_training_steps=400 \
+  trainer.eval_episodes=50 \
+  trainer.save_freq=50 \
+  trainer.test_freq=50
+```
+
+Before updating the policy, the workflow runs a 50-episode evaluation to record
+its starting success rate. It then evaluates every 50 training steps without
+collection noise. Checkpoints, TensorBoard logs, evaluation videos, and replay
+data are written under
+`./outputs/rl/sac/act/self-collected-libero-spatial-single-batch/`.
+
+Monitor the success-rate curve in another terminal:
+
+```bash
+tensorboard \
+  --logdir "./outputs/rl/sac/act/self-collected-libero-spatial-single-batch/tensorboard" \
+  --bind_all \
+  --port 6007
+```
+
+Open `http://localhost:6007` and compare `val/trajectory_success_rate` with the
+initial evaluation. Select the checkpoint with the highest validation success
+rate rather than assuming that the final checkpoint is the best one. You have
+now completed the full path from demonstration collection and supervised
+fine-tuning to reinforcement learning post-training.
+
 ## Next steps
 
-This end-to-end loop represents the core verl-vla workflow. Continue with the
-[Framework Overview](../framework-overview/index.md) to learn how the system is
-organized, or follow the [Data Collection](../data-collection/index.md) guides
-to collect demonstrations and intervention trajectories with additional
-environments and input devices. You can then explore more models and training
-algorithms supported by the framework.
+Congratulations—you have completed an end-to-end VLA post-training workflow,
+from collecting demonstrations and supervised fine-tuning to policy evaluation
+and reinforcement learning. From this point on, every model post-training
+workflow follows this same process; only the environment, model, and
+reinforcement learning algorithm change to suit the task.
 
-## Acknowledgements
+- You may work with a different simulator or a physical robot. To set up these
+  environments and collect data with their supported control devices, see
+  [Data Collection](../data-collection/index.md).
+- You may fine-tune a different VLA model. For model-specific datasets,
+  configurations, and complete training recipes, see
+  [Fine-Tuning](../fine-tuning/index.md).
+- You may use additional reinforcement learning algorithms to improve your
+  policy. For the supported algorithms and runnable training examples, see
+  [Reinforcement Learning](../reinforcement-learning/index.md).
 
-The user-facing APIs in this workflow are organized with reference to
-LeRobot's API design, whose clarity and elegance we greatly appreciate.
+For a deeper understanding of how verl-vla connects and composes these stages,
+continue with the [Framework Overview](../framework-overview/index.md).
