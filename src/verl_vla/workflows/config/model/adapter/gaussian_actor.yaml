@@ -1,0 +1,21 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+
+# Standalone single-step Gaussian SAC policy adapter.
+# Dataset root used to initialize native LeRobot normalization processors when
+# the artifact contains config only. Trained LeRobot artifacts load their saved
+# processor JSON files directly.
+processor_dataset_root: null
+
+# Optional twin-Q critic owned by the Gaussian Actor adapter.
+critic:
+
+  # Whether to construct the critic for SAC training.
+  enabled: true
+
+  # Number of independent Q heads.
+  head_num: 2
+
+  # Hidden-layer dimensions for every Q head.
+  hidden_dims: [256, 256]

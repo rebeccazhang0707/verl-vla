@@ -81,6 +81,53 @@ def build_vla_model(model_config, *, torch_dtype: torch.dtype):
             model_path=path,
         )
 
+    if architecture == "gaussian_actor":
+        from lerobot.configs.policies import PreTrainedConfig
+        from lerobot.policies.pretrained import SAFETENSORS_SINGLE_FILE
+
+        from .gaussian_actor import (
+            GaussianActorConfig,
+            GaussianActorPolicy,
+            GaussianActorTrainableModel,
+            load_gaussian_actor_processors,
+        )
+
+        if overrides:
+            raise ValueError("Gaussian actor architecture is checkpoint-owned; model.override_config must be empty")
+        model_path = Path(path)
+        weights_path = model_path / SAFETENSORS_SINGLE_FILE
+        initialization_path = model_path / "initialization.json"
+        if weights_path.is_file():
+            policy = GaussianActorPolicy.from_pretrained(path, strict=True)
+        else:
+            if not initialization_path.is_file():
+                raise FileNotFoundError(
+                    f"Native Gaussian actor weights are missing at {weights_path}. Config-only initialization "
+                    f"requires an explicit {initialization_path.name} sidecar."
+                )
+            with initialization_path.open(encoding="utf-8") as file:
+                initialization = json.load(file)
+            if initialization != {"type": "gaussian_actor_config"}:
+                raise ValueError(f"Unsupported Gaussian actor initialization metadata in {initialization_path}")
+            config = PreTrainedConfig.from_pretrained(path)
+            if not isinstance(config, GaussianActorConfig):
+                raise TypeError(f"Expected GaussianActorConfig in {model_path}, got {type(config).__name__}")
+            policy = GaussianActorPolicy(config)
+        adapter_config = dict(model_config.adapter)
+        processor_dataset_root = adapter_config.pop("processor_dataset_root", None)
+        preprocessor, postprocessor = load_gaussian_actor_processors(
+            policy.config,
+            model_path,
+            dataset_root=processor_dataset_root,
+        )
+        policy.to(dtype=torch_dtype)
+        return GaussianActorTrainableModel(
+            policy,
+            preprocessor=preprocessor,
+            postprocessor=postprocessor,
+            adapter_config=adapter_config,
+        )
+
     if architecture == "gr00t_n1d6":
         from gr00t.configs.model.gr00t_n1d6 import Gr00tN1d6Config
 

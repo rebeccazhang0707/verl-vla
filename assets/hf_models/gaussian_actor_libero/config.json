@@ -1,0 +1,48 @@
+{
+  "type": "gaussian_actor",
+  "n_obs_steps": 1,
+  "input_features": {
+    "observation.images.image": {"type": "VISUAL", "shape": [3, 256, 256]},
+    "observation.images.wrist_image": {"type": "VISUAL", "shape": [3, 256, 256]},
+    "observation.state": {"type": "STATE", "shape": [8]}
+  },
+  "output_features": {
+    "action": {"type": "ACTION", "shape": [7]}
+  },
+  "device": "cuda",
+  "use_amp": false,
+  "use_peft": false,
+  "push_to_hub": true,
+  "repo_id": null,
+  "private": null,
+  "tags": null,
+  "license": null,
+  "pretrained_path": null,
+  "normalization_mapping": {
+    "VISUAL": "MEAN_STD",
+    "STATE": "MIN_MAX",
+    "ENV": "MIN_MAX",
+    "ACTION": "MIN_MAX"
+  },
+  "storage_device": "cpu",
+  "vision_encoder_name": null,
+  "freeze_vision_encoder": false,
+  "image_encoder_hidden_dim": 32,
+  "shared_encoder": true,
+  "num_discrete_actions": null,
+  "image_embedding_pooling_dim": 8,
+  "state_encoder_hidden_dim": 256,
+  "latent_dim": 256,
+  "actor_network_kwargs": {"hidden_dims": [256, 256], "activate_final": true},
+  "policy_kwargs": {
+    "use_tanh_squash": true,
+    "std_min": 1e-5,
+    "std_max": 10.0,
+    "init_final": 0.05
+  },
+  "discrete_critic_network_kwargs": {
+    "hidden_dims": [256, 256],
+    "activate_final": true,
+    "final_activation": null
+  }
+}

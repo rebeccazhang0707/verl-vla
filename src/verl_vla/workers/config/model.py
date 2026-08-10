@@ -97,6 +97,8 @@ class VLAModelConfig(HFModelConfig):
             architecture = "openvla_oft"
         elif policy_type == "act":
             architecture = "act"
+        elif policy_type == "gaussian_actor":
+            architecture = "gaussian_actor"
         elif model_type == "recap_value_critic":
             architecture = "recap_value_critic"
         elif "gr00tn1d6" in identity or "gr00t_n1d6" in identity:

@@ -1,0 +1,40 @@
+# Gaussian Actor SFT on the first canonical LIBERO Spatial task.
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/sft@_global_
+  - override /model/override@cluster.actor_rollout_ref.model.override_config: gaussian_actor
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: gaussian_actor
+  - _self_
+
+cluster:
+  checkpoint:
+    default_local_dir: ./outputs/train/gaussian-actor-sft/libero-spatial-task0-step-sweep/checkpoints
+
+  actor_rollout_ref:
+    model:
+      load_tokenizer: false
+      adapter:
+        processor_dataset_root: ${data.root}
+
+    actor:
+      fsdp_config:
+        reshard_after_forward: false
+        use_torch_compile: false
+
+data:
+  # The native Gaussian Actor predicts one action for each observation.
+  action_delta_steps: 1
+
+trainer:
+  project_name: gaussian-actor-sft
+  experiment_name: libero-spatial-task0
+  save_freq: 100
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      env_vars:
+        TENSORBOARD_DIR: ./outputs/train/gaussian-actor-sft/libero-spatial-task0-step-sweep/tensorboard
