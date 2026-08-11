@@ -66,18 +66,44 @@ def update_progress_trajectory_counts(
     progress_counts: dict[str, int],
     progress_lane_state: dict[int, dict[str, torch.Tensor]],
 ) -> None:
-    del stage_id, progress_lane_state
+    """Count each trajectory on a per-lane ``done`` rising edge.
 
+    Environment lanes may keep ``done`` high after termination, so consecutive
+    true values represent one completed trajectory. A false value clears that
+    lane for the next rising edge. Success is carried across chunks until the
+    corresponding trajectory completes.
+    """
     batch = env_result.batch
     episode_done = batch["next.terminated"].bool() | batch["next.truncated"].bool()
     success = batch["next.success"].bool()
-    first_done_idx = episode_done.float().argmax(dim=1)
-    chunk_done = episode_done.any(dim=1)
-    step_idx = torch.arange(episode_done.shape[1], device=episode_done.device).unsqueeze(0)
-    success_before_done = (success & (step_idx <= first_done_idx.unsqueeze(1))).any(dim=1)
+    batch_size = episode_done.shape[0]
+    state = progress_lane_state.setdefault(
+        stage_id,
+        {
+            "done": torch.zeros(batch_size, dtype=torch.bool, device=episode_done.device),
+            "success": torch.zeros(batch_size, dtype=torch.bool, device=episode_done.device),
+        },
+    )
+    previous_done = state["done"]
+    carried_success = state["success"]
 
-    progress_counts["done_eps"] += int(chunk_done.sum().item())
-    progress_counts["succ_eps"] += int((chunk_done & success_before_done).sum().item())
+    for step_idx in range(episode_done.shape[1]):
+        step_done = episode_done[:, step_idx]
+        step_success = success[:, step_idx]
+
+        active = ~previous_done
+        carried_success[active] |= step_success[active]
+
+        newly_done = active & step_done
+        progress_counts["done_eps"] += int(newly_done.sum().item())
+        progress_counts["succ_eps"] += int((newly_done & carried_success).sum().item())
+
+        previous_done[newly_done] = True
+        carried_success[newly_done] = False
+
+        resumed = previous_done & ~step_done
+        previous_done[resumed] = False
+        carried_success[resumed] = step_success[resumed]
 
 
 def dataloader_batch_to_dataproto(batch: dict) -> DataProto:

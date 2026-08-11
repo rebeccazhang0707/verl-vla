@@ -35,8 +35,8 @@ def test_progress_counts_at_most_one_trajectory_per_chunk_lane():
 
     update_progress_trajectory_counts(
         _make_env_result(
-            [[False, False, True, True, False, True, False]],
-            success=[[False, False, True, True, False, True, False]],
+            [[False, False, True, True, True]],
+            success=[[False, False, True, True, True]],
         ),
         stage_id=0,
         progress_counts=progress_counts,
@@ -60,3 +60,38 @@ def test_progress_ignores_success_after_first_done_in_chunk():
     )
 
     assert progress_counts == {"done_eps": 1, "succ_eps": 0}
+
+
+def test_progress_counts_only_done_rising_edges_across_chunks():
+    progress_counts = {"done_eps": 0, "succ_eps": 0}
+    progress_lane_state = {}
+
+    for done in (False, True, True, False, True):
+        update_progress_trajectory_counts(
+            _make_env_result([[done]], success=[[done]]),
+            stage_id=0,
+            progress_counts=progress_counts,
+            progress_lane_state=progress_lane_state,
+        )
+
+    assert progress_counts == {"done_eps": 2, "succ_eps": 2}
+
+
+def test_progress_counts_new_episode_after_false_gap():
+    progress_counts = {"done_eps": 0, "succ_eps": 0}
+    progress_lane_state = {}
+
+    update_progress_trajectory_counts(
+        _make_env_result([[False, True]], success=[[False, True]]),
+        stage_id=0,
+        progress_counts=progress_counts,
+        progress_lane_state=progress_lane_state,
+    )
+    update_progress_trajectory_counts(
+        _make_env_result([[False, False, True]]),
+        stage_id=0,
+        progress_counts=progress_counts,
+        progress_lane_state=progress_lane_state,
+    )
+
+    assert progress_counts == {"done_eps": 2, "succ_eps": 1}
