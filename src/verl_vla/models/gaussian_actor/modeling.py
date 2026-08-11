@@ -86,7 +86,7 @@ class GaussianActorPolicy(
         if self.shared_encoder and self.actor.encoder.has_images:
             observations_features = self.actor.encoder.get_cached_image_features(batch)
 
-        actions, _, _ = self.actor(batch, observations_features)
+        actions, _, _, _ = self.actor(batch, observations_features)
 
         if self.config.num_discrete_actions is not None:
             if self.discrete_critic is not None:
@@ -111,7 +111,7 @@ class GaussianActorPolicy(
         """
         observations = batch.get("state", batch)
         observation_features = batch.get("observation_feature") if isinstance(batch, dict) else None
-        actions, log_probs, means = self.actor(observations, observation_features)
+        actions, log_probs, means, _ = self.actor(observations, observation_features)
         return {"action": actions, "log_prob": log_probs, "action_mean": means}
 
     def _init_encoders(self):
@@ -444,7 +444,8 @@ class Policy(nn.Module):
         self,
         observations: torch.Tensor,
         observation_features: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        std_scale: float = 1.0,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # We detach the encoder if it is shared to avoid backprop through it
         # This is important to avoid the encoder to be updated through the policy
         obs_enc = self.encoder(observations, cache=observation_features, detach=self.encoder_is_shared)
@@ -460,6 +461,7 @@ class Policy(nn.Module):
             std = torch.clamp(std, self.std_min, self.std_max)  # Match JAX default clip
         else:
             std = self.fixed_std.expand_as(means)
+        std = std * std_scale
 
         # Build transformed distribution
         dist = TanhMultivariateNormalDiag(loc=means, scale_diag=std)
@@ -470,7 +472,7 @@ class Policy(nn.Module):
         # Compute log_probs
         log_probs = dist.log_prob(actions)
 
-        return actions, log_probs, means
+        return actions, log_probs, means, std
 
     def get_features(self, observations: torch.Tensor) -> torch.Tensor:
         """Get encoded features from observations"""
@@ -629,7 +631,7 @@ class RescaleFromTanh(Transform):
 
 class TanhMultivariateNormalDiag(TransformedDistribution):
     def __init__(self, loc, scale_diag, low=None, high=None):
-        base_dist = MultivariateNormal(loc, torch.diag_embed(scale_diag))
+        base_dist = MultivariateNormal(loc, scale_tril=torch.diag_embed(scale_diag))
 
         transforms = [TanhTransform(cache_size=1)]
 

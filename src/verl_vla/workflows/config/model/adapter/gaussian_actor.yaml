@@ -8,6 +8,9 @@
 # processor JSON files directly.
 processor_dataset_root: null
 
+# Scale the native Gaussian standard deviation during SAC sampling.
+sac_std_scale: 1.0
+
 # Optional twin-Q critic owned by the Gaussian Actor adapter.
 critic:
 

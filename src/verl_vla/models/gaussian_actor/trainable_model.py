@@ -69,6 +69,9 @@ class GaussianActorTrainableModel(TrainableVLAModelBase, SupportSACTraining, Sup
         self.postprocessor = postprocessor
         config = dict(adapter_config or {})
         config.pop("processor_dataset_root", None)
+        self.sac_std_scale = float(config.pop("sac_std_scale", 1.0))
+        if self.sac_std_scale <= 0.0:
+            raise ValueError(f"sac_std_scale must be positive, got {self.sac_std_scale}")
         critic_config = dict(config.pop("critic", {}))
         if config:
             raise ValueError(f"Unsupported Gaussian actor adapter fields: {sorted(config)}")
@@ -78,8 +81,12 @@ class GaussianActorTrainableModel(TrainableVLAModelBase, SupportSACTraining, Sup
         if critic_config:
             raise ValueError(f"Unsupported Gaussian critic fields: {sorted(critic_config)}")
         action_dim = int(policy.config.output_features[ACTION].shape[0])
+        # The upstream policy may share its actor and critic encoders. SAC critic
+        # updates must not mutate the pretrained actor's observation features, so
+        # the verl-vla critic owns an independent encoder alongside its Q heads.
+        self.critic_encoder = deepcopy(policy.encoder_critic) if critic_enabled else None
         self.critic = (
-            GaussianCriticEnsemble(policy.encoder_critic.output_dim + action_dim, hidden_dims, head_num)
+            GaussianCriticEnsemble(self.critic_encoder.output_dim + action_dim, hidden_dims, head_num)
             if critic_enabled
             else None
         )
@@ -209,7 +216,7 @@ class GaussianActorTrainableModel(TrainableVLAModelBase, SupportSACTraining, Sup
         self, obs: DataProto, tokenizer: Optional[nn.Module] = None, eval: bool = False
     ) -> ModelOutput:
         observations = self.sac_forward_state_features(obs, tokenizer)
-        normalized_action, log_prob, mean = self.policy.actor(observations)
+        normalized_action, log_prob, mean, _ = self.policy.actor(observations, std_scale=self.sac_std_scale)
         if eval:
             normalized_action = torch.tanh(mean)
             log_prob = None
@@ -230,10 +237,10 @@ class GaussianActorTrainableModel(TrainableVLAModelBase, SupportSACTraining, Sup
         ).float()
 
     def sac_get_critic_parameters(self) -> list[nn.Parameter]:
-        if self.critic is None:
+        if self.critic is None or self.critic_encoder is None:
             raise RuntimeError("GaussianActor critic is disabled")
         parameters = list(self.critic.heads.parameters())
-        parameters.extend(parameter for parameter in self.policy.encoder_critic.parameters() if parameter.requires_grad)
+        parameters.extend(parameter for parameter in self.critic_encoder.parameters() if parameter.requires_grad)
         return parameters
 
     def sac_get_named_actor_parameters(self) -> list[tuple[str, nn.Parameter]]:
@@ -255,13 +262,13 @@ class GaussianActorTrainableModel(TrainableVLAModelBase, SupportSACTraining, Sup
         requires_grad: bool = False,
     ) -> Tensor:
         del task_ids
-        if self.critic is None:
+        if self.critic is None or self.critic_encoder is None:
             raise RuntimeError("GaussianActor critic is disabled")
         if requires_grad:
-            encoded = self.policy.encoder_critic(state_features)
+            encoded = self.critic_encoder(state_features)
         else:
             with torch.no_grad():
-                encoded = self.policy.encoder_critic(state_features)
+                encoded = self.critic_encoder(state_features)
         actions = self._normalize_action(a["action"]).reshape(a["action"].shape[0], -1)
         critic_inputs = torch.cat([encoded, actions], dim=-1)
         parameters = tuple(self.critic.heads.parameters())
@@ -282,8 +289,9 @@ class GaussianActorTrainableModel(TrainableVLAModelBase, SupportSACTraining, Sup
         noise_scale: Optional[float] = None,
     ) -> tuple[Tensor, Tensor, dict[str, float]]:
         del task_ids, is_first_micro_batch, noise_scale
-        normalized_action, log_prob, _ = self.policy.actor(state_features)
-        return self._environment_action(normalized_action).unsqueeze(1), log_prob, {}
+        normalized_action, log_prob, _, std = self.policy.actor(state_features, std_scale=self.sac_std_scale)
+        metrics = {"pre_tanh_std_mean": std.detach().mean().item()}
+        return self._environment_action(normalized_action).unsqueeze(1), log_prob, metrics
 
     def sac_forward_state_features(self, obs: DataProto, tokenizer: nn.Module | None) -> dict[str, Tensor]:
         del tokenizer

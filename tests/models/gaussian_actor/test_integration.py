@@ -14,6 +14,7 @@ from verl import DataProto
 from verl_vla.models.builder import build_vla_model
 from verl_vla.models.gaussian_actor import GaussianActorConfig, GaussianActorPolicy, GaussianActorTrainableModel
 from verl_vla.models.gaussian_actor.configuration import ActorNetworkConfig, PolicyConfig
+from verl_vla.models.gaussian_actor.modeling import TanhMultivariateNormalDiag
 
 
 def _config() -> GaussianActorConfig:
@@ -94,8 +95,22 @@ def test_gaussian_actor_native_artifact_round_trip(tmp_path) -> None:
     assert isinstance(built.policy, GaussianActorPolicy)
 
 
+def test_tanh_gaussian_uses_scale_as_standard_deviation() -> None:
+    loc = torch.zeros(2, 3)
+    scale = torch.tensor([[0.1, 0.2, 0.4], [0.3, 0.5, 0.7]], requires_grad=True)
+
+    distribution = TanhMultivariateNormalDiag(loc=loc, scale_diag=scale)
+    distribution.rsample().sum().backward()
+
+    torch.testing.assert_close(distribution.base_dist.scale_tril, torch.diag_embed(scale.detach()))
+    torch.testing.assert_close(distribution.base_dist.variance, scale.detach().square())
+    assert scale.grad is not None
+
+
 def test_gaussian_actor_sac_contract() -> None:
     model = _model()
+    actor_encoder_parameter_ids = {id(parameter) for parameter in model.policy.actor.encoder.parameters()}
+    critic_parameter_ids = {id(parameter) for parameter in model.sac_get_critic_parameters()}
     features = model.sac_forward_state_features(_observations(), None)
     actions, log_prob, metrics = model.sac_forward_actor(features)
     q_values = model.sac_forward_critic({"action": actions}, features, method="cat", requires_grad=True)
@@ -107,9 +122,12 @@ def test_gaussian_actor_sac_contract() -> None:
     }
     assert actions.shape == (2, 1, 7)
     assert log_prob.shape == (2,)
-    assert metrics == {}
+    assert metrics.keys() == {"pre_tanh_std_mean"}
+    assert metrics["pre_tanh_std_mean"] > 0
     assert q_values.shape == (2, 2)
     assert torch.all(actions.abs() < 1)
+    assert actor_encoder_parameter_ids.isdisjoint(critic_parameter_ids)
+    assert model.critic_encoder is not model.policy.actor.encoder
 
     _, actor_parameter = next(iter(model.sac_get_named_actor_parameters()))
     actor_before = actor_parameter.detach().clone()
@@ -123,6 +141,23 @@ def test_gaussian_actor_sac_contract() -> None:
         source.add_(1.0)
     model.sac_update_target_network(0.5)
     torch.testing.assert_close(next(model.critic.target_heads.parameters()), target_before + 0.5)
+
+
+def test_gaussian_actor_scales_sac_exploration_around_mean_policy() -> None:
+    model = _model()
+    model.eval()
+    observations = _observations()
+    mean_action = model.sac_sample_actions(observations, eval=True).action
+
+    torch.manual_seed(7)
+    unit_scale_action = model.sac_sample_actions(observations).action
+    model.sac_std_scale = 0.1
+    torch.manual_seed(7)
+    controlled_action = model.sac_sample_actions(observations).action
+
+    assert torch.linalg.vector_norm(controlled_action - mean_action) < torch.linalg.vector_norm(
+        unit_scale_action - mean_action
+    )
 
 
 def test_gaussian_actor_sft_uses_one_step_action_mse_and_freezes_std() -> None:
