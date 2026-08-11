@@ -1,0 +1,100 @@
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/sac@_global_
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: pi0
+  - _self_
+
+output_dir: ???
+
+cluster:
+  env:
+    env_loop:
+      pipeline_stage_num: 2
+      max_interactions: 20
+    env_worker:
+      auto_reset: true
+      modes: [train, eval]
+      simulator:
+        libero:
+          task_suite_name: libero_spatial
+          task_ids: [2]
+          max_episode_steps: 200
+      recorder:
+        enable: true
+        recorders: [video]
+        video:
+          root: ${output_dir}/videos
+
+  actor_rollout_ref:
+    model:
+      adapter:
+        embodiment: libero
+        action_chunk_size: 10
+        critic:
+          type: mean_pool
+          hidden_dims: [512, 256, 128]
+        flow_sde_enable: true
+        flow_sde_noise_level: 0.02
+        flow_sde_noise_schedule_enabled: false
+        flow_sde_rollout_noise_scale: 1.0
+        flow_sde_train_noise_scale: 1.0
+
+    actor:
+      actor_update_interval: 2
+      optim:
+        lr: 5e-6
+        warmup_style: constant
+      sac:
+        auto_entropy: false
+        initial_alpha: 0.0
+      td3:
+        enabled: true
+        bc_alpha: 0.5
+      cql:
+        enabled: true
+        alpha: 0.5
+        temperature: 1.0
+        noise_scale: 1.0
+      critic:
+        lr: 1e-4
+        tau: 1.0
+        force_target_tau_one_in_warmup: true
+        skip_update_when_actor_update: true
+        warmup_steps: 400
+      replay:
+        critic_positive_sample_ratio: 0.5
+        actor_positive_sample_ratio: 0.9
+        save_interval: 50
+        save_dir: ${output_dir}/replay
+
+    rollout:
+      mode: async_envloop
+      prompt_length: 512
+      free_cache_engine: false
+      output_critic_value: true
+
+  checkpoint:
+    resume_mode: disable
+    default_local_dir: ${output_dir}/checkpoints
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      env_vars:
+        TENSORBOARD_DIR: ???
+
+trainer:
+  project_name: verl-vla
+  experiment_name: pi05-libero-spatial-task2-online-from-sft-step100-td3-bc
+  logger: [console, tensorboard]
+  total_training_steps: 1000
+  rollout_interval: 50
+  rollout_times: 1
+  warm_rollout_steps: 3
+  save_freq: 50
+  test_freq: 50
+  eval_episodes: 50
+  val_before_train: true
