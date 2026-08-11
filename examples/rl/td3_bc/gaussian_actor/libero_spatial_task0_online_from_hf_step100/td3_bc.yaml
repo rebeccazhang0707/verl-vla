@@ -1,0 +1,110 @@
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/sac@_global_
+  - override /model/override@cluster.actor_rollout_ref.model.override_config: gaussian_actor
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: gaussian_actor
+  - _self_
+
+output_dir: ???
+
+cluster:
+  env:
+    env_loop:
+      pipeline_stage_num: 2
+      max_interactions: 256
+    env_worker:
+      auto_reset: false
+      modes: [train, eval]
+      simulator:
+        libero:
+          task_suite_name: libero_spatial
+          task_ids: [0]
+          max_episode_steps: 256
+      recorder:
+        enable: true
+        recorders: [video]
+        video:
+          root: ${output_dir}/videos
+
+  actor_rollout_ref:
+    model:
+      load_tokenizer: false
+      adapter:
+        sac_std_scale: 0.1
+        critic:
+          enabled: true
+          hidden_dims: [512, 256, 128]
+
+    actor:
+      mini_batch_size: 128
+      micro_batch_size: 128
+      fsdp_config:
+        reshard_after_forward: false
+        use_torch_compile: false
+      actor_update_interval: 2
+      optim:
+        lr: 5e-6
+        clip_grad: 1.0
+        warmup_style: constant
+      sac:
+        auto_entropy: true
+        initial_alpha: 0.01
+        target_entropy: -3.5
+      td3:
+        enabled: true
+        bc_alpha: 0.5
+      cql:
+        enabled: true
+        alpha: 0.5
+        temperature: 1.0
+        noise_scale: 1.0
+      critic:
+        gamma: 0.99
+        lr: 1e-4
+        grad_clip: null
+        tau: 1.0
+        force_target_tau_one_in_warmup: true
+        skip_update_when_actor_update: true
+        resample_target_action: true
+        warmup_steps: 400
+        only_steps_after_rollout: 0
+      replay:
+        critic_positive_sample_ratio: 0.5
+        actor_positive_sample_ratio: 0.9
+        online_sample_batch_size: 128
+        online_single_size: 1000
+        offline_sample_batch_size: 0
+        save_interval: 50
+        save_dir: ${output_dir}/replay
+
+    rollout:
+      mode: async_envloop
+      prompt_length: 512
+      free_cache_engine: false
+      output_critic_value: true
+
+  checkpoint:
+    resume_mode: disable
+    default_local_dir: ${output_dir}/checkpoints
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      env_vars:
+        TENSORBOARD_DIR: ???
+
+trainer:
+  project_name: verl-vla
+  experiment_name: gaussian-actor-libero-spatial-task0-online-from-hf-step100-td3-bc
+  logger: [console, tensorboard]
+  total_training_steps: 1000
+  rollout_interval: 50
+  rollout_times: 2
+  warm_rollout_steps: 3
+  save_freq: 50
+  test_freq: 50
+  eval_episodes: 50
+  val_before_train: false

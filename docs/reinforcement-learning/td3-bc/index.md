@@ -1,10 +1,12 @@
-# TD3+BC
+# TD3+BC / SAC / CQL
 
-TD3+BC combines value-guided deterministic policy updates with a behavior
-cloning objective that keeps the actor close to actions represented in replay.
+These recipes combine value-guided policy updates with behavior cloning and CQL
+regularization. Gaussian actor recipes can additionally use SAC entropy
+regularization.
 
 ```{toctree}
 :maxdepth: 1
 
 pi05/index
+gaussian-actor/index
 ```
