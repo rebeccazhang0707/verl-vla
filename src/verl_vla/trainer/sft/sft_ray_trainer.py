@@ -31,7 +31,6 @@ from verl_vla.train_cluster import TrainCluster
 from verl_vla.utils.data import dataloader_batch_to_dataproto
 from verl_vla.utils.dataloader import LeRobotDataLoaderConfig, build_lerobot_sft_dataloader
 from verl_vla.utils.dataloader.state import load_dataloader_state
-from verl_vla.utils.early_stopping import TrendEarlyStopper
 
 from .config import SFTTrainerConfig
 
@@ -94,14 +93,12 @@ class RobRaySFTTrainer(RayPPOTrainer):
         self.total_training_steps = total_epochs * steps_per_epoch
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
         self.max_steps_duration = 0.0
-        early_stopper = self._build_early_stopper()
 
         train_iter = iter(self.sft_dataloader)
         actor_output_future = None
         actor_output_epoch = self.epoch
         profile_steps = set(self.profiler_config.steps or [])
         profile_continuous_steps = bool(self.profiler_config.profile_continuous_steps)
-        profiling_active = False
         while self.global_steps < self.total_training_steps:
             timing_raw = {}
             current_step = self.global_steps + 1
@@ -113,7 +110,6 @@ class RobRaySFTTrainer(RayPPOTrainer):
                     if current_step_profile:
                         with marked_timer("start_profile", timing_raw):
                             self.cluster.start_profiling(step=current_step)
-                        profiling_active = True
                     actor_output_future, train_iter, actor_output_epoch = self._submit_sft_update(
                         train_iter,
                         timing_raw,
@@ -153,7 +149,6 @@ class RobRaySFTTrainer(RayPPOTrainer):
                 if stop_profile:
                     with marked_timer("stop_profile", timing_raw):
                         self.cluster.stop_profiling()
-                    profiling_active = False
 
                 if should_save:
                     with marked_timer("save_checkpoint", timing_raw, color="green"):
@@ -168,13 +163,6 @@ class RobRaySFTTrainer(RayPPOTrainer):
             }
             metrics.update(actor_output_metrics)
 
-            early_stop = self._update_early_stopper(early_stopper, metrics)
-            if early_stop:
-                metrics.update(early_stop)
-                if not should_save:
-                    with marked_timer("save_checkpoint", timing_raw, color="green"):
-                        self._save_checkpoint()
-
             metrics.update({f"timing_s/{name}": value for name, value in timing_raw.items()})
 
             progress_bar.update(1)
@@ -182,54 +170,10 @@ class RobRaySFTTrainer(RayPPOTrainer):
                 "sft_loss": f"{metrics.get('sft/loss', 0.0):.4f}",
                 "grad_pre": f"{metrics.get('sft/grad_norm', 0.0):.4f}",
             }
-            if early_stopper is not None:
-                threshold_progress = metrics.get("sft/early_stop/threshold_progress", 0.0)
-                postfix["early_stop"] = f"{threshold_progress * 100.0:.1f}%"
             progress_bar.set_postfix(**postfix)
             tracking_logger.log(data=metrics, step=self.global_steps)
 
-            if early_stop:
-                if profiling_active:
-                    self.cluster.stop_profiling()
-                progress_bar.set_postfix(
-                    sft_loss=f"{metrics.get('sft/loss', 0.0):.4f}",
-                    early_stop="true",
-                )
-                progress_bar.close()
-                return
-
         progress_bar.close()
-
-    def _build_early_stopper(self) -> TrendEarlyStopper | None:
-        early_stopping = self.trainer_config.early_stopping
-        if not early_stopping.enable:
-            return None
-        return TrendEarlyStopper(early_stopping)
-
-    def _update_early_stopper(
-        self,
-        early_stopper: TrendEarlyStopper | None,
-        metrics: dict[str, float],
-    ) -> dict[str, float] | None:
-        if early_stopper is None:
-            return None
-
-        early_stopping = self.trainer_config.early_stopping
-        metric_name = early_stopping.metric
-        metric_value = metrics.get(metric_name)
-        if metric_value is None:
-            return None
-
-        early_stop_metrics = early_stopper.update(float(metric_value))
-        metrics.update({f"sft/early_stop/{key}": value for key, value in early_stop_metrics.items()})
-
-        if not early_stopper.should_stop:
-            return None
-
-        print(f"Early stopping triggered at step {self.global_steps}.")
-        return {
-            "sft/early_stop/triggered": 1.0,
-        }
 
     def _get_step_control_flags(self) -> tuple[bool, bool]:
         current_step = self.global_steps + 1

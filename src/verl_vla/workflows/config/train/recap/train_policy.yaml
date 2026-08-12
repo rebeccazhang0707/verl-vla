@@ -101,18 +101,3 @@ trainer:
 
   # Whether checkpoint resume restores dataloader progress.
   resume_dataloader_state: false
-
-  # Early-stopping criteria.
-  early_stopping:
-
-    # Whether this component is enabled.
-    enable: true
-
-    # Number of recent steps used by early stopping.
-    window_size: 500
-
-    # Number of steps before early-stopping evaluation begins.
-    warmup_steps: 800
-
-    # Minimum relative improvement required to reset early stopping.
-    min_improvement_ratio: 0.0005

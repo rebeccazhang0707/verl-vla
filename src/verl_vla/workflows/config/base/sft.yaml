@@ -18,4 +18,5 @@ defaults:
   - /cluster@cluster: actor_cluster
   - /data@data: lerobot_dataloader
   - /trainer@trainer: sft_trainer
+  - /trainer/global_profiler@global_profiler: default
   - _self_

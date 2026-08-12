@@ -16,8 +16,6 @@ from dataclasses import dataclass, field
 
 from verl.base_config import BaseConfig
 
-from verl_vla.utils.early_stopping import TrendEarlyStoppingConfig
-
 __all__ = ["SFTTrainerConfig"]
 
 
@@ -35,7 +33,6 @@ class SFTTrainerConfig(BaseConfig):
     save_last: bool = True
     esi_redundant_time: int = 0
     resume_dataloader_state: bool = True
-    early_stopping: TrendEarlyStoppingConfig = field(default_factory=TrendEarlyStoppingConfig)
 
     def __post_init__(self):
         if self.total_epochs <= 0:
