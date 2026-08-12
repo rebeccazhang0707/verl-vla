@@ -101,6 +101,8 @@ class VLAModelConfig(HFModelConfig):
             architecture = "gaussian_actor"
         elif model_type == "recap_value_critic":
             architecture = "recap_value_critic"
+        elif model_type == "recap_resnet18_value_critic":
+            architecture = "recap_resnet18_value_critic"
         elif "gr00tn1d6" in identity or "gr00t_n1d6" in identity:
             architecture = "gr00t_n1d6"
         else:

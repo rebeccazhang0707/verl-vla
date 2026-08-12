@@ -20,8 +20,8 @@ defaults:
   # Base actor-only SFT trainer config.
   - /base/sft@_here_
 
-  # Value-model-specific model overrides.
-  - override /model/override@cluster.actor_rollout_ref.model.override_config: recap_value_model
+  # ResNet-18 value-model-specific overrides.
+  - override /model/override@cluster.actor_rollout_ref.model.override_config: recap_resnet18_value_model
 
   # Apply this stage config last.
   - _self_
@@ -56,10 +56,10 @@ cluster:
     model:
 
       # Path to the model or artifact used by this component.
-      path: /file_system/liujincheng/Projects/verl-vla/assets/hf_models/recap_value_critic
+      path: assets/hf_models/recap_resnet18_value_critic
 
-      # Path to the tokenizer loaded with the policy.
-      tokenizer_path: google/gemma-3-270m
+      # The image-and-state value critic does not consume language tokens.
+      load_tokenizer: false
 
       # Whether Hugging Face may execute repository-provided model code.
       trust_remote_code: true
@@ -88,8 +88,8 @@ cluster:
         # FSDP module wrapping policy.
         wrap_policy:
 
-          # Transformer layer classes wrapped as individual FSDP units.
-          transformer_layer_cls_to_wrap: ["ReCapValueDualStreamLayer"]
+          # Fusion layers wrapped as individual FSDP units.
+          transformer_layer_cls_to_wrap: ["ReCapResNet18ValueFusion"]
 
 
 # Value-model trainer settings.
@@ -101,17 +101,8 @@ trainer:
   # Tracking name for this experiment.
   experiment_name: value_model
 
+  # Number of full return-dataset passes per training stage.
+  total_epochs: 20
+
   # Whether checkpoint resume restores dataloader progress.
   resume_dataloader_state: false
-
-  # Early-stopping criteria.
-  early_stopping:
-
-    # Whether this component is enabled.
-    enable: true
-
-    # Number of recent steps used by early stopping.
-    window_size: 500
-
-    # Number of steps before early-stopping evaluation begins.
-    warmup_steps: 800

@@ -158,6 +158,16 @@ def build_vla_model(model_config, *, torch_dtype: torch.dtype):
         _apply_overrides(config, overrides)
         return ReCapValueCriticTrainableModel.from_pretrained(path, config=config, torch_dtype=torch_dtype)
 
+    if architecture == "recap_resnet18_value_critic":
+        from .recap_resnet18_value_critic import (
+            ReCapResNet18ValueCriticConfig,
+            ReCapResNet18ValueCriticTrainableModel,
+        )
+
+        config = ReCapResNet18ValueCriticConfig.from_pretrained(path)
+        _apply_overrides(config, overrides)
+        return ReCapResNet18ValueCriticTrainableModel.from_pretrained(path, config=config, torch_dtype=torch_dtype)
+
     raise ValueError(f"Unsupported VLA architecture: {architecture!r}")
 
 

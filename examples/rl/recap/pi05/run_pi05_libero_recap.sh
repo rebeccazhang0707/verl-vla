@@ -93,7 +93,6 @@ overrides=(
   "recap.train_value_model.data.num_workers=8"
   "recap.train_value_model.data.prefetch_factor=8"
   "recap.train_value_model.data.batch_size=256"
-  "recap.train_value_model.cluster.actor_rollout_ref.model.path=$PROJECT_ROOT/assets/hf_models/recap_value_critic"
   "recap.train_value_model.cluster.checkpoint.resume_mode=auto"
   "recap.train_value_model.cluster.checkpoint.default_local_dir=$RECAP_VALUE_MODEL_CHECKPOINT_DIR"
   "recap.train_value_model.cluster.checkpoint.max_actor_ckpt_to_keep=3"

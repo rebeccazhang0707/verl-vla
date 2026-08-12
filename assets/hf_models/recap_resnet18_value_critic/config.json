@@ -1,0 +1,22 @@
+{
+  "license": "apache-2.0",
+  "model_type": "recap_resnet18_value_critic",
+  "architectures": [
+    "ReCapResNet18ValueCriticTrainableModel"
+  ],
+  "image_keys": [
+    "observation.images.image",
+    "observation.images.wrist_image"
+  ],
+  "image_size": 224,
+  "resnet18_path": "microsoft/resnet-18",
+  "state_dim": 8,
+  "fusion_hidden_dim": 256,
+  "freeze_vision_encoder": false,
+  "sft_type": "value_model",
+  "value_head_num_bins": 201,
+  "value_head_v_min": -1.0,
+  "value_head_v_max": 0.0,
+  "value_head_dropout": 0.0,
+  "value_head_hidden_dim": 0
+}

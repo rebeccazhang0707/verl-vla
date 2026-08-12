@@ -28,12 +28,13 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, SequentialSampler, Subset
 from tqdm import tqdm
 
-from verl_vla.models.recap_value_critic import ReCapValueCriticTrainableModel
+from verl_vla.models.builder import build_vla_model
 from verl_vla.recorder.dataset import iter_lerobot_frame_records, write_lerobot_frame_columns
 from verl_vla.utils.data import dataloader_batch_to_dataproto
 from verl_vla.utils.dataloader import LeRobotDataLoaderConfig, resolve_multiprocessing_context
 from verl_vla.utils.dataloader.lerobot import build_lerobot_dataset
 from verl_vla.utils.dtype import precision_to_torch_dtype
+from verl_vla.workers.config import VLAModelConfig
 from verl_vla.workflows.train.recap.compute_return import (
     RECAP_ADVANTAGE_FIELD,
     RECAP_INDICATOR_FIELD,
@@ -310,11 +311,12 @@ def _infer_value_lookup_on_device(
     )
 
     # STEP 2: load the value model and run inference on the assigned shard.
-    model = ReCapValueCriticTrainableModel.from_pretrained(
-        str(model_path),
-        torch_dtype=infer_cfg.torch_dtype,
-        trust_remote_code=True,
+    model_config = VLAModelConfig(
+        path=str(model_path),
+        tokenizer_path=str(model_path),
+        load_tokenizer=False,
     )
+    model = build_vla_model(model_config, torch_dtype=infer_cfg.torch_dtype)
     model.to(device=device)
     model.eval()
 
