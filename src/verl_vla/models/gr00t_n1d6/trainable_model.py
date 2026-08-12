@@ -57,7 +57,7 @@ class _CpuBeta(torch.distributions.Beta):
 
 
 def beta_schedule(step: int, beta0: float, beta_min: float, T: int) -> float:
-    """Cosine anneal of the Flow-SDE exploration scale (GR00T-specific; pi0 uses ScheduledScalar)."""
+    """Cosine anneal of the GR00T Flow-SDE exploration scale."""
     progress = min(step / T, 1.0)
     return beta_min + (beta0 - beta_min) * 0.5 * (1.0 + math.cos(math.pi * progress))
 

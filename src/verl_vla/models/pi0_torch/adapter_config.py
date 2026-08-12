@@ -48,16 +48,9 @@ class PI0AdapterConfig:
         "action_norm_stats": {},
         "flow_sde_enable": True,
         "flow_sde_noise_level": 0.5,
-        "flow_sde_noise_schedule_enabled": False,
-        "flow_sde_noise_schedule_initial": None,
-        "flow_sde_noise_schedule_final": None,
-        "flow_sde_noise_schedule_method": "cos",
         "flow_sde_task_noise_level": {},
         "flow_sde_rollout_noise_scale": 1.0,
         "flow_sde_train_noise_scale": 1.0,
-        "flow_sde_initial_beta": 1.0,
-        "flow_sde_beta_min": 0.02,
-        "flow_sde_beta_schedule_T": 2000,
     }
 
     def __init__(

@@ -30,8 +30,6 @@ from typing_extensions import override
 from verl.protocol import DataProto
 from verl.utils.device import get_device_name
 
-from verl_vla.utils.scalar_schedule import ScheduledScalar
-
 from ..base import ModelOutput, SupportSACTraining, SupportSFTTraining, TrainableVLAModelBase
 from ..dsrl import DSRLSteering
 from .adapter_config import PI0AdapterConfig
@@ -144,20 +142,9 @@ class PI0TrainableModel(
         self._to(get_device_name())
         self.flow_sde_enable = bool(getattr(config, "flow_sde_enable", True))
         self.flow_sde_noise_level = float(getattr(config, "flow_sde_noise_level", 0.5))
-        self.flow_sde_noise_scheduler = ScheduledScalar(
-            base_value=self.flow_sde_noise_level,
-            enabled=bool(getattr(config, "flow_sde_noise_schedule_enabled", False)),
-            initial_value=getattr(config, "flow_sde_noise_schedule_initial", None),
-            final_value=getattr(config, "flow_sde_noise_schedule_final", None),
-            method=getattr(config, "flow_sde_noise_schedule_method", "cos"),
-            clamp_min=0.0,
-            clamp_max=None,
-        )
         self.flow_sde_task_noise_level = self._parse_task_noise_levels(config.flow_sde_task_noise_level)
         self.flow_sde_rollout_noise_scale = float(getattr(config, "flow_sde_rollout_noise_scale", 1.0))
         self.flow_sde_train_noise_scale = float(getattr(config, "flow_sde_train_noise_scale", 1.0))
-        self.flow_sde_beta_schedule_T = int(getattr(config, "flow_sde_beta_schedule_T", 2000))
-        self.register_buffer("flow_sde_step", torch.zeros((), dtype=torch.long))
 
         ##### SAC Algorithm Support #####
         if self.config.critic.enabled:
@@ -506,8 +493,8 @@ class PI0TrainableModel(
     def _parse_task_noise_levels(
         self,
         task_noise_levels: str,
-    ) -> dict[int, ScheduledScalar]:
-        normalized: dict[int, ScheduledScalar] = {}
+    ) -> dict[int, float]:
+        normalized: dict[int, float] = {}
         if not task_noise_levels:
             return normalized
         for item in task_noise_levels.split(","):
@@ -519,16 +506,8 @@ class PI0TrainableModel(
                     f"flow_sde_task_noise_level[{normalized_task_id}] must be non-negative, "
                     f"got {normalized_noise_level}."
                 )
-            normalized[normalized_task_id] = ScheduledScalar(
-                base_value=normalized_noise_level,
-                method=self.flow_sde_noise_scheduler.method,
-                clamp_min=0.0,
-                clamp_max=None,
-            )
+            normalized[normalized_task_id] = normalized_noise_level
         return normalized
-
-    def _flow_sde_noise_control_value(self) -> float:
-        return min(float(self.flow_sde_step.item()) / max(1.0, float(self.flow_sde_beta_schedule_T)), 1.0)
 
     def _resolve_flow_sde_noise_levels(
         self,
@@ -537,17 +516,15 @@ class PI0TrainableModel(
         dtype: torch.dtype,
         task_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        noise_control = self._flow_sde_noise_control_value()
-        noise_level = self.flow_sde_noise_scheduler.refresh(noise_control)
-        noise_levels = torch.full((batch_size,), noise_level, device=device, dtype=dtype)
+        noise_levels = torch.full((batch_size,), self.flow_sde_noise_level, device=device, dtype=dtype)
         task_ids = task_ids.to(device=device, dtype=torch.long).reshape(-1)
         if task_ids.shape[0] != batch_size:
             raise ValueError(f"task_ids batch size {task_ids.shape[0]} does not match batch size {batch_size}")
 
-        for task_id, task_noise_scheduler in self.flow_sde_task_noise_level.items():
+        for task_id, task_noise_level in self.flow_sde_task_noise_level.items():
             task_mask = task_ids == task_id
             if task_mask.any():
-                noise_levels = noise_levels.masked_fill(task_mask, task_noise_scheduler.refresh(noise_control))
+                noise_levels = noise_levels.masked_fill(task_mask, task_noise_level)
         normal_noise_factors = (torch.randn_like(noise_levels) / 6.0 + 0.5).clamp(0.0, 1.0)
         return noise_levels * normal_noise_factors
 
@@ -747,12 +724,8 @@ class PI0TrainableModel(
                 return_log_prob=True,
                 task_ids=task_ids,
             )
-            if is_first_micro_batch:
-                self.flow_sde_step.add_(1)
             actor_metrics = {
-                "flow_sde_step": float(self.flow_sde_step.item()),
-                "flow_sde_noise_level": float(self.flow_sde_noise_scheduler.current_value),
-                "flow_sde_noise_control": float(self.flow_sde_noise_scheduler.control_value),
+                "flow_sde_noise_level": self.flow_sde_noise_level,
                 "flow_sde_noise_scale": float(resolved_noise_scale),
             }
         else:
