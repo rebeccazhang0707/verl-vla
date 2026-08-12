@@ -24,7 +24,7 @@ def _build_policy_eval_config(config, policy_path: str, *, disable_acp: bool = F
     if eval_config_node is None:
         raise ValueError("`recap.policy_eval` is required when RECAP policy evaluation is enabled.")
 
-    eval_config = OmegaConf.create(OmegaConf.to_container(eval_config_node, resolve=False))
+    eval_config = OmegaConf.create(OmegaConf.to_container(eval_config_node, resolve=True))
     OmegaConf.set_struct(eval_config, False)
     ray_kwargs = OmegaConf.select(config, "ray_kwargs", default={})
     OmegaConf.update(

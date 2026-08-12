@@ -1,0 +1,147 @@
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/recap@_global_
+  - _self_
+
+output_dir: ???
+initial_policy_path: ???
+dataset_root: ${output_dir}/datasets/local/pi05_libero10_task8_recap
+dataset_repo_id: local/pi05_libero10_task8_recap
+
+recap:
+  num_iterations: 3
+  resume_iteration: 1
+  resume_step: 1
+  sft_dataset_path: ${dataset_root}
+
+  policy_eval:
+    enable: true
+    model_path: ${initial_policy_path}
+    max_episodes: 50
+    result_dir: ${output_dir}/eval_results
+    cluster:
+      actor_rollout_ref:
+        model:
+          path: ${initial_policy_path}
+          adapter:
+            embodiment: libero
+            critic:
+              enabled: false
+        rollout:
+          acp:
+            enable: true
+      env:
+        env_loop:
+          pipeline_stage_num: 2
+          max_interactions: 52
+        env_worker:
+          auto_reset: true
+          simulator:
+            libero:
+              task_suite_name: libero_10
+              task_ids: [8]
+              num_trials_per_task: 50
+              max_episode_steps: 520
+          recorder:
+            video:
+              root: ${output_dir}/videos/eval
+
+  collect_data:
+    enable: true
+    max_episodes: 32
+    cluster:
+      actor_rollout_ref:
+        model:
+          path: ${initial_policy_path}
+          adapter:
+            embodiment: libero
+            critic:
+              enabled: false
+        rollout:
+          acp:
+            enable: true
+      env:
+        env_loop:
+          pipeline_stage_num: 2
+          max_interactions: 52
+        env_worker:
+          auto_reset: true
+          simulator:
+            libero:
+              task_suite_name: libero_10
+              task_ids: [8]
+              max_episode_steps: 520
+          recorder:
+            lerobot:
+              root: ${output_dir}/datasets
+              repo_id: ${dataset_repo_id}
+            video:
+              root: ${output_dir}/videos/rollout
+
+  compute_return:
+    enable: true
+    dataset:
+      root: ${dataset_root}
+      repo_id: ${dataset_repo_id}
+
+  train_value_model:
+    enable: true
+    data:
+      root: ${dataset_root}
+      repo_id: ${dataset_repo_id}
+    cluster:
+      checkpoint:
+        resume_mode: auto
+        default_local_dir: ${output_dir}/checkpoints/value_model
+        max_actor_ckpt_to_keep: 3
+    trainer:
+      experiment_name: pi05-libero10-task8-resnet18-value
+      logger: [console, tensorboard]
+      total_epochs: 10
+      save_freq: -1
+
+  value_infer:
+    enable: true
+    dataset:
+      root: ${dataset_root}
+      repo_id: ${dataset_repo_id}
+    model_path: assets/hf_models/recap_resnet18_value_critic
+    positive_ratio: 0.05
+    n_step: 50
+    indicator_strategy: future_smoothed_advantage
+    advantage_smoothing_window: 50
+    advantage_smoothing_decay: 0.95
+
+  train_policy:
+    enable: true
+    dataset:
+      root: ${dataset_root}
+      repo_id: ${dataset_repo_id}
+    data:
+      action_delta_steps: 50
+    cluster:
+      checkpoint:
+        resume_mode: auto
+        default_local_dir: ${output_dir}/checkpoints/policy
+        max_actor_ckpt_to_keep: 3
+      actor_rollout_ref:
+        model:
+          path: ${initial_policy_path}
+          adapter:
+            embodiment: libero
+            critic:
+              enabled: false
+    trainer:
+      experiment_name: pi05-libero10-task8-acp-policy
+      logger: [console, tensorboard]
+      total_epochs: 3
+      save_freq: -1
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      env_vars:
+        TENSORBOARD_DIR: ???
