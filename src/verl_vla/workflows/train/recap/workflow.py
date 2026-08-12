@@ -142,3 +142,7 @@ def run_recap(config):
             print(f"ReCap policy training finished: {policy_path}")
             if policy_path is not None:
                 policy_path_from_previous_iteration = policy_path
+
+    if policy_path_from_previous_iteration is not None and recap_config.stage_enabled("policy_eval", default=False):
+        metrics = eval_recap_policy(config, str(policy_path_from_previous_iteration))
+        print(f"Final ReCap policy eval finished: {metrics}")

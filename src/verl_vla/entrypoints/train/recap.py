@@ -15,7 +15,7 @@
 import hydra
 
 
-@hydra.main(config_path="../../workflows/config/train", config_name="recap", version_base=None)
+@hydra.main(config_path="../../workflows/config", config_name="train/recap", version_base=None)
 def main(config):
     from verl_vla.workflows.train.recap import run_recap
 

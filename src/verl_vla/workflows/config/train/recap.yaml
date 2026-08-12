@@ -1,3 +1,5 @@
+# @package _global_
+
 # Copyright 2026 Bytedance Ltd. and/or its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,34 +14,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Hydra runtime configuration.
-hydra:
-
-  # Additional Hydra configuration search paths.
-  searchpath:
-
-    - pkg://verl_vla.workflows.config
-
 # Hydra configuration composition order.
 defaults:
 
   # Stage 1: evaluate the configured RECAP policy on the environment benchmark.
-  - /recap/policy_eval@recap.policy_eval
+  - /train/recap/policy_eval@recap.policy_eval
 
   # Stage 2: collect rollout data into a LeRobot dataset.
-  - /recap/collect_data@recap.collect_data
+  - /train/recap/collect_data@recap.collect_data
 
   # Stage 3: compute RECAP returns for the collected LeRobot dataset.
-  - /recap/compute_return@recap.compute_return
+  - /train/recap/compute_return@recap.compute_return
 
   # Stage 4: train the RECAP value model with actor-only SFT.
-  - /recap/train_value_model@recap.train_value_model
+  - /train/recap/train_value_model@recap.train_value_model
 
   # Stage 5: infer RECAP values and write them back to the LeRobot dataset.
-  - /recap/value_infer@recap.value_infer
+  - /train/recap/value_infer@recap.value_infer
 
   # Stage 6: train the final RECAP policy with actor-only SFT.
-  - /recap/train_policy@recap.train_policy
+  - /train/recap/train_policy@recap.train_policy
 
   # Attach Ray initialization config shared by RECAP stages under `ray_kwargs`.
   - /ray@ray_kwargs: default

@@ -99,5 +99,8 @@ trainer:
   # Metric logging backends.
   logger: ["console", "tensorboard"]
 
+  # Number of full policy-dataset passes per training stage.
+  total_epochs: 5
+
   # Whether checkpoint resume restores dataloader progress.
   resume_dataloader_state: false
