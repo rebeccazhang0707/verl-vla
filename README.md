@@ -5,10 +5,12 @@
 **A unified post-training framework for vision-language-action policies, built
 on top of [verl](https://github.com/verl-project/verl).**
 
-verl-vla provides a unified workflow for human-in-the-loop data collection,
-fine-tuning, reinforcement learning, and policy evaluation. Models,
-environments, and training algorithms can be integrated independently and
-composed through a shared execution architecture.
+verl-vla unifies human-in-the-loop data collection, fine-tuning, and
+reinforcement learning in a single post-training workflow. Its shared execution
+architecture allows models, environments, and training algorithms to be
+integrated independently and composed as needed. Together with a growing
+collection of reproducible recipes, verl-vla aims to accelerate the deployment
+of VLA models in real-world applications.
 
 Training workers, simulators, and physical robots may run on different nodes
 according to their hardware and connectivity requirements. Operators can
@@ -42,10 +44,14 @@ shown below across simulators and physical robots:
   synchronization across heterogeneous topologies—from models and simulators
   running on multi-node cloud clusters to physical robots operating on local
   machines—all through a compact API.
-- **Independent integrations:** connect upstream policies through model
-  adapters while preserving their native implementations and Hugging Face
-  checkpoint formats, and add simulators or physical robots by implementing
-  the shared environment lifecycle.
+- **Fast model and environment integration:** preserve each upstream model's
+  native implementation and checkpoint format while connecting it through a
+  lightweight adapter, and integrate new simulators or physical robots through
+  a concise, unified environment API with operations such as `reset` and
+  `step`.
+- **Reproducible recipes:** start from documented, end-to-end recipes with
+  verified environments and minimal launchers, then adapt the same workflows
+  to deploy post-training in your own models, environments, and robot setups.
 - **Human-in-the-loop operation:** teleoperate environments, intervene in
   policy execution, and record demonstrations, autonomous rollouts, and
   intervention data through the same environment loop.
@@ -67,9 +73,9 @@ The repository currently includes integrations and runnable examples for:
 
 | Area | Integrations |
 | --- | --- |
-| Models | ACT, Pi0.5, and GR00T N1.6 |
+| Models | ACT, Gaussian actor, Pi0.5, and GR00T N1.6 |
 | Environments and robots | LIBERO, Isaac Lab Arena, and Piper |
-| Training | SFT, SAC-style off-policy training, and RECAP |
+| Training | SFT, SAC-style off-policy training, DSRL, and RECAP |
 | Human input | Keyboard, gamepad, XR controller, and LeRobot leader arm |
 
 Support for additional models, environments, training algorithms, and input
@@ -118,18 +124,13 @@ GPU.
 
 ## Contributing
 
-Feedback, bug reports, and contributions are welcome. If you encounter a
-problem or have an idea for a new model, environment, device, or training
-workflow, please open a
+We warmly welcome contributions. Valuable improvements of any kind, as well as
+meaningful and reproducible experiments, can help more people bring embodied
+models into real-world applications. If you encounter a problem or have an
+idea for a new model, environment, device, training workflow, or experiment,
+please open a
 [GitHub issue](https://github.com/verl-project/verl-vla/issues). See
 [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
-
-## Project status
-
-The core architecture of verl-vla is stable. Development remains active as we
-expand model, environment, and training integrations and refine the
-user-facing workflows. We would be very grateful if you could share your
-feedback and suggestions with us.
 
 ## Acknowledgements
 
@@ -141,6 +142,7 @@ support for this project.
 We are grateful to [LeRobot](https://github.com/huggingface/lerobot),
 [SimpleVLA-RL](https://github.com/PRIME-RL/SimpleVLA-RL),
 [RLinf](https://github.com/RLinf/RLinf),
+[DSRL](https://github.com/ajwagen/dsrl),
 [Giga Models](https://github.com/open-gigaai/giga-models),
 [OpenPI](https://github.com/Physical-Intelligence/openpi),
 [Evo-RL](https://github.com/MINT-SJTU/Evo-RL), and
