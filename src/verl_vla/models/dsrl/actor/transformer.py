@@ -4,7 +4,7 @@
 
 """DSRL noise actor variant: a Transformer chunking SAC policy over flow noise.
 
-Same contract as :class:`~verl_vla.models.dsrl.noise_actor.DSRLNoiseActor` (map
+Same contract as :class:`~verl_vla.models.dsrl.actor.mlp.DSRLNoiseActor` (map
 a frozen-backbone feature vector plus the raw robot state to the flow sampler's
 initial noise ``x0``), but the trunk mirrors the posttrain reference DSRL actor
 (``isaac_rl_posttraining/modules/transformer/actor.py``): the observation is
@@ -29,7 +29,7 @@ import math
 import torch
 from torch import nn
 
-from .config import DSRLSteeringConfig
+from ..config import DSRLSteeringConfig
 
 _LOG_2 = math.log(2.0)
 

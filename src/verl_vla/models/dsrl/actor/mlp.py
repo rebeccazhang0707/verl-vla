@@ -22,7 +22,7 @@ import math
 import torch
 from torch import nn
 
-from .config import DSRLSteeringConfig
+from ..config import DSRLSteeringConfig
 
 _TANH_EPS = 1e-6
 

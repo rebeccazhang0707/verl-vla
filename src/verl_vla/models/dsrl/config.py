@@ -55,10 +55,28 @@ class DSRLTransformerActorConfig:
         return dict(vars(self))
 
 
+class DSRLCNNActorConfig:
+    DEFAULTS = {
+        "hidden_dims": [128, 128, 128],
+        "image_size": 64,
+        "features": [32, 32, 32, 32],
+        "strides": [2, 1, 1, 1],
+        "latent_dim": 50,
+    }
+
+    def __init__(self, **values: Any) -> None:
+        for name, value in {**self.DEFAULTS, **values}.items():
+            setattr(self, name, value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(vars(self))
+
+
 class DSRLSteeringConfig:
     _FLAT_ACTOR_FIELDS = {
         *DSRLMLPActorConfig.DEFAULTS,
         *DSRLTransformerActorConfig.DEFAULTS,
+        *DSRLCNNActorConfig.DEFAULTS,
         "transformer_dropout",
         "transformer_activation",
     }
@@ -70,14 +88,16 @@ class DSRLSteeringConfig:
         # resolves from the model (backbone feature dim / processor state dim).
         "feature_dim": None,
         "state_dim": None,
-        # Noise-actor architecture: "mlp" (default) or "transformer" (posttrain
-        # reference chunking actor).
+        # Noise-actor architecture: "mlp", "transformer", or "cnn".
         "actor_type": "mlp",
         # False (RLinf parity): one noise vector shared by every step of the
         # action chunk. True: an independent noise vector per horizon step.
         "noise_per_step": False,
         # tanh output bound; x0 lives in [-noise_bound, noise_bound]^d.
         "noise_bound": 1.0,
+        # Optional extra Gaussian exploration scale for online rollout
+        # sampling. None preserves the actor's learned stochasticity.
+        "rollout_noise_scale": None,
         # Pre-tanh Gaussian log-std clamp range.
         "log_std_min": -20.0,
         "log_std_max": 2.0,
@@ -87,19 +107,29 @@ class DSRLSteeringConfig:
         flat_actor_fields = self._FLAT_ACTOR_FIELDS.intersection(values)
         if flat_actor_fields:
             fields = ", ".join(sorted(flat_actor_fields))
-            raise ValueError(f"DSRL actor settings must be nested under dsrl.mlp or dsrl.transformer: {fields}")
+            raise ValueError(
+                f"DSRL actor settings must be nested under dsrl.mlp, dsrl.transformer, or dsrl.cnn: {fields}"
+            )
         mlp_values = dict(values.pop("mlp", {}) or {})
         transformer_values = dict(values.pop("transformer", {}) or {})
+        cnn_values = dict(values.pop("cnn", {}) or {})
         for name, value in {**self.DEFAULTS, **values}.items():
             setattr(self, name, value)
         self.mlp = DSRLMLPActorConfig(**mlp_values)
         self.transformer = DSRLTransformerActorConfig(**transformer_values)
+        self.cnn = DSRLCNNActorConfig(**cnn_values)
 
     def to_dict(self) -> dict[str, Any]:
-        config = {name: value for name, value in vars(self).items() if name not in ("mlp", "transformer")}
+        config = {name: value for name, value in vars(self).items() if name not in ("mlp", "transformer", "cnn")}
         config["mlp"] = self.mlp.to_dict()
         config["transformer"] = self.transformer.to_dict()
+        config["cnn"] = self.cnn.to_dict()
         return config
 
 
-__all__ = ["DSRLMLPActorConfig", "DSRLSteeringConfig", "DSRLTransformerActorConfig"]
+__all__ = [
+    "DSRLCNNActorConfig",
+    "DSRLMLPActorConfig",
+    "DSRLSteeringConfig",
+    "DSRLTransformerActorConfig",
+]
