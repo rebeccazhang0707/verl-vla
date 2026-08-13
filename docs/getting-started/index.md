@@ -45,31 +45,23 @@ python -m pip config --site set \
   global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
-Then update the Python packaging tools:
+Then update the Python packaging tools and install the verified LeRobot runtime
+and verl-vla LIBERO dependencies:
 
 ```bash
 python -m pip install --upgrade pip setuptools wheel
-```
 
-Install the verified LeRobot runtime first, then install verl-vla with its
-LIBERO dependencies:
-
-```bash
 python -m pip install --requirement requirements-lerobot.txt &&
 python -m pip install --no-deps lerobot==0.4.4 &&
 python -m pip install --editable ".[libero]"
 ```
 
 The PyPI distribution of LIBERO does not include all simulator assets. Install
-the revision verified by verl-vla:
+the revision verified by verl-vla, then verify the complete environment:
 
 ```bash
 python scripts/install_libero_assets.py
-```
 
-Verify the installation:
-
-```bash
 python scripts/install_checks/check_libero.py
 python -c "import av, torchcodec; from verl_vla.recorder import get_lerobot_dataset_cls; get_lerobot_dataset_cls()"
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
