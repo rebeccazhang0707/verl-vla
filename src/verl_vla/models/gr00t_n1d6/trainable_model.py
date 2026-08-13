@@ -228,6 +228,8 @@ class Gr00tN1d6TrainableModel(TrainableVLAModelBase, SupportSACTraining, Support
                 raise ValueError("DSRL noise steering and Flow-SDE are mutually exclusive; set flow_sde_enable=False.")
             if not adapter_config.critic.enabled:
                 raise ValueError("DSRL requires the SAC critic; set adapter.critic.enabled=True.")
+            if dsrl_cfg.actor_type == "cnn":
+                raise ValueError("GR00T does not support dsrl.actor_type=cnn.")
             self.dsrl = DSRLSteering(
                 dsrl_cfg,
                 feature_dim=self.backbone_feature_dim,

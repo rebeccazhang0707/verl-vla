@@ -18,6 +18,24 @@ from typing import Any
 from ..dsrl.config import DSRLSteeringConfig
 
 
+class PI0CNNCriticConfig:
+    DEFAULTS = {
+        "head_num": 10,
+        "hidden_dims": [128, 128, 128],
+        "image_size": 64,
+        "features": [32, 32, 32, 32],
+        "strides": [2, 1, 1, 1],
+        "latent_dim": 50,
+    }
+
+    def __init__(self, **values: Any) -> None:
+        for name, value in {**self.DEFAULTS, **values}.items():
+            setattr(self, name, value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(vars(self))
+
+
 class PI0CriticConfig:
     DEFAULTS = {
         "enabled": False,
@@ -32,11 +50,15 @@ class PI0CriticConfig:
     }
 
     def __init__(self, **values: Any) -> None:
+        cnn_values = dict(values.pop("cnn", {}) or {})
         for name, value in {**self.DEFAULTS, **values}.items():
             setattr(self, name, value)
+        self.cnn = PI0CNNCriticConfig(**cnn_values)
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(vars(self))
+        config = {name: value for name, value in vars(self).items() if name != "cnn"}
+        config["cnn"] = self.cnn.to_dict()
+        return config
 
 
 class PI0AdapterConfig:

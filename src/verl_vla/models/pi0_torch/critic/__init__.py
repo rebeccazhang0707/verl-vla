@@ -13,12 +13,15 @@
 # limitations under the License.
 
 from .base import CriticBackend
+from .critic_cnn import PI0CNNCritic, PI0CNNCriticBackend
 from .critic_cross_attn import CrossAttentionCriticBackend, CrossAttentionCriticGroup
 from .critic_mean_pool import MeanPoolCriticBackend, MeanPoolCriticGroup
 from .critic_multi_cross_attn import MultiCrossAttentionCritic, MultiCrossAttentionCriticBackend
 
 __all__ = [
     "CriticBackend",
+    "PI0CNNCritic",
+    "PI0CNNCriticBackend",
     "CrossAttentionCriticBackend",
     "CrossAttentionCriticGroup",
     "MeanPoolCriticBackend",

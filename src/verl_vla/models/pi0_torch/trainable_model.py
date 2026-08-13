@@ -37,6 +37,7 @@ from .critic import (
     CrossAttentionCriticBackend,
     MeanPoolCriticBackend,
     MultiCrossAttentionCriticBackend,
+    PI0CNNCriticBackend,
 )
 from .embodiments import get_pi0_embodiment_classes
 from .embodiments.base import Pi0Output
@@ -49,6 +50,7 @@ from .pi0_utils import (
 )
 
 CRITIC_BACKENDS = {
+    "cnn": PI0CNNCriticBackend(),
     "cross_attn": CrossAttentionCriticBackend(),
     "mean_pool": MeanPoolCriticBackend(),
     "multi_cross_attn": MultiCrossAttentionCriticBackend(),
@@ -248,6 +250,10 @@ class PI0TrainableModel(
             lang_masks=lang_masks,
         )
         state_features = (prefix_features, state)
+        if self.dsrl is not None and self.dsrl.actor_type == "cnn":
+            pixels = env_obs.batch["observation.images.image"]
+            raw_state = env_obs.batch["observation.state"]
+            state_features = (prefix_features, state, (pixels, raw_state))
         task_ids = torch.tensor(env_obs.non_tensor_batch["task_id"], device=state.device, dtype=torch.long)
 
         steering_noise = None
@@ -255,10 +261,12 @@ class PI0TrainableModel(
             # DSRL: sample steering noise from the small SAC actor and let the
             # frozen flow head integrate it deterministically into an action.
             features, dsrl_state = self._dsrl_actor_inputs(state_features)
+            rollout_noise_scale = None if eval else self.dsrl.config.rollout_noise_scale
             steering_noise, rollout_log_probs, _ = self.dsrl.sample(
                 features,
                 dsrl_state,
                 deterministic=eval,
+                noise_scale=rollout_noise_scale,
             )
             initial_noise = steering_noise
         else:
@@ -380,9 +388,12 @@ class PI0TrainableModel(
 
     def _dsrl_actor_inputs(
         self,
-        state_features: tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
+        state_features,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        prefix_features, states = state_features
+        if self.dsrl.actor_type == "cnn":
+            _, _, cnn_inputs = state_features
+            return cnn_inputs
+        prefix_features, states = state_features[:2]
         prefix_embs, prefix_pad_masks, _ = prefix_features
         prefix_mask = prefix_pad_masks.to(dtype=prefix_embs.dtype).unsqueeze(-1)
         pooled = (prefix_embs * prefix_mask).sum(dim=1) / prefix_mask.sum(dim=1).clamp_min(1.0)
@@ -542,7 +553,7 @@ class PI0TrainableModel(
         see https://arxiv.org/abs/2510.25889
         """
 
-        prefix_features, states = state_features
+        prefix_features, states = state_features[:2]
         prefix_embs, prefix_pad_masks, _ = prefix_features
         batch_size = prefix_embs.shape[0]
         device = prefix_embs.device
@@ -761,10 +772,10 @@ class PI0TrainableModel(
         method: Literal["cat", "min"] = "cat",
         requires_grad: bool = False,
     ):
-        if self.critic_api.uses_task_ids and task_ids is None:
-            raise ValueError(f"critic_type={self.critic_type} requires task_ids for critic forward.")
         if self.dsrl is not None:
             a = self.dsrl.select_critic_noise(a)
+        if self.critic_api.uses_task_ids and task_ids is None:
+            raise ValueError(f"critic_type={self.critic_type} requires task_ids for critic forward.")
         return self.critic_api.forward(
             self,
             a=a,
@@ -791,12 +802,18 @@ class PI0TrainableModel(
         self,
         obs: DataProto,
         tokenizer: torch.nn.Module,
-    ) -> tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]:
+    ):
         pi0_input_cls, _ = self._get_pi0_embodiment_classes()
         pi0_input = pi0_input_cls.from_env_obs(obs)
 
         with torch.no_grad():
             state = self.state_normalize_transform(pi0_input.state)
+            needs_prefix = self.dsrl is None or self.dsrl.actor_type != "cnn" or self.critic_type != "cnn"
+            if not needs_prefix:
+                pixels = obs.batch["observation.images.image"]
+                critic_state = obs.batch["observation.state"]
+                return ((), state, (pixels, critic_state))
+
             images, _ = self.image_transform.call_batch(pi0_input.images)
             lang_tokens, lang_masks = self.prompt_tokenizer_transform.call_batch(
                 {"task": pi0_input.task, "observation.state": state}, tokenizer
@@ -807,6 +824,10 @@ class PI0TrainableModel(
                 lang_tokens=lang_tokens,
                 lang_masks=lang_masks,
             )
+        if self.critic_type == "cnn" or (self.dsrl is not None and self.dsrl.actor_type == "cnn"):
+            pixels = obs.batch["observation.images.image"]
+            critic_state = obs.batch["observation.state"]
+            return (prefix_features, state, (pixels, critic_state))
         return (prefix_features, state)
 
     @override

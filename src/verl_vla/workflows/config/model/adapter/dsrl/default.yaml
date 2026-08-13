@@ -26,6 +26,9 @@ defaults:
   # Transformer noise-actor implementation settings.
   - /model/adapter/dsrl/actor@transformer: transformer
 
+  # CNN noise-actor implementation settings.
+  - /model/adapter/dsrl/actor@cnn: cnn
+
   # Apply shared DSRL settings last.
   - _self_
 
@@ -34,8 +37,8 @@ enabled: false
 
 # Noise-actor architecture:
 #   mlp (default): an MLP trunk over the projected features and state.
-#   transformer: the posttrain reference chunking actor -- one token per flow
-#     horizon step, mixed by a Transformer encoder (see the block further down).
+#   transformer: the posttrain reference chunking actor.
+#   cnn: the official-style pixel observation actor.
 actor_type: mlp
 
 # Optional explicit policy-feature width; null derives it from the model.
@@ -44,9 +47,13 @@ feature_dim: null
 # Optional explicit robot-state width; null derives it from the model.
 state_dim: null
 
-# False uses one shared noise vector across the action chunk; true samples one
-# independent vector per horizon step.
+# False uses one shared noise vector across the action chunk. The official DSRL
+# simulation setup uses true and predicts the complete noise chunk.
 noise_per_step: false
 
 # Tanh bound of the steering noise.
 noise_bound: 1.0
+
+# Optional extra Gaussian exploration scale for online rollout sampling.
+# null preserves the actor's learned stochasticity.
+rollout_noise_scale: null

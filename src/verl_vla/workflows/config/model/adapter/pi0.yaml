@@ -39,7 +39,8 @@ critic:
   # Whether this component is enabled.
   enabled: True
 
-  # Backend or implementation type selected for this component.
+  # Backend selected for this component. Use cnn for the official DSRL critic
+  # structure (requires dsrl.enabled=true).
   type: cross_attn
 
   # Number of workers allocated to this role.
@@ -62,6 +63,15 @@ critic:
 
   # Mapping from task identifiers to critic checkpoints.
   task_to_critic: null
+
+  # CNN critic backend settings.
+  cnn:
+    head_num: 10
+    hidden_dims: [128, 128, 128]
+    image_size: 64
+    features: [32, 32, 32, 32]
+    strides: [2, 1, 1, 1]
+    latent_dim: 50
 
 # Whether Flow-SDE is enabled.
 flow_sde_enable: False

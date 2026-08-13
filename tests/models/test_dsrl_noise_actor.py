@@ -20,7 +20,9 @@ import pytest
 import torch
 
 from verl_vla.models.dsrl import (
+    DSRLCNNActor,
     DSRLNoiseActor,
+    DSRLSteering,
     DSRLSteeringConfig,
     DSRLTransformerNoiseActor,
 )
@@ -197,6 +199,43 @@ def test_transformer_actor_noise_scale_increases_sampling_variance():
     assert scaled_noise[:, 0].std() > base_noise[:, 0].std()
 
 
+def test_cnn_actor_uses_pixels_and_raw_state():
+    config = DSRLSteeringConfig(
+        actor_type="cnn",
+        cnn={"hidden_dims": [16, 16], "features": [8, 8, 8, 8], "latent_dim": 12},
+        noise_per_step=True,
+    )
+    actor = DSRLCNNActor(
+        feature_dim=FEATURE_DIM,
+        state_dim=STATE_DIM,
+        noise_dim=NOISE_DIM,
+        noise_horizon=HORIZON,
+        config=config,
+    )
+    pixels = torch.randint(0, 256, (2, 64, 64, 3), dtype=torch.uint8)
+    noise, log_prob = actor.sample(pixels, torch.randn(2, STATE_DIM))
+    assert noise.shape == (2, HORIZON, NOISE_DIM)
+    assert log_prob.shape == (2,)
+    assert not torch.equal(noise[:, 0], noise[:, 1])
+    (noise.sum() + log_prob.sum()).backward()
+    assert actor.encoder.convolutions[0].weight.grad is not None
+
+
+def test_steering_selects_configured_actor_type():
+    steering = DSRLSteering(
+        DSRLSteeringConfig(
+            actor_type="cnn",
+            cnn={"hidden_dims": [16], "features": [8, 8, 8, 8], "latent_dim": 12},
+        ),
+        feature_dim=FEATURE_DIM,
+        state_dim=STATE_DIM,
+        noise_dim=NOISE_DIM,
+        noise_horizon=HORIZON,
+    )
+    assert steering.actor_type == "cnn"
+    assert isinstance(steering.noise_actor, DSRLCNNActor)
+
+
 def test_gr00t_adapter_config_parses_and_roundtrips_dsrl():
     cfg = Gr00tAdapterConfig(dsrl={"enabled": True, "mlp": {"hidden_dims": [64, 64]}, "noise_bound": 1.5})
     assert cfg.dsrl.enabled is True
@@ -206,6 +245,7 @@ def test_gr00t_adapter_config_parses_and_roundtrips_dsrl():
     assert payload["dsrl"]["enabled"] is True
     assert payload["dsrl"]["mlp"]["hidden_dims"] == [64, 64]
     assert payload["dsrl"]["transformer"]["d_model"] == 256
+    assert payload["dsrl"]["cnn"]["latent_dim"] == 50
     # Reload from the serialized payload (adapter_config.json roundtrip).
     reloaded = Gr00tAdapterConfig(**payload)
     assert reloaded.dsrl.enabled is True
@@ -219,11 +259,21 @@ def test_gr00t_adapter_config_dsrl_defaults_off():
 
 
 def test_pi0_adapter_config_parses_and_roundtrips_dsrl():
-    cfg = PI0AdapterConfig(dsrl={"enabled": True, "state_dim": 8})
+    cfg = PI0AdapterConfig(
+        dsrl={"enabled": True, "actor_type": "cnn", "state_dim": 8},
+        critic={"type": "cnn", "cnn": {"head_num": 4, "latent_dim": 32}},
+    )
     assert cfg.dsrl.enabled is True
+    assert cfg.dsrl.actor_type == "cnn"
     assert cfg.dsrl.state_dim == 8
+    assert cfg.critic.cnn.head_num == 4
+    assert cfg.critic.cnn.latent_dim == 32
     payload = cfg.to_dict()
     assert payload["dsrl"]["enabled"] is True
+    assert payload["critic"]["cnn"]["head_num"] == 4
     reloaded = PI0AdapterConfig(**payload)
     assert reloaded.dsrl.enabled is True
+    assert reloaded.dsrl.actor_type == "cnn"
     assert reloaded.dsrl.state_dim == 8
+    assert reloaded.critic.cnn.head_num == 4
+    assert reloaded.critic.cnn.latent_dim == 32
