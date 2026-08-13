@@ -45,6 +45,7 @@ class SACConfig(BaseConfig):
     alpha_type: str = "exp"
     alpha_lr: float = 3e-4
     target_entropy: float = -64.0
+    backup_entropy: bool = True
 
     def __post_init__(self):
         valid_alpha_types = ["exp", "softplus"]

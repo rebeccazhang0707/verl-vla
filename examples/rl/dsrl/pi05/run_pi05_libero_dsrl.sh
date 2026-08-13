@@ -56,9 +56,9 @@ python -m verl_vla.entrypoints.train.sac \
   "cluster.actor_rollout_ref.model.adapter.embodiment=libero" \
   "cluster.actor_rollout_ref.model.adapter.dsrl.enabled=true" \
   "cluster.actor_rollout_ref.model.adapter.dsrl.state_dim=8" \
-  "cluster.actor_rollout_ref.model.adapter.dsrl.feature_latent_dim=64" \
-  "cluster.actor_rollout_ref.model.adapter.dsrl.state_latent_dim=64" \
-  "cluster.actor_rollout_ref.model.adapter.dsrl.hidden_dims=[128,128,128]" \
+  "cluster.actor_rollout_ref.model.adapter.dsrl.mlp.feature_latent_dim=64" \
+  "cluster.actor_rollout_ref.model.adapter.dsrl.mlp.state_latent_dim=64" \
+  "cluster.actor_rollout_ref.model.adapter.dsrl.mlp.hidden_dims=[128,128,128]" \
   "cluster.actor_rollout_ref.model.adapter.critic.type=mean_pool" \
   "cluster.actor_rollout_ref.model.adapter.critic.head_num=10" \
   "cluster.actor_rollout_ref.model.adapter.critic.input_dim=2112" \

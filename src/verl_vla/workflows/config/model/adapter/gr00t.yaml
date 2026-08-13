@@ -69,7 +69,11 @@ critic:
   # Whether to construct the critic for SAC training.
   enabled: true
 
-  # Critic architecture. cross_attn pools action tokens with learned queries.
+  # Critic architecture:
+  #   cross_attn (default): pools action tokens with learned queries.
+  #   mean_pool: mean-pools the GR00T prefix instead of cross-attending.
+  #   transformer: posttrain-style Transformer sequence critic over
+  #     [obs_token, action_1..K]; the DSRL launcher selects this.
   type: cross_attn
 
   # Number of Q-value heads produced by the critic.
@@ -83,6 +87,32 @@ critic:
 
   # Whether to apply layer normalization in the critic head.
   layernorm: false
+
+  # Projection width for pooled critic features (0 disables the projection).
+  # cross_attn / mean_pool critics only.
+  pool_proj_dim: 0
+
+  # Token width of the Transformer critic (type=transformer).
+  transformer_d_model: 128
+
+  # Attention heads of the Transformer critic; must divide transformer_d_model.
+  transformer_nhead: 8
+
+  # Transformer encoder depth of the critic.
+  transformer_num_layers: 1
+
+  # Dropout inside the Transformer critic encoder.
+  transformer_dropout: 0.0
+
+  # Activation of the Transformer critic encoder: relu or gelu.
+  transformer_activation: gelu
+
+  # Width each action token is embedded to before the Transformer critic.
+  transformer_action_embedding_dim: 128
+
+  # How the Transformer critic pools its token sequence into a scalar Q value.
+  # One of: first, attention, weighted_mean, mean.
+  transformer_pooling: attention
 
 # Trainable policy components -------------------------------------------------
 

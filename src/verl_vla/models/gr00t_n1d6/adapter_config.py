@@ -30,6 +30,14 @@ class Gr00tCriticConfig:
         "pooling": None,  # derived from type when unset: cross_attn->attn, mean_pool->mean
         "use_encoded_state": False,
         "pool_proj_dim": 0,
+        # Transformer critic geometry (type=transformer; posttrain reference critic).
+        "transformer_d_model": 128,
+        "transformer_nhead": 8,
+        "transformer_num_layers": 1,
+        "transformer_dropout": 0.0,
+        "transformer_activation": "gelu",
+        "transformer_action_embedding_dim": 128,
+        "transformer_pooling": "attention",  # first | attention | weighted_mean | mean
         "state_real_dim": None,
         "mask_frozen_action": False,
         "privileged_obs": False,

@@ -11,8 +11,15 @@ from torch import nn
 
 from .config import DSRLSteeringConfig
 from .noise_actor import DSRLNoiseActor
+from .transformer_actor import DSRLTransformerNoiseActor
 
 _DSRL_STATE_PREFIX = "dsrl.noise_actor."
+
+# Noise-actor architectures selectable via ``adapter.dsrl.actor_type``.
+NOISE_ACTORS = {
+    "mlp": DSRLNoiseActor,
+    "transformer": DSRLTransformerNoiseActor,
+}
 
 
 class DSRLSteering(nn.Module):
@@ -28,7 +35,11 @@ class DSRLSteering(nn.Module):
         noise_horizon: int,
     ) -> None:
         super().__init__()
-        self.noise_actor = DSRLNoiseActor(
+        actor_type = str(getattr(config, "actor_type", "mlp")).lower()
+        if actor_type not in NOISE_ACTORS:
+            raise ValueError(f"dsrl actor_type must be one of {sorted(NOISE_ACTORS)}, got {actor_type!r}")
+        self.actor_type = actor_type
+        self.noise_actor = NOISE_ACTORS[actor_type](
             feature_dim=int(config.feature_dim or feature_dim),
             state_dim=int(config.state_dim or state_dim),
             noise_dim=int(noise_dim),

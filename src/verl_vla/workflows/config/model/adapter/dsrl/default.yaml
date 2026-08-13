@@ -17,17 +17,26 @@
 # noise is stored in replay under ``steering_noise``. DSRL is mutually
 # exclusive with Flow-SDE.
 
+# Hydra configuration composition order.
+defaults:
+
+  # MLP noise-actor implementation settings.
+  - /model/adapter/dsrl/actor@mlp: mlp
+
+  # Transformer noise-actor implementation settings.
+  - /model/adapter/dsrl/actor@transformer: transformer
+
+  # Apply shared DSRL settings last.
+  - _self_
+
 # Master switch for DSRL noise steering.
 enabled: false
 
-# MLP trunk widths of the noise actor.
-hidden_dims: [256, 256, 256]
-
-# Projection width of the frozen policy features.
-feature_latent_dim: 128
-
-# Projection width of the normalized robot state.
-state_latent_dim: 64
+# Noise-actor architecture:
+#   mlp (default): an MLP trunk over the projected features and state.
+#   transformer: the posttrain reference chunking actor -- one token per flow
+#     horizon step, mixed by a Transformer encoder (see the block further down).
+actor_type: mlp
 
 # Optional explicit policy-feature width; null derives it from the model.
 feature_dim: null

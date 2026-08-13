@@ -1,0 +1,37 @@
+# Copyright 2026 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Transformer noise-actor implementation settings.
+
+# Transformer token width.
+d_model: 256
+
+# Attention heads; must divide d_model.
+nhead: 8
+
+# Transformer encoder depth.
+num_encoder_layers: 1
+
+# Encoder dropout. Zero keeps deterministic steering reproducible even when the
+# online rollout does not explicitly switch the actor to eval mode.
+dropout: 0.0
+
+# Transformer encoder activation: relu or gelu.
+activation: gelu
+
+# Positional-encoding dropout.
+positional_dropout: 0.0
+
+# Initial bias of the zero-weight log-standard-deviation head.
+log_std_init: 0.0
