@@ -49,6 +49,7 @@ class DSRLNoiseActor(nn.Module):
     ) -> None:
         super().__init__()
         config = config or DSRLSteeringConfig()
+        actor_config = config.mlp
         self.feature_dim = int(feature_dim)
         self.state_dim = int(state_dim)
         self.noise_dim = int(noise_dim)
@@ -60,8 +61,8 @@ class DSRLNoiseActor(nn.Module):
         if self.noise_bound <= 0:
             raise ValueError(f"dsrl noise_bound must be positive, got {self.noise_bound}")
 
-        feature_latent_dim = int(config.feature_latent_dim)
-        state_latent_dim = int(config.state_latent_dim)
+        feature_latent_dim = int(actor_config.feature_latent_dim)
+        state_latent_dim = int(actor_config.state_latent_dim)
         self.feature_encoder = nn.Sequential(
             nn.Linear(self.feature_dim, feature_latent_dim),
             nn.LayerNorm(feature_latent_dim),
@@ -75,7 +76,7 @@ class DSRLNoiseActor(nn.Module):
 
         trunk: list[nn.Module] = []
         in_dim = feature_latent_dim + state_latent_dim
-        for hidden_dim in (int(h) for h in config.hidden_dims):
+        for hidden_dim in (int(h) for h in actor_config.hidden_dims):
             trunk += [nn.Linear(in_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.ReLU()]
             in_dim = hidden_dim
         self.trunk = nn.Sequential(*trunk)

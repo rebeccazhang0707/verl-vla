@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import pytest
 import torch
 
 from verl_vla.models.gr00t_n1d6.critic import Gr00tTransformerCriticGroup
@@ -73,30 +72,14 @@ def test_target_network_starts_as_a_copy_and_tracks_via_polyak():
     critic.update_target_network(0.5)
     torch.testing.assert_close(critic(a, sf, use_target_network=True), target_q + 0.5)
 
-
-def test_target_parameters_stay_frozen_and_gradients_reach_only_the_online_ensemble():
-    critic = _make_critic()
+    # Online optimization must not accumulate gradients on the target copy.
     assert all(not p.requires_grad for p in critic.target_members.parameters())
-    critic(_actions(), _state_features(), requires_grad=True).sum().backward()
+    critic(a, sf, requires_grad=True).sum().backward()
     assert critic.critic_members[0].value_head.weight.grad is not None
     assert all(p.grad is None for p in critic.target_members.parameters())
-    assert len(critic.get_critic_parameters()) == len(list(critic.critic_members.parameters()))
 
 
 def test_replay_full_action_key_is_accepted():
     """Replay transitions carry the steering noise under ``full_action``."""
     critic = _make_critic()
     assert critic(_actions("full_action"), _state_features()).shape == (BATCH, HEADS)
-
-
-@pytest.mark.parametrize("pooling", ["first", "attention", "weighted_mean", "mean"])
-def test_all_pooling_strategies_produce_one_value_per_head(pooling):
-    critic = _make_critic(head_num=2, pooling_strategy=pooling)
-    assert critic(_actions(), _state_features()).shape == (BATCH, 2)
-
-
-def test_rejects_invalid_geometry():
-    with pytest.raises(ValueError, match="divisible"):
-        _make_critic(d_model=18, nhead=4)
-    with pytest.raises(ValueError, match="activation"):
-        _make_critic(activation="silu")

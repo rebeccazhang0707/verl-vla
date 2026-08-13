@@ -48,8 +48,12 @@ sac:
   # Target entropy used when auto_entropy is enabled
   target_entropy: -64.0
 
-  # Include the -alpha*log_pi entropy term in the critic TD target. DSRL disables
-  # it because the summed noise log-prob dwarfs the reward in that target.
+  # Include the -alpha*log_pi entropy term in the critic TD target. DSRL must
+  # disable it: the noise log-prob is summed over chunk_size * noise_dim, so at
+  # alpha~0.5 it contributes about +444 to every target while the reward is at
+  # most 1.0. This buries the reward signal and can invert the critic's
+  # positive/negative ordering, observed as critic/td_loss around 2e5 and a
+  # negative critic/diff_pos_neg_qvalue_mean.
   backup_entropy: true
 
 # Optional TD3+BC actor loss.

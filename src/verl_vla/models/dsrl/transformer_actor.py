@@ -73,6 +73,7 @@ class DSRLTransformerNoiseActor(nn.Module):
     ) -> None:
         super().__init__()
         config = config or DSRLSteeringConfig()
+        actor_config = config.transformer
         self.feature_dim = int(feature_dim)
         self.state_dim = int(state_dim)
         self.noise_dim = int(noise_dim)
@@ -88,14 +89,12 @@ class DSRLTransformerNoiseActor(nn.Module):
         # over the chunk (a single-token transformer, RLinf parity).
         self.chunk_size = self.noise_horizon if self.noise_per_step else 1
 
-        d_model = int(config.d_model)
-        nhead = int(config.nhead)
+        d_model = int(actor_config.d_model)
+        nhead = int(actor_config.nhead)
         if d_model % nhead != 0:
             raise ValueError(f"dsrl d_model ({d_model}) must be divisible by nhead ({nhead})")
-        if config.transformer_activation not in ("relu", "gelu"):
-            raise ValueError(
-                f"dsrl transformer_activation must be 'relu' or 'gelu', got {config.transformer_activation}"
-            )
+        if actor_config.activation not in ("relu", "gelu"):
+            raise ValueError(f"dsrl transformer activation must be 'relu' or 'gelu', got {actor_config.activation}")
         self.d_model = d_model
 
         # Observation featurizer: concat the frozen features and raw state, then
@@ -104,19 +103,19 @@ class DSRLTransformerNoiseActor(nn.Module):
         self.obs_projection = nn.Linear(self.feature_dim + self.state_dim, d_model)
         self.input_norm = nn.LayerNorm(d_model)
         self.position_embedding = _PositionalEncoding(
-            d_model, max_len=max(self.chunk_size, 1), dropout=float(config.positional_dropout)
+            d_model, max_len=max(self.chunk_size, 1), dropout=float(actor_config.positional_dropout)
         )
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
-            dropout=float(config.transformer_dropout),
-            activation=str(config.transformer_activation),
+            dropout=float(actor_config.dropout),
+            activation=str(actor_config.activation),
             batch_first=True,
         )
         self.transformer_encoder = nn.TransformerEncoder(
             encoder_layer=encoder_layer,
-            num_layers=int(config.num_encoder_layers),
+            num_layers=int(actor_config.num_encoder_layers),
             norm=nn.LayerNorm(d_model),
         )
         self.pre_output_norm = nn.LayerNorm(d_model)
@@ -131,7 +130,7 @@ class DSRLTransformerNoiseActor(nn.Module):
         # posttrain init: a zero log-std head starts the policy at std=exp(log_std_init).
         with torch.no_grad():
             self.log_std_processor[-1].weight.zero_()
-            self.log_std_processor[-1].bias.fill_(float(config.log_std_init))
+            self.log_std_processor[-1].bias.fill_(float(actor_config.log_std_init))
 
     def forward(self, features: torch.Tensor, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the per-step pre-tanh Gaussian ``(mean, log_std)`` in float32.

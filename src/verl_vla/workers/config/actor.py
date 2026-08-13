@@ -45,12 +45,6 @@ class SACConfig(BaseConfig):
     alpha_type: str = "exp"
     alpha_lr: float = 3e-4
     target_entropy: float = -64.0
-    # Include the -alpha*log_pi entropy term in the critic TD target. DSRL must
-    # disable it: the noise log-prob is summed over chunk_size * noise_dim, so at
-    # alpha~0.5 it contributes ~+444 to every target while the reward is <=1.0,
-    # which buries the reward signal and inverts the critic's positive/negative
-    # ordering (observed as critic/td_loss ~2e5 and a negative
-    # critic/diff_pos_neg_qvalue_mean).
     backup_entropy: bool = True
 
     def __post_init__(self):

@@ -17,6 +17,18 @@
 # noise is stored in replay under ``steering_noise``. DSRL is mutually
 # exclusive with Flow-SDE.
 
+# Hydra configuration composition order.
+defaults:
+
+  # MLP noise-actor implementation settings.
+  - /model/adapter/dsrl/actor@mlp: mlp
+
+  # Transformer noise-actor implementation settings.
+  - /model/adapter/dsrl/actor@transformer: transformer
+
+  # Apply shared DSRL settings last.
+  - _self_
+
 # Master switch for DSRL noise steering.
 enabled: false
 
@@ -25,38 +37,6 @@ enabled: false
 #   transformer: the posttrain reference chunking actor -- one token per flow
 #     horizon step, mixed by a Transformer encoder (see the block further down).
 actor_type: mlp
-
-# MLP trunk widths of the noise actor (actor_type=mlp).
-hidden_dims: [256, 256, 256]
-
-# Projection width of the frozen policy features (actor_type=mlp).
-feature_latent_dim: 128
-
-# Projection width of the normalized robot state (actor_type=mlp).
-state_latent_dim: 64
-
-# Token width of the noise-actor Transformer (actor_type=transformer).
-d_model: 256
-
-# Attention heads of the noise-actor Transformer; must divide d_model.
-nhead: 8
-
-# Transformer encoder depth of the noise actor.
-num_encoder_layers: 1
-
-# Dropout inside the noise-actor Transformer encoder. Kept at 0 so deterministic
-# (eval) steering noise stays reproducible without an explicit eval() toggle.
-transformer_dropout: 0.0
-
-# Activation of the noise-actor Transformer encoder: relu or gelu.
-transformer_activation: gelu
-
-# Dropout applied to the noise actor's positional encoding.
-positional_dropout: 0.0
-
-# Initial bias of the zero-weight log-std head, i.e. the initial policy std
-# (actor_type=transformer).
-log_std_init: 0.0
 
 # Optional explicit policy-feature width; null derives it from the model.
 feature_dim: null

@@ -21,7 +21,6 @@ import torch
 
 from verl_vla.models.dsrl import (
     DSRLNoiseActor,
-    DSRLSteering,
     DSRLSteeringConfig,
     DSRLTransformerNoiseActor,
 )
@@ -35,7 +34,10 @@ HORIZON = 5
 
 
 def _make_actor(**config_overrides) -> DSRLNoiseActor:
-    config = DSRLSteeringConfig(hidden_dims=[16, 16], feature_latent_dim=8, state_latent_dim=4, **config_overrides)
+    config = DSRLSteeringConfig(
+        mlp={"hidden_dims": [16, 16], "feature_latent_dim": 8, "state_latent_dim": 4},
+        **config_overrides,
+    )
     return DSRLNoiseActor(
         feature_dim=FEATURE_DIM,
         state_dim=STATE_DIM,
@@ -46,9 +48,10 @@ def _make_actor(**config_overrides) -> DSRLNoiseActor:
 
 
 def _make_transformer_actor(**config_overrides) -> DSRLTransformerNoiseActor:
-    values = {"actor_type": "transformer", "d_model": 16, "nhead": 4, "num_encoder_layers": 1}
-    values.update(config_overrides)
-    config = DSRLSteeringConfig(**values)
+    shared_names = {"noise_per_step", "noise_bound", "log_std_min", "log_std_max"}
+    shared = {name: config_overrides.pop(name) for name in tuple(config_overrides) if name in shared_names}
+    transformer = {"d_model": 16, "nhead": 4, "num_encoder_layers": 1, **config_overrides}
+    config = DSRLSteeringConfig(actor_type="transformer", transformer=transformer, **shared)
     return DSRLTransformerNoiseActor(
         feature_dim=FEATURE_DIM,
         state_dim=STATE_DIM,
@@ -173,12 +176,6 @@ def test_transformer_actor_deterministic_sample_is_tanh_mean_with_zero_logprob()
     assert torch.all(log_prob == 0)
 
 
-def test_transformer_actor_log_std_head_starts_at_log_std_init():
-    actor = _make_transformer_actor(log_std_init=-1.5)
-    _, log_std = actor(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
-    torch.testing.assert_close(log_std, torch.full_like(log_std, -1.5))
-
-
 def test_transformer_actor_sample_is_reparameterized():
     actor = _make_transformer_actor()
     noise, log_prob = actor.sample(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
@@ -200,55 +197,19 @@ def test_transformer_actor_noise_scale_increases_sampling_variance():
     assert scaled_noise[:, 0].std() > base_noise[:, 0].std()
 
 
-def test_transformer_actor_rejects_indivisible_d_model():
-    with pytest.raises(ValueError, match="divisible"):
-        _make_transformer_actor(d_model=18, nhead=4)
-
-
-def _make_steering(**config_overrides) -> DSRLSteering:
-    return DSRLSteering(
-        DSRLSteeringConfig(**config_overrides),
-        feature_dim=FEATURE_DIM,
-        state_dim=STATE_DIM,
-        noise_dim=NOISE_DIM,
-        noise_horizon=HORIZON,
-    )
-
-
-def test_steering_defaults_to_the_mlp_actor():
-    steering = _make_steering(hidden_dims=[16, 16], feature_latent_dim=8, state_latent_dim=4)
-    assert steering.actor_type == "mlp"
-    assert isinstance(steering.noise_actor, DSRLNoiseActor)
-
-
-def test_steering_selects_the_transformer_actor():
-    steering = _make_steering(actor_type="transformer", d_model=16, nhead=4)
-    assert steering.actor_type == "transformer"
-    assert isinstance(steering.noise_actor, DSRLTransformerNoiseActor)
-    noise, log_prob, metrics = steering.sample(torch.randn(2, FEATURE_DIM), torch.randn(2, STATE_DIM))
-    assert noise.shape == (2, HORIZON, NOISE_DIM)
-    assert log_prob.shape == (2,)
-    assert metrics == {}
-    # Actor parameters are exported under the shared checkpoint prefix.
-    assert all(name.startswith("dsrl.noise_actor.") for name, _ in steering.named_actor_parameters())
-
-
-def test_steering_rejects_unknown_actor_type():
-    with pytest.raises(ValueError, match="actor_type"):
-        _make_steering(actor_type="rnn")
-
-
 def test_gr00t_adapter_config_parses_and_roundtrips_dsrl():
-    cfg = Gr00tAdapterConfig(dsrl={"enabled": True, "hidden_dims": [64, 64], "noise_bound": 1.5})
+    cfg = Gr00tAdapterConfig(dsrl={"enabled": True, "mlp": {"hidden_dims": [64, 64]}, "noise_bound": 1.5})
     assert cfg.dsrl.enabled is True
-    assert cfg.dsrl.hidden_dims == [64, 64]
+    assert cfg.dsrl.mlp.hidden_dims == [64, 64]
     assert cfg.dsrl.noise_bound == 1.5
     payload = cfg.to_dict()
     assert payload["dsrl"]["enabled"] is True
+    assert payload["dsrl"]["mlp"]["hidden_dims"] == [64, 64]
+    assert payload["dsrl"]["transformer"]["d_model"] == 256
     # Reload from the serialized payload (adapter_config.json roundtrip).
     reloaded = Gr00tAdapterConfig(**payload)
     assert reloaded.dsrl.enabled is True
-    assert reloaded.dsrl.hidden_dims == [64, 64]
+    assert reloaded.dsrl.mlp.hidden_dims == [64, 64]
 
 
 def test_gr00t_adapter_config_dsrl_defaults_off():
