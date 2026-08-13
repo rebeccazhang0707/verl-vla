@@ -14,8 +14,17 @@
 
 # Official-style DSRL CNN actor settings.
 
+# Hidden-layer dimensions for the actor MLP.
 hidden_dims: [128, 128, 128]
+
+# Spatial size used for encoded RGB observations.
 image_size: 64
+
+# Output channels for each CNN encoder layer.
 features: [32, 32, 32, 32]
+
+# Stride for each CNN encoder layer.
 strides: [2, 1, 1, 1]
+
+# Output dimension of the CNN observation encoder.
 latent_dim: 50

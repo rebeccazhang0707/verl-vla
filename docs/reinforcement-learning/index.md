@@ -5,4 +5,5 @@
 
 td3-bc/index
 recap/index
+dsrl/index
 ```

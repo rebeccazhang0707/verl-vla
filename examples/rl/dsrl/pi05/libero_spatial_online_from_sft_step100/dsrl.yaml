@@ -1,0 +1,115 @@
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/sac@_global_
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: pi0
+  - _self_
+
+output_dir: ???
+
+cluster:
+  env:
+    env_loop:
+      pipeline_stage_num: 2
+      max_interactions: 20
+    env_worker:
+      auto_reset: true
+      modes: [train, eval]
+      simulator:
+        libero:
+          task_suite_name: libero_spatial
+          task_ids: ???
+          max_episode_steps: 200
+      recorder:
+        enable: true
+        recorders: [video]
+        video:
+          root: ${output_dir}/videos
+
+  actor_rollout_ref:
+    model:
+      adapter:
+        embodiment: libero
+        action_chunk_size: 10
+        dsrl:
+          enabled: true
+          actor_type: cnn
+          state_dim: 8
+          mlp:
+            feature_latent_dim: 64
+            state_latent_dim: 64
+            hidden_dims: [128, 128, 128]
+          noise_per_step: true
+          rollout_noise_scale: ???
+        critic:
+          type: cnn
+          head_num: 10
+          input_dim: 2112
+          hidden_dims: [512, 256, 128]
+        flow_sde_enable: false
+
+    actor:
+      actor_update_interval: 2
+      optim:
+        lr: 5e-6
+        clip_grad: 3.5
+        warmup_style: constant
+      sac:
+        auto_entropy: false
+        initial_alpha: 0.0
+      td3:
+        enabled: false
+      cql:
+        enabled: true
+        alpha: 0.5
+        temperature: 1.0
+        noise_scale: 1.0
+      critic:
+        lr: 1e-4
+        gamma: 0.999
+        tau: 0.005
+        force_target_tau_one_in_warmup: true
+        skip_update_when_actor_update: true
+        warmup_steps: 400
+        only_steps_after_rollout: 0
+      replay:
+        critic_positive_sample_ratio: 0.5
+        actor_positive_sample_ratio: 0.9
+        online_sample_batch_size: 128
+        offline_sample_batch_size: 0
+        save_interval: 100
+        save_dir: ${output_dir}/replay
+        online_single_size: 20000
+        offline_single_size: 1000
+
+    rollout:
+      mode: async_envloop
+      prompt_length: 512
+      free_cache_engine: false
+      output_critic_value: false
+
+  checkpoint:
+    resume_mode: disable
+    default_local_dir: ${output_dir}/checkpoints
+    max_actor_ckpt_to_keep: 2
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      env_vars:
+        TENSORBOARD_DIR: ???
+
+trainer:
+  project_name: pi05-libero-dsrl
+  experiment_name: pi05-libero-spatial-task2-online-from-sft-step100-dsrl
+  logger: [console, tensorboard]
+  total_training_steps: 1000
+  rollout_interval: 50
+  rollout_times: 1
+  warm_rollout_steps: 1
+  save_freq: 100
+  test_freq: 50
+  eval_episodes: 50
+  val_before_train: true
