@@ -28,12 +28,6 @@ python scripts/install_libero_assets.py
 python scripts/install_checks/check_libero.py
 ```
 
-LeRobot is installed without dependency resolution because LeRobot 0.4.4
-requires `rerun-sdk>=0.24`, whose Linux wheels require NumPy 2, while verl
-0.7.1 requires NumPy 1. The preceding requirements file supplies the verified
-runtime versions. Keep `.venv` activated when running the training and
-evaluation launchers.
-
 ## Start training
 
 ```bash
@@ -89,10 +83,11 @@ statistics and training outputs are reused from the training output directory.
 | Micro-batch size | 16 |
 | DataLoader workers | 8 |
 | Action horizon | 10 |
-| Epochs | 25 (approximately 5,150 steps) |
+| Epochs | 15 (approximately 3,090 steps) |
 | Learning rate | `1e-4` |
 | Weight decay | `1e-5` |
 | Warmup ratio | `0.05` |
+| Checkpoint interval | 100 steps |
 | Distributed strategy | FSDP2 |
 | Model dtype | BF16 |
 | Output | `outputs/train/pi05-sft/libero-spatial` |
@@ -102,7 +97,7 @@ statistics and training outputs are reused from the training output directory.
 A running job reports loss and gradient metrics in the console:
 
 ```text
-Training Progress: 1/5150 ... grad_pre=... sft_loss=...
+Training Progress: 1/3090 ... grad_pre=... sft_loss=...
 ```
 
 Event files are written to:
@@ -136,11 +131,12 @@ GPU utilization can be inspected from another terminal:
 watch -n 1 nvidia-smi
 ```
 
-The loss curve from a reference run is shown below:
+The reference run's per-step loss and 50-step moving average through step 3,000
+are shown below:
 
 ![PI0.5 LIBERO Spatial SFT loss](../../_static/images/pi05-libero-spatial-sft-loss.png)
 
-## Evaluate the checkpoint
+## Evaluate checkpoints
 
 The evaluation launcher reads the latest saved checkpoint and runs the full
 LIBERO Spatial benchmark:
@@ -149,7 +145,28 @@ LIBERO Spatial benchmark:
 bash examples/fine_tuning/pi05/run_eval.sh
 ```
 
-The reference run evaluated all 10 tasks with 10 trials per task:
+The reference run evaluated all 10 tasks with 10 trials per task at every
+100-step checkpoint. Each point below therefore summarizes 100 trajectories:
+
+![PI0.5 LIBERO Spatial SFT checkpoint success rate](../../_static/images/pi05-libero-spatial-sft-success-rate.png)
+
+| Step | Success | Step | Success | Step | Success |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 54% | 1,100 | 96% | 2,100 | 98% |
+| 200 | 72% | 1,200 | 96% | 2,200 | 98% |
+| 300 | 76% | 1,300 | 97% | 2,300 | 98% |
+| 400 | 86% | 1,400 | 95% | 2,400 | 100% |
+| 500 | 88% | 1,500 | 96% | 2,500 | 100% |
+| 600 | 95% | 1,600 | 96% | 2,600 | 97% |
+| 700 | 87% | 1,700 | 97% | 2,700 | 96% |
+| 800 | 93% | 1,800 | 98% | 2,800 | 96% |
+| 900 | 97% | 1,900 | 99% | 2,900 | 99% |
+| 1,000 | 97% | 2,000 | 98% | 3,000 | 100% |
+
+Success first reached 100% at step 2,400 and did so again at steps 2,500 and
+3,000. Step 2,500 is the recommended checkpoint because it combined 100%
+success with the shortest mean successful trajectory among those three
+checkpoints. Its full evaluation result is:
 
 | Metric | Value |
 | --- | ---: |
@@ -158,10 +175,9 @@ The reference run evaluated all 10 tasks with 10 trials per task:
 | Successful trajectories | 100 / 100 |
 | Success rate | 100% |
 | Average return | 1.0 |
-| Average successful trajectory length | 98.72 |
-| Average successful trajectory chunk length | 10.34 |
-| Total evaluation time | 51.69 seconds |
+| Average successful trajectory length | 98.89 |
+| Average successful trajectory chunk length | 10.32 |
 
-Every task achieved a 100% success rate. The
+Every task achieved a 100% success rate at step 2,500. The
 [complete evaluation metrics](../../_static/results/pi05-libero-spatial-eval.json)
 include per-task trajectory lengths, counts, timing, and throughput.

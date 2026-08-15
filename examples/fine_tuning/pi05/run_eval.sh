@@ -21,6 +21,7 @@ exec vvla-eval \
   cluster.resource.env.device=cpu \
   cluster.resource.env.workers_per_node=8 \
   cluster.env.env_worker.num_envs=2 \
+  ray_kwargs.ray_init.runtime_env.env_vars.MUJOCO_GL=osmesa \
   max_episodes=null \
   "output_dir=$OUTPUT_DIR" \
   "$@"
