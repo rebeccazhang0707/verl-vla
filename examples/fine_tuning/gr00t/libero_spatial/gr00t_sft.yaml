@@ -1,0 +1,62 @@
+# GR00T N1.6 SFT on the official LIBERO Spatial demonstrations.
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/sft@_global_
+  - override /model/override@cluster.actor_rollout_ref.model.override_config: gr00t
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: gr00t
+  - _self_
+
+cluster:
+  checkpoint:
+    default_local_dir: ./outputs/train/gr00t-sft/libero-spatial/checkpoints
+
+  actor_rollout_ref:
+    model:
+      load_tokenizer: false
+      enable_gradient_checkpointing: false
+      use_remove_padding: false
+      trust_remote_code: true
+      adapter:
+        policy_type: libero
+        embodiment_tag: libero_panda
+        action_dim: 7
+        embodiment_id: 2
+        num_action_chunks: 8
+        override_modality_configs: true
+        use_relative_action: true
+        freeze_vision_tower: false
+        freeze_action_io: false
+        critic:
+          enabled: false
+      override_config:
+        load_bf16: true
+
+    actor:
+      strategy: fsdp2
+      fsdp_config:
+        model_dtype: float32
+        use_torch_compile: false
+        ulysses_sequence_parallel_size: 1
+        wrap_policy:
+          transformer_layer_cls_to_wrap:
+            - Qwen3DecoderLayer
+            - Siglip2EncoderLayer
+            - BasicTransformerBlock
+
+data:
+  action_delta_steps: 16
+
+trainer:
+  project_name: gr00t-sft
+  experiment_name: libero-spatial
+  save_freq: 100
+  save_last: true
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      env_vars:
+        TENSORBOARD_DIR: ./outputs/train/gr00t-sft/libero-spatial/tensorboard

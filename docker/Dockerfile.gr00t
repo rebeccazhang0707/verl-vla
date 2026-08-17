@@ -107,9 +107,8 @@ RUN set -eux; \
       tar -xzf "${assets_archive}" --directory "${assets_dir}"; \
       rm -f "${assets_archive}"; \
     else \
-      hf download jadechoghari/libero-assets \
-        --revision "${LIBERO_ASSETS_REVISION}" \
-        --local-dir "${assets_dir}"; \
+      ASSETS_DIR="${assets_dir}" LIBERO_ASSETS_REVISION="${LIBERO_ASSETS_REVISION}" \
+        python -c 'import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id="jadechoghari/libero-assets", revision=os.environ["LIBERO_ASSETS_REVISION"], local_dir=os.environ["ASSETS_DIR"])'; \
       rm -rf "${assets_dir}/.cache"; \
     fi; \
     test -f "${assets_dir}/scenes/libero_tabletop_base_style.xml"

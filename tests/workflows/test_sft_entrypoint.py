@@ -58,14 +58,13 @@ def test_pi05_sft_example_composes_through_training_entrypoint():
 
 def test_gr00t_sft_example_composes_through_training_entrypoint():
     config = _compose_sft_config(
-        "--config-path",
-        str(REPO_ROOT / "examples/fine_tuning/gr00t"),
+        "--config-dir",
+        str(REPO_ROOT / "examples/fine_tuning/gr00t/libero_spatial"),
         "--config-name",
-        "main_gr00t_sft",
-        f"hydra.searchpath=[file://{REPO_ROOT}/src/verl_vla/workflows/config]",
+        "gr00t_sft",
     )
 
     assert config.ray_kwargs.ray_init is not None
     assert config.cluster.actor_rollout_ref.model.adapter.policy_type == "libero"
     assert config.cluster.actor_rollout_ref.model.override_config.load_bf16 is True
-    assert config.data.repo_id == "lerobot/libero_spatial_image"
+    assert config.data.action_delta_steps == 16
