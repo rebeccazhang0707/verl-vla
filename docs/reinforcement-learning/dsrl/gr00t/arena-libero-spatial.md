@@ -83,16 +83,16 @@ Run the launcher from the repository root, once per task:
 
 ```bash
 TASK_ID=7 TOTAL_TRAINING_STEPS=8000 \
-  bash examples/rl/dsrl/gr00t/run_gr00t_arena_libero_dsrl.sh
+  bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh
 ```
 
-`TASK_ID` is the zero-based LIBERO Spatial task. The launcher
-hard-codes the settings that define this recipe and exposes only the task,
-schedule, topology, and paths as environment variables. Any extra argument is
-forwarded to Hydra verbatim, so a one-off change needs no edit:
+`TASK_ID` is the zero-based LIBERO Spatial task; it defaults to 3. The recipe
+itself lives in `dsrl.yaml` beside the launcher, which supplies only the
+machine-specific choices: checkpoint, output root, GPU counts, and batch sizes.
+Any extra argument is forwarded to Hydra, so a one-off change needs no edit:
 
 ```bash
-TASK_ID=7 bash examples/rl/dsrl/gr00t/run_gr00t_arena_libero_dsrl.sh \
+TASK_ID=7 bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh \
   cluster.actor_rollout_ref.actor.sac.target_entropy=-64.0
 ```
 

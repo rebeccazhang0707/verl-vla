@@ -6,9 +6,9 @@ flow-matching initial noise `x0`, plus its SAC critic. The steering noise is the
 SAC action: it seeds the frozen flow head, which decodes it into the
 environment action with a deterministic Euler ODE.
 
-`run_gr00t_arena_libero_dsrl.sh` reproduces the published LIBERO-Spatial runs. The
+`run_train.sh` reproduces the published LIBERO-Spatial runs. The
 results, baselines, and known measurement gaps are in
-[the recipe guide](../../../../docs/reinforcement-learning/dsrl/gr00t/arena-libero-spatial.md).
+[the recipe guide](../../../../../docs/reinforcement-learning/dsrl/gr00t/arena-libero-spatial.md).
 
 ## Setup
 
@@ -69,14 +69,14 @@ docker run --rm --gpus all --network=host --ipc=host --privileged --shm-size=64g
   -v "$PWD/.data/libero/assembled_hdf5":/workspace/project/.data/libero/assembled_hdf5:ro \
   -w /workspace/project -e RAY_TMPDIR=/tmp/ray -e TASK_ID=7 \
   isaaclab_arena:gr00t-runtime \
-  bash examples/rl/dsrl/gr00t/run_gr00t_arena_libero_dsrl.sh
+  bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh
 ```
 
 Inside an already-running container it is just:
 
 ```bash
 TASK_ID=7 TOTAL_TRAINING_STEPS=8000 \
-  bash examples/rl/dsrl/gr00t/run_gr00t_arena_libero_dsrl.sh
+  bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh
 ```
 
 The first run on a fresh image spends a long time before the first training
@@ -85,39 +85,50 @@ Those land in `.data/gr00t_arena/cache/`, which the launcher creates and the
 image symlinks `/root/.cache` to, so later runs are much faster. Raise
 `SIM_START_TIMEOUT_S` if the cold start still times out.
 
-The launcher hard-codes the settings that define this recipe — noise-actor
-architecture, critic architecture, learning rates, entropy schedule, replay
-sampling. Those are the recipe, not tuning knobs, so they are not exposed as
-environment variables. Anything else is a Hydra override passed as an argument:
+`dsrl.yaml` owns the recipe — noise-actor and critic architecture, learning
+rates, entropy schedule, replay sampling, rollout and evaluation cadence. The
+launcher owns only what varies with the machine. Anything else is a Hydra
+override passed as an argument:
 
 ```bash
-TASK_ID=7 bash examples/rl/dsrl/gr00t/run_gr00t_arena_libero_dsrl.sh \
+TASK_ID=7 bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh \
   cluster.actor_rollout_ref.actor.sac.target_entropy=-64.0
 ```
 
 ### Environment variables
 
+The launcher exposes only what varies with the machine. Everything else lives
+in `dsrl.yaml`.
+
 | Var | Default | Meaning |
 | --- | --- | --- |
-| `TASK_SUITE` / `TASK_ID` | `libero_spatial` / `3` | LIBERO suite and zero-based task |
-| `GROOT_MODEL_PATH` | `.data/models/checkpoint-10000` | Starting GR00T checkpoint |
-| `LIBERO_DATA_ROOT` | `.data/libero` | LIBERO USD / HDF5 asset tree |
-| `OUTPUT_ROOT` | `outputs/rl/dsrl/gr00t/<suite>-task<id>` | Videos, checkpoints, TensorBoard |
-| `REPLAY_POOL_DIR` | `$OUTPUT_ROOT/replay_pools` | Replay shards (see below) |
-| `TENSORBOARD_DIR` | `$OUTPUT_ROOT/tensorboard` | TensorBoard event files |
+| `TASK_ID` | `3` | LIBERO Spatial task, zero-based |
+| `MODEL_PATH` | `.data/models/checkpoint-10000` | Starting GR00T checkpoint |
+| `OUTPUT_DIR` | `outputs/rl/dsrl/gr00t/arena-libero-spatial-task<id>` | Output root; checkpoints, replay, videos, and TensorBoard derive from it |
 | `NUM_ENV_GPUS` / `NUM_MODEL_GPUS` | `4` / `4` | Simulation and model GPU pools |
 | `NUM_ENV` | `64` | Isaac environments **per env worker** |
-| `TOTAL_TRAINING_STEPS` | `8000` | Optimizer steps |
-| `ROLLOUT_INTERVAL` | `160` | Steps between online rollouts |
-| `SAVE_FREQ` / `TEST_FREQ` | `500` / `500` | Checkpoint and evaluation cadence |
-| `EVAL_EPISODES` | `32` | Trajectories aggregated per evaluation |
-| `SIM_START_TIMEOUT_S` | `2400` | Isaac Sim startup budget per env worker |
-| `RESUME_MODE` | `disable` | `resume_path` to continue a run |
-| `EXPERIMENT_NAME` | `dsrl_<suite>_task<id>` | TensorBoard run name |
-| `ARENA_ROOT` | `/workspace/arena` | Arena checkout inside the image |
+| `LIBERO_DATA_ROOT` | `.data/libero` | LIBERO USD / HDF5 asset tree |
 | `LIBERO_ASSETS_DATA_DIR` | `$LIBERO_DATA_ROOT/USD` | Scene / object USDs |
 | `LIBERO_ASSEMBLED_DATASET_DIR` | `$LIBERO_DATA_ROOT/assembled_hdf5` | Demo HDF5 for state reset |
 | `LIBERO_CONFIG_DIR` | under `$ARENA_ROOT` | Arena's LIBERO task-config JSONs |
+| `ARENA_ROOT` | `/workspace/arena` | Arena checkout inside the image |
+
+Recipe settings — noise-actor and critic architecture, learning rates, entropy
+schedule, replay sampling, rollout and evaluation cadence, the training-step
+budget — are in `dsrl.yaml`. Change one for a single run with a Hydra override
+rather than editing the file:
+
+```bash
+TASK_ID=7 bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh \
+  trainer.total_training_steps=2000 \
+  cluster.env.env_worker.simulator_start_timeout_s=3600
+```
+
+Inspect the fully composed job without launching training:
+
+```bash
+bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh --cfg job
+```
 
 ## Topology
 
@@ -167,5 +178,5 @@ non-monotonic on every task, so the final checkpoint is often not the best one.
   noise. The verl checkpoint carries the noise actor and critic; the native
   Hugging Face export stays an unchanged upstream policy.
 - The SAC and evaluation launchers for GR00T Arena live in
-  [`examples/rl/sac/gr00t/`](../../sac/gr00t/README.md) and still use
+  [`examples/rl/sac/gr00t/`](../../../sac/gr00t/README.md) and still use
   `run_docker.sh`. This DSRL recipe is self-contained and does not.

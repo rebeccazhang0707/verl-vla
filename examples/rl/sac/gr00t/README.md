@@ -40,7 +40,7 @@ run_docker.sh   →   (re)creates the GR00T container + mounts   →   runs an i
 | `run_docker.sh` | GR00T container launcher. Mounts image/repo/Arena/models, runs the inner script named by `INNER_SCRIPT`. |
 | `run_gr00t_arena_eval.sh` | GR00T rollout through the shared `eval` workflow. `ARENA_TASK=gr1\|libero`. |
 | `run_gr00t_arena_sac.sh` | GR00T SAC training. `ARENA_TASK=gr1\|libero`. |
-| (DSRL) | Moved to `examples/rl/dsrl/gr00t/run_gr00t_arena_libero_dsrl.sh` — Arena LIBERO only, run directly inside the container. |
+| (DSRL) | Moved to `examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh` — Arena LIBERO only, run directly inside the container. |
 
 Inner scripts are meant to run *inside* the container, but `run_docker.sh`
 launches them for you — you normally never call them directly.
@@ -226,7 +226,7 @@ DSRL now lives under its own workflow directory and is self-contained: run it
 inside the container rather than through `run_docker.sh`.
 
 ```bash
-TASK_ID=3 bash examples/rl/dsrl/gr00t/run_gr00t_arena_libero_dsrl.sh
+TASK_ID=3 bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh
 ```
 
 ### Start a container / shell only
@@ -388,7 +388,7 @@ scores that steering noise; replay stores it separately from the normalized
 model action and decoded environment action.
 
 The maintained DSRL recipe is
-`examples/rl/dsrl/gr00t/run_gr00t_arena_libero_dsrl.sh`. Its algorithm settings are
+`examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh`. Its algorithm settings are
 fixed to the published recipe; see
 `docs/reinforcement-learning/dsrl/gr00t/arena-libero-spatial.md`.
 

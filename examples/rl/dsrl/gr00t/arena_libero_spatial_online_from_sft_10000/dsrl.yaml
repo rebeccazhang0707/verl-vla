@@ -1,0 +1,102 @@
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/sac@_global_
+  - override /model/adapter@cluster.actor_rollout_ref.model.adapter: gr00t
+  - override /model/override@cluster.actor_rollout_ref.model.override_config: gr00t
+  - _self_
+
+output_dir: ???
+
+cluster:
+  env:
+    env_loop:
+      max_interactions: 20
+
+    env_worker:
+      auto_reset: true
+      simulator_start_timeout_s: 2400
+      simulator:
+        simulator_type: arena
+        arena:
+          environment: libero
+          sim_dt: 0.016666666666666666
+          decimation: 3
+          libero:
+            libero_task_suite: libero_spatial
+            libero_task_id: ???
+      recorder:
+        enable: true
+        recorders: [video]
+        video:
+          fps: 20
+          root: ${output_dir}/videos
+
+  actor_rollout_ref:
+    model:
+      trust_remote_code: true
+      load_tokenizer: false
+      use_remove_padding: false
+      adapter:
+        embodiment_tag: new_embodiment
+        embodiment_id: 10
+        action_dim: 7
+        num_action_chunks: 16
+        dsrl:
+          enabled: true
+          actor_type: transformer
+          noise_per_step: true
+        critic:
+          type: transformer
+          head_num: 4
+          layernorm: true
+
+    actor:
+      actor_update_interval: 1
+      optim:
+        lr: 5e-5
+        warmup_style: constant
+      fsdp_config:
+        model_dtype: bfloat16
+        wrap_policy:
+          transformer_layer_cls_to_wrap:
+            - Qwen3DecoderLayer
+            - Siglip2EncoderLayer
+            - BasicTransformerBlock
+            - MultiEmbodimentActionEncoder
+            - CategorySpecificMLP
+      sac:
+        auto_entropy: true
+        alpha_type: softplus
+        initial_alpha: 1.0
+        target_entropy: 0.0
+        backup_entropy: false
+      critic:
+        lr: 1e-4
+        tau: 0.005
+        warmup_steps: 100
+      replay:
+        actor_positive_sample_ratio: 0.6
+        online_single_size: 20000
+        save_dir: ${output_dir}/replay_pools
+
+    rollout:
+      name: hf
+      output_critic_value: false
+
+  checkpoint:
+    resume_mode: disable
+    default_local_dir: ${output_dir}/checkpoints
+
+trainer:
+  project_name: gr00t-arena-libero-dsrl
+  logger: [console, tensorboard]
+  total_training_steps: 8000
+  rollout_interval: 160
+  warm_rollout_steps: 5
+  save_freq: 500
+  test_freq: 500
+  eval_episodes: 32
+  val_before_train: false
