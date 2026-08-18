@@ -9,4 +9,5 @@ components rather than introducing a separate training stack.
 :maxdepth: 1
 
 pi05/index
+gr00t/index
 ```

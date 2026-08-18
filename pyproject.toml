@@ -139,5 +139,6 @@ verl_vla = [
     "workflows/config/*.yaml",
     "workflows/config/*/*.yaml",
     "workflows/config/*/*/*.yaml",
+    "workflows/config/*/*/*/*.yaml",
     "teleop/obs_server/html/*",
 ]

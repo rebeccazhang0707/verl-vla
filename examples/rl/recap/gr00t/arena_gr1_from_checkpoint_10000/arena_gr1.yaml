@@ -1,0 +1,199 @@
+hydra:
+  searchpath:
+    - pkg://verl_vla.workflows.config
+
+defaults:
+  - /train/recap@_global_
+  - override /model/adapter@recap.policy_eval.cluster.actor_rollout_ref.model.adapter: gr00t
+  - override /model/override@recap.policy_eval.cluster.actor_rollout_ref.model.override_config: gr00t
+  - override /model/adapter@recap.collect_data.cluster.actor_rollout_ref.model.adapter: gr00t
+  - override /model/override@recap.collect_data.cluster.actor_rollout_ref.model.override_config: gr00t
+  - override /model/adapter@recap.train_policy.cluster.actor_rollout_ref.model.adapter: gr00t
+  - override /model/override@recap.train_policy.cluster.actor_rollout_ref.model.override_config: gr00t
+  - _self_
+
+output_dir: ???
+initial_policy_path: ???
+dataset_root: ${output_dir}/datasets/local/gr00t_arena_gr1_recap
+dataset_repo_id: local/gr00t_arena_gr1_recap
+
+recap:
+  num_iterations: 1
+  resume_iteration: 1
+  resume_step: 1
+  sft_dataset_path: ${dataset_root}
+
+  policy_eval:
+    enable: true
+    model_path: ${initial_policy_path}
+    max_episodes: 50
+    result_dir: ${output_dir}/eval_results
+    disable_acp_on_first_iteration: true
+    cluster:
+      actor_rollout_ref:
+        model:
+          path: ${initial_policy_path}
+          tokenizer_path: null
+          load_tokenizer: false
+          trust_remote_code: true
+          adapter:
+            critic:
+              enabled: false
+        rollout:
+          output_critic_value: false
+          acp:
+            enable: true
+      env:
+        env_loop:
+          pipeline_stage_num: 2
+          max_interactions: 32
+        env_worker:
+          modes: [eval]
+          num_envs: 8
+          auto_reset: true
+          simulator_start_timeout_s: 1800
+          simulator:
+            simulator_type: arena
+            arena:
+              environment: gr1
+              asset_cache_dir: ${output_dir}/arena_asset_cache
+          teleop:
+            enable: false
+          recorder:
+            enable: false
+
+  collect_data:
+    enable: true
+    max_episodes: 32
+    cluster:
+      actor_rollout_ref:
+        model:
+          path: ${initial_policy_path}
+          tokenizer_path: null
+          load_tokenizer: false
+          trust_remote_code: true
+          adapter:
+            critic:
+              enabled: false
+        rollout:
+          output_critic_value: false
+          acp:
+            enable: true
+      env:
+        env_loop:
+          pipeline_stage_num: 2
+          max_interactions: 32
+        env_worker:
+          modes: [train]
+          num_envs: 8
+          auto_reset: true
+          simulator_start_timeout_s: 1800
+          simulator:
+            simulator_type: arena
+            arena:
+              environment: gr1
+              asset_cache_dir: ${output_dir}/arena_asset_cache
+          teleop:
+            enable: false
+          recorder:
+            enable: true
+            recorders: [lerobot]
+            lerobot:
+              root: ${output_dir}/datasets
+              repo_id: ${dataset_repo_id}
+              vcodec: h264
+
+  compute_return:
+    enable: true
+    dataset:
+      root: ${dataset_root}
+      repo_id: ${dataset_repo_id}
+
+  train_value_model:
+    enable: true
+    data:
+      root: ${dataset_root}
+      repo_id: ${dataset_repo_id}
+      action_delta_steps: 0
+    cluster:
+      checkpoint:
+        resume_mode: auto
+        default_local_dir: ${output_dir}/checkpoints/value_model
+        max_actor_ckpt_to_keep: 3
+      actor_rollout_ref:
+        model:
+          path: assets/hf_models/recap_resnet18_value_critic
+          tokenizer_path: null
+          load_tokenizer: false
+          override_config:
+            resnet18_path: microsoft/resnet-18
+            image_keys:
+              - observation.images.robot_pov_cam_rgb
+              - observation.images.right_wrist_cam_rgb
+            state_dim: 26
+    trainer:
+      experiment_name: gr00t-arena-gr1-resnet18-value
+      logger: [console, tensorboard]
+      total_epochs: 10
+      save_freq: -1
+      save_last: true
+
+  value_infer:
+    enable: true
+    dataset:
+      root: ${dataset_root}
+      repo_id: ${dataset_repo_id}
+    data:
+      action_delta_steps: 0
+    positive_ratio: 0.3
+    n_step: 50
+    indicator_strategy: future_smoothed_advantage
+    advantage_smoothing_window: 50
+    advantage_smoothing_decay: 0.95
+
+  train_policy:
+    enable: true
+    dataset:
+      root: ${dataset_root}
+      repo_id: ${dataset_repo_id}
+    data:
+      action_delta_steps: 16
+    cluster:
+      checkpoint:
+        resume_mode: auto
+        default_local_dir: ${output_dir}/checkpoints/policy
+        max_actor_ckpt_to_keep: 6
+      actor_rollout_ref:
+        model:
+          path: ${initial_policy_path}
+          tokenizer_path: null
+          load_tokenizer: false
+          trust_remote_code: true
+          override_config:
+            load_bf16: true
+          adapter:
+            num_action_chunks: 16
+            critic:
+              enabled: false
+        actor:
+          strategy: fsdp2
+          fsdp_config:
+            model_dtype: float32
+            use_torch_compile: false
+            wrap_policy:
+              transformer_layer_cls_to_wrap:
+                - Qwen3DecoderLayer
+                - Siglip2EncoderLayer
+                - BasicTransformerBlock
+    trainer:
+      experiment_name: gr00t-arena-gr1-acp-policy
+      logger: [console, tensorboard]
+      total_epochs: 17
+      save_freq: 200
+      save_last: false
+
+ray_kwargs:
+  ray_init:
+    runtime_env:
+      env_vars:
+        TENSORBOARD_DIR: ???

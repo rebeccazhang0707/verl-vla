@@ -1,188 +1,150 @@
 ARG BASE_IMAGE=nvcr.io/nvidia/isaac-sim:6.0.0-dev2
-
 FROM ${BASE_IMAGE}
 
 USER root
 
-# GR00T Policy Build Arguments, these are only used if INSTALL_GROOT is true
-ARG INSTALL_GROOT=false
+ARG ARENA_REPO=https://github.com/rebeccazhang0707/IsaacLab-Arena.git
+ARG ARENA_COMMIT=40ad41612dc89cb0d4ae74112175da2bf1074282
+ARG FLASH_ATTN_WHEEL_URL=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.7.4%2Bcu128torch2.10-cp312-cp312-linux_x86_64.whl
+ARG DEBIAN_FRONTEND=noninteractive
 
-ARG WORKDIR="/workspace"
-ENV WORKDIR=${WORKDIR}
-WORKDIR "${WORKDIR}"
+ENV PIP_NO_CACHE_DIR=1 \
+    ARENA_ROOT=/workspace/arena \
+    ISAACLAB_PATH=/workspace/arena/submodules/IsaacLab \
+    LW_API_ENDPOINT=https://api.lightwheel.net \
+    PATH=/isaac-sim/kit/python/bin:${PATH} \
+    PYTHONPATH=/workspace/arena:/workspace/arena/submodules/Isaac-GR00T:/workspace/project/src
 
-# Hide conflicting Vulkan files, if needed.
-RUN if [ -e "/usr/share/vulkan" ] && [ -e "/etc/vulkan" ]; then \
+RUN if [ -e /usr/share/vulkan ] && [ -e /etc/vulkan ]; then \
       mv /usr/share/vulkan /usr/share/vulkan_hidden; \
     fi
 
-# Install apt packages
-RUN apt-get update && apt-get install -y \
-  git \
-  git-lfs \
-  cmake \
-  sudo \
-  python3-pip
+RUN env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+      apt-get update \
+    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+      apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      cmake \
+      ffmpeg \
+      git \
+      git-lfs \
+    && rm -rf /var/lib/apt/lists/*
 
-################################
-# Install Isaac Lab
-################################
-# Split copying into separate instructions
-# to avoid docker cache invalidation on code edits.
-COPY ./submodules/IsaacLab ${WORKDIR}/submodules/IsaacLab
-# Set the ISAACLAB_PATH environment variable
-ENV ISAACLAB_PATH=${WORKDIR}/submodules/IsaacLab
-ENV TERM=xterm
-# Symlink isaac sim to IsaacLab
-RUN ln -s /isaac-sim/ ${WORKDIR}/submodules/IsaacLab/_isaac_sim
-# Install IsaacLab dependencies
-RUN for DIR in ${WORKDIR}/submodules/IsaacLab/source/isaaclab*/; do /isaac-sim/python.sh -m pip install --no-deps -e "$DIR"; done
-# Logs and other stuff appear under dist-packages per default, so this dir has to be writeable.
-RUN chmod 777 -R /isaac-sim/kit/
-# Make /isaac-sim directory traversable and readable by all users
-# This is needed when entrypoint switches to non-root user
-RUN chmod a+x /isaac-sim
-# Ensure isaaclab_visualizers is installed so --visualizer kit works.
-RUN /isaac-sim/python.sh -m pip install --no-deps -e ${WORKDIR}/submodules/IsaacLab/source/isaaclab_visualizers
-RUN /isaac-sim/python.sh -m pip install --no-deps -e ${WORKDIR}/submodules/IsaacLab/source/isaaclab_teleop
+# Arena owns the verified IsaacLab and GR00T revisions. Their optional nested
+# benchmark repositories are not runtime dependencies of Arena eval or ReCap.
+RUN git clone --filter=blob:none "${ARENA_REPO}" "${ARENA_ROOT}" \
+    && cd "${ARENA_ROOT}" \
+    && git checkout "${ARENA_COMMIT}" \
+    && git config -f .gitmodules submodule.submodules/Isaac-GR00T.url https://github.com/NVIDIA/Isaac-GR00T.git \
+    && git config -f .gitmodules submodule.submodules/IsaacLab.url https://github.com/isaac-sim/IsaacLab.git \
+    && git submodule sync -- submodules/Isaac-GR00T submodules/IsaacLab \
+    && git submodule update --init -- submodules/Isaac-GR00T submodules/IsaacLab \
+    && rm -rf .git submodules/Isaac-GR00T/.git submodules/IsaacLab/.git
 
-# Install isaaclab
-RUN ${ISAACLAB_PATH}/isaaclab.sh -i
+RUN ln -s /isaac-sim "${ISAACLAB_PATH}/_isaac_sim" \
+    && "${ISAACLAB_PATH}/isaaclab.sh" -i 'assets,physx,tasks,ov,rl[rsl_rl]' \
+    && /isaac-sim/python.sh -m pip install --no-deps -e "${ISAACLAB_PATH}/source/isaaclab_teleop" \
+    && /isaac-sim/python.sh -m pip install --no-deps -e "${ISAACLAB_PATH}/source/isaaclab_visualizers" \
+    && /isaac-sim/python.sh -m pip install isaacteleop~=1.1.0 --extra-index-url https://pypi.nvidia.com
 
-# DAQP version required for latest qpsolvers 4.12.0. Backport of IsaacLab #5556.
-# Can be dropped once the Isaac Lab submodule is bumped past 4934cd0ce5a53b86342f32d89e5491016c841769.
-RUN /isaac-sim/python.sh -m pip install --force-reinstall daqp==0.8.5
+RUN /isaac-sim/python.sh -m pip install -e "${ARENA_ROOT}"
 
-# Install Isaac Teleop Python APIs (retargeters, device I/O, OpenXR bindings)
-RUN /isaac-sim/python.sh -m pip install isaacteleop~=1.1.0 --extra-index-url https://pypi.nvidia.com
+# Isaac Sim supplies Torch 2.10, CUDA 12.8 runtime libraries, and NumPy 2.
+# Install only the compatible prebuilt FlashAttention wheel; a second CUDA
+# toolkit or Torch stack would add size and can make distributed loading fail.
+# The pinned GR00T metadata excludes Isaac's Python 3.12 even though this exact
+# combination passes eval and training, so bypass only that version declaration.
+RUN /isaac-sim/python.sh -m pip install "${FLASH_ATTN_WHEEL_URL}" \
+    && /isaac-sim/python.sh -m pip install --no-deps --ignore-requires-python \
+      -e "${ARENA_ROOT}/submodules/Isaac-GR00T" \
+    && /isaac-sim/python.sh -m pip install --no-deps \
+      lerobot==0.4.4 \
+      verl==0.7.1
 
-# Install isaaclab_newton's [all] extra so its pinned mujoco / mujoco-warp / newton
-# versions take effect. The earlier `isaaclab*` loop above and `isaaclab.sh -i`
-# install with `--no-deps` and without the extra, so the pins in
-# `isaaclab_newton/setup.py::EXTRAS_REQUIRE["all"]` are otherwise ignored,
-# and `isaaclab` pulls `mujoco-warp>=3.5` which resolves to 3.7.x — where
-# `geom_dataid` is 2D and breaks the pinned Newton's SolverMuJoCo kernels.
-RUN /isaac-sim/python.sh -m pip install -e \
-      "${WORKDIR}/submodules/IsaacLab/source/isaaclab_newton[all]"
+# LeRobot and verl publish Torch/NumPy constraints for standalone environments
+# that conflict with Isaac Sim. Their verified runtime dependencies are installed
+# explicitly while preserving the base image's Torch and NumPy.
+RUN printf 'torch==%s\nnumpy==%s\n' \
+      "$(/isaac-sim/python.sh -c 'import torch; print(torch.__version__)')" \
+      "$(/isaac-sim/python.sh -c 'import numpy; print(numpy.__version__)')" \
+      > /tmp/isaac_constraints.txt \
+    && /isaac-sim/python.sh -m pip install \
+      --constraint /tmp/isaac_constraints.txt \
+      accelerate==1.2.1 \
+      albumentations==1.4.18 \
+      av==15.0.0 \
+      click==8.1.8 \
+      codetiming \
+      datasets==4.0.0 \
+      decord==0.6.0 \
+      deepdiff==8.6.2 \
+      diffusers==0.35.1 \
+      dill \
+      dm-tree==0.1.8 \
+      draccus==0.10.0 \
+      einops==0.8.1 \
+      fastapi \
+      feetech-servo-sdk==1.0.0 \
+      hjson==3.1.0 \
+      'huggingface-hub[cli]==0.35.3' \
+      hydra-core \
+      'imageio[ffmpeg]==2.37.3' \
+      jsonlines==4.0.0 \
+      kornia==0.7.4 \
+      lmdb==1.7.5 \
+      matplotlib==3.10.1 \
+      msgpack==1.1.0 \
+      msgpack-numpy==0.4.8 \
+      ninja==1.13.0 \
+      omegaconf==2.3.0 \
+      onnx-ir \
+      pandas==2.2.3 \
+      peft==0.17.0 \
+      py-cpuinfo==9.0.0 \
+      pyarrow==19.0.1 \
+      pybind11 \
+      pylatexenc \
+      pynput==1.8.2 \
+      pyserial==3.5 \
+      pyzmq==27.0.1 \
+      ray==2.47.0 \
+      scipy \
+      tensordict==0.10.0 \
+      termcolor==3.2.0 \
+      timm==1.0.14 \
+      tokenizers==0.21.4 \
+      torchcodec==0.10.0 \
+      torchdata \
+      tqdm==4.67.1 \
+      transformers==4.51.3 \
+      tyro \
+      'uvicorn[standard]' \
+      wandb==0.23.0 \
+    && rm -f /tmp/isaac_constraints.txt
 
-# Upgrade pip ahead of the editable install
-RUN /isaac-sim/python.sh -m pip install --upgrade pip
+# Point Ray's generated CLI at Isaac's Python wrapper so interactive `ray start`
+# sees the same prebundled modules as training workers.
+RUN sed -i '1c#!/isaac-sim/python.sh' /isaac-sim/kit/python/bin/ray
 
-# Lightwheel server
-ENV LW_API_ENDPOINT="https://api-dev.lightwheel.net"
+RUN mkdir -p /usr/share/glvnd/egl_vendor.d \
+    && printf '{\n  "file_format_version":"1.0.0",\n  "ICD":{"library_path":"libEGL_nvidia.so.0"}\n}\n' \
+       > /usr/share/glvnd/egl_vendor.d/10_nvidia.json
 
-# HuggingFace CLI for downloading datasets and models.
-# Use pipx so the hf binary gets an isolated venv with all its deps (e.g. requests),
-# without touching system Python packages.
-RUN apt-get update && apt-get install -y pipx && \
-    PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
-    pipx install \
-    "huggingface-hub[cli]" \
-    pre-commit
+ENV NVIDIA_DRIVER_CAPABILITIES=all \
+    VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json \
+    PYOPENGL_PLATFORM=egl \
+    __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
 
-###############################
-# Install GR00T and CUDA 12.8 #
-###############################
-# Copy CUDA 12.8 installation script
-COPY docker/setup/install_cuda.sh /tmp/install_cuda.sh
-RUN chmod +x /tmp/install_cuda.sh
-# If GR00T deps to be installed, install cuda 12.8 (needed for flash-attn, and avoid 4G memory addon)
-RUN if [ "$INSTALL_GROOT" = "true" ]; then \
-    /tmp/install_cuda.sh; \
-  else \
-    echo "Skipping CUDA 12.8 installation"; \
-  fi && \
-  rm -f /tmp/install_cuda.sh
-# Copy GR00T
-COPY ./submodules/Isaac-GR00T ${WORKDIR}/submodules/Isaac-GR00T
-# Copy GR00T dependencies installation script
-COPY docker/setup/install_gr00t_deps.sh /tmp/install_gr00t_deps.sh
-RUN chmod +x /tmp/install_gr00t_deps.sh
-# Install GR00T deps to /opt/groot_deps when requested; entrypoint sources profile.d to set GROOT_DEPS_DIR
-RUN if [ "$INSTALL_GROOT" = "true" ]; then \
-    /tmp/install_gr00t_deps.sh && echo 'export GROOT_DEPS_DIR=/opt/groot_deps' > /etc/profile.d/groot_deps.sh; \
-  else \
-    echo "Skipping GR00T installation" && rm -f /etc/profile.d/groot_deps.sh; \
-  fi && rm -f /tmp/install_gr00t_deps.sh
+WORKDIR /workspace/project
+RUN mkdir -p /workspace/project/.data/gr00t_arena/cache/root_cache/{nv,triton/autotune} \
+    && rm -rf /root/.cache /root/.nv /root/.triton \
+    && ln -s /workspace/project/.data/gr00t_arena/cache/root_cache /root/.cache \
+    && ln -s /workspace/project/.data/gr00t_arena/cache/root_cache/nv /root/.nv \
+    && ln -s /workspace/project/.data/gr00t_arena/cache/root_cache/triton /root/.triton
 
-# The GR00T deps pull a stray CUDA-13 NCCL into /opt/groot_deps/nvidia/nccl
-# (transitive dep of deepspeed). Disable it at build time so `import nvidia.nccl`
-# falls through to Isaac Sim's cu12 NCCL.
-RUN if [ -e /opt/groot_deps/nvidia/nccl/lib/libnccl.so.2 ]; then \
-    mv /opt/groot_deps/nvidia/nccl /opt/groot_deps/nvidia/nccl.cu13-disabled; \
-  fi
+COPY . /workspace/project
+RUN /isaac-sim/python.sh -m pip install --no-build-isolation --no-deps -e /workspace/project
 
-# LeRobot runtime for verl_vla (SFT dataloader, SO100 teleop devices, lerobot envs).
-# Installed with --no-deps: lerobot 0.4.4's dependency metadata pins torch==2.7.1 /
-# torchcodec==0.4.0 / rerun-sdk>=0.24 (NumPy 2), which would clobber Isaac Sim's
-# torch cu128 build. The curated deps below match verl-vla's requirements-lerobot.txt
-# minus anything Isaac Sim already ships (torch, numpy, av, opencv, gymnasium, ...).
-RUN if [ "$INSTALL_GROOT" = "true" ]; then \
-    /isaac-sim/python.sh -m pip install --no-deps lerobot==0.4.4 && \
-    /isaac-sim/python.sh -m pip install \
-      draccus==0.10.0 deepdiff==8.6.2 jsonlines==4.0.0 datasets==4.0.0 \
-      pyserial==3.5 pynput==1.8.2 feetech-servo-sdk==1.0.0; \
-  else \
-    echo "Skipping LeRobot installation"; \
-  fi
-
-# verl runtime for verl_vla's SAC / RECAP entrypoints (previously bootstrapped at
-# runtime by verl-vla's GR00T RL launch scripts). verl 0.7.1
-# declares numpy<2.0, which conflicts with what this image ships — so install
-# verl with --no-deps and pull only its missing lightweight imports, with a
-# constraints file pinning torch / transformers / numpy to the versions already
-# in the image so pip cannot upgrade Isaac Sim's torch or the Eagle transformers.
-# codetiming is needed on EVERY node — including the L20 sim nodes that merely
-# run `ray start` (verl imports it at import time). The verl-vla launch scripts
-# do no runtime installs and rely on this block.
-RUN if [ "$INSTALL_GROOT" = "true" ]; then \
-    printf 'torch==%s\ntransformers==4.51.3\nnumpy==%s\n' \
-      "$(/isaac-sim/python.sh -c 'import torch;print(torch.__version__)')" \
-      "$(/isaac-sim/python.sh -c 'import numpy;print(numpy.__version__)')" \
-      > /tmp/verl_constraints.txt && \
-    /isaac-sim/python.sh -m pip install --no-deps verl==0.7.1 && \
-    /isaac-sim/python.sh -m pip install -c /tmp/verl_constraints.txt \
-      datasets torchdata codetiming dill pybind11 pylatexenc && \
-    rm -f /tmp/verl_constraints.txt; \
-  else \
-    echo "Skipping verl installation"; \
-  fi
-
-# Copy the rest of the files
-COPY *.* ${WORKDIR}/
-COPY isaaclab_arena ${WORKDIR}/isaaclab_arena
-COPY isaaclab_arena_g1 ${WORKDIR}/isaaclab_arena_g1
-COPY isaaclab_arena_gr00t ${WORKDIR}/isaaclab_arena_gr00t
-COPY isaaclab_arena_environments ${WORKDIR}/isaaclab_arena_environments
-COPY isaaclab_arena_examples ${WORKDIR}/isaaclab_arena_examples
-COPY docs ${WORKDIR}/docs
-
-# Install IsaacLab Arena (runtime + dev deps declared in setup.py)
-RUN /isaac-sim/python.sh -m pip install -e "${WORKDIR}/[dev]"
-
-# Set an alias to run the isaac lab python interpreter.
-RUN echo "alias python='/isaac-sim/python.sh'" >> /etc/bash.bashrc
-RUN echo "alias pip3='/isaac-sim/python.sh -m pip'" >> /etc/bash.bashrc
-RUN echo "alias pytest='/isaac-sim/python.sh -m pytest'" >> /etc/bash.bashrc
-
-# Debugging with debugpy (installed via setup.py[dev])
-# Usage:
-# 1) Set your breakpoints
-# 2) Start the script you want to debug with "debugpy" instead of "python".
-#    It will pause waiting for the debugger to attach.
-# 3) Attach to the running container with VSCode using the "Attach to debugpy session"
-#    configuration from the Run and Debug panel.
-RUN echo "alias debugpy='python -Xfrozen_modules=off -m debugpy --listen localhost:5678 --wait-for-client'" >> /etc/bash.bashrc
-
-# Change prompt so it's obvious we're inside the arena container
-RUN echo "PS1='[IsaacLab Arena] \[\e[0;32m\]~\u \[\e[0;34m\]\w\[\e[0m\] \$ '" >> /etc/bash.bashrc
-# List files as a table, with colors, show hidden, append indicators (/ for dirs, * for executables, @ for symlinks)
-RUN echo "alias ll='ls -alF --color=auto'" >> /etc/bash.bashrc
-# Go one level up
-RUN echo "alias ..='cd ..'" >> /etc/bash.bashrc
-# Change prompt to colored one for root too
-RUN cp /etc/bash.bashrc /root/.bashrc
-
-# Set the entrypoint
-COPY docker/setup/entrypoint.sh /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT []
+CMD ["/bin/bash"]

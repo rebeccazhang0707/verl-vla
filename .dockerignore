@@ -1,4 +1,6 @@
 .git/
+.agents/
+.miical_code/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
