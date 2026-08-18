@@ -4,7 +4,7 @@ FROM ${BASE_IMAGE}
 USER root
 
 ARG ARENA_REPO=https://github.com/rebeccazhang0707/IsaacLab-Arena.git
-ARG ARENA_COMMIT=40ad41612dc89cb0d4ae74112175da2bf1074282
+ARG ARENA_COMMIT=6cdf0056873075cf828d2af45859db40f7c6a37b
 ARG FLASH_ATTN_WHEEL_URL=https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.7.4%2Bcu128torch2.10-cp312-cp312-linux_x86_64.whl
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -33,12 +33,14 @@ RUN env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
 
 # Arena owns the verified IsaacLab and GR00T revisions. Their optional nested
 # benchmark repositories are not runtime dependencies of Arena eval or ReCap.
+#
+# Take the submodule URLs from Arena's own .gitmodules; do not repoint them.
+# Isaac-GR00T tracks a fork carrying the rotvec end-effector fix, without which
+# the LIBERO recipes fail at "Expected action dim 9 (xyz + rot6d) for EEF,
+# got 6". Upstream NVIDIA at the same SHA does not have it.
 RUN git clone --filter=blob:none "${ARENA_REPO}" "${ARENA_ROOT}" \
     && cd "${ARENA_ROOT}" \
     && git checkout "${ARENA_COMMIT}" \
-    && git config -f .gitmodules submodule.submodules/Isaac-GR00T.url https://github.com/NVIDIA/Isaac-GR00T.git \
-    && git config -f .gitmodules submodule.submodules/IsaacLab.url https://github.com/isaac-sim/IsaacLab.git \
-    && git submodule sync -- submodules/Isaac-GR00T submodules/IsaacLab \
     && git submodule update --init -- submodules/Isaac-GR00T submodules/IsaacLab \
     && rm -rf .git submodules/Isaac-GR00T/.git submodules/IsaacLab/.git
 
