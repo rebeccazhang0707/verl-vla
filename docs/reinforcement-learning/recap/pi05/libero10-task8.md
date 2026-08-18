@@ -11,6 +11,15 @@ trajectories (46%). A plain-SFT control trained on the same final 106-episode
 pool peaks at 6 of 50 (12%), indicating that adding rollout data without the
 RECAP labels does not explain the gain.
 
+```{figure} ../../../_static/images/pi05-libero10-task8-recap-success.gif
+:alt: Synchronized agent and wrist camera views of a successful PI0.5 RECAP rollout
+:width: 480px
+:align: left
+
+A successful autonomous rollout from the reference run: agent camera on the
+left, wrist camera on the right.
+```
+
 ## Install the environment
 
 Complete the
