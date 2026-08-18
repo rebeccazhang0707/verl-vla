@@ -135,12 +135,15 @@ vvla-record \
   resume=false
 ```
 
-> **Tip:** For task 0, the demonstration can be completed using only W/A/S/D
-> and Page Up/Page Down.
+> **Tip:** For LIBERO Spatial task ID 0 (the first task), the demonstration can
+> be completed using `W/A/S/D`, `Q/E` (or `Page Up/Page Down`) for vertical
+> movement, and `K` to toggle the gripper.
 
-At the beginning of each episode, the console in the teleoperation dashboard
-prompts you to confirm that recording should start. Press Enter to begin
-recording.
+After starting the recording command, open or refresh `http://localhost:18000`
+in a browser. If the simulator is running on a remote machine, replace
+`localhost` with the machine's hostname or IP address. Click the dashboard to
+give it keyboard focus. At the beginning of each episode, the dashboard console
+prompts you to press `Enter` to begin recording.
 
 When the task succeeds, the trajectory is saved automatically and the
 environment resets for the next episode. Press Enter to save the current
@@ -166,8 +169,11 @@ vvla-replay \
   episode_indices='[0]'
 ```
 
-Press Enter when prompted. Check that `executed_frames` matches
-`expected_frames` in the replay result.
+Open `http://localhost:18000` in a browser to view the replay dashboard. If the
+simulator is running on a remote machine, replace `localhost` with the
+machine's hostname or IP address. The prompt to start replay appears in the
+dashboard console. Click the dashboard, then press `Enter` to begin. Check that
+`executed_frames` matches `expected_frames` in the replay result.
 
 ## Train ACT with SFT
 
@@ -211,9 +217,10 @@ a remote machine, expose or forward port 6006 first.
 
 ## Evaluate the trained policy
 
-LIBERO task ids are zero-based, so `task_ids=[0]` selects task 1. Run the full
-50-trial benchmark in parallel across 8 environments and two pipeline stages.
-The command resolves the latest exported native ACT checkpoint:
+LIBERO task IDs are zero-based, so this guide uses task ID 0 (the first task).
+Run the full 50-trial benchmark in parallel across 8 environments and two
+pipeline stages. The command resolves the latest exported native ACT
+checkpoint:
 
 ```bash
 vvla-eval \
@@ -226,12 +233,12 @@ vvla-eval \
   cluster.resource.model.gpus_per_node=1 \
   cluster.resource.env.gpus_per_node=1 \
   cluster.env.env_worker.num_envs=8 \
-  output_dir="./outputs/eval/act-sft/libero-spatial/task-1-parallel"
+  output_dir="./outputs/eval/act-sft/libero-spatial/task-id-0-parallel"
 ```
 
 Metrics are written to
-`./outputs/eval/act-sft/libero-spatial/task-1-parallel/metrics.json`, and videos
-are written below the adjacent `videos/` directory.
+`./outputs/eval/act-sft/libero-spatial/task-id-0-parallel/metrics.json`, and
+videos are written below the adjacent `videos/` directory.
 
 ## Collect intervention data with DAgger (Optional)
 
@@ -264,8 +271,9 @@ includes a compact RL example that starts from the SFT policy trained above and
 further improves its task success rate. The example uses a TD3+BC-style actor
 update and a fixed batch of newly collected experience:
 
-In our reference experiment on LIBERO Spatial task 0, this workflow increased
-the policy success rate from approximately 40% to approximately 80%.
+In our reference experiment on LIBERO Spatial task ID 0 (the first task), this
+workflow increased the policy success rate from approximately 40% to
+approximately 80%.
 
 - It adds action noise while collecting 64 initial trajectories to broaden the
   policy's exploration space and expose the critic to a wider range of
