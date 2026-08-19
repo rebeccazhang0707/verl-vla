@@ -35,7 +35,6 @@ EXPECTED_ENTRY_POINTS = {
     "vvla-record",
     "vvla-replay",
     "vvla-teleop",
-    "vvla-train-ppo",
     "vvla-train-recap",
     "vvla-train-sac",
     "vvla-train-sft",
