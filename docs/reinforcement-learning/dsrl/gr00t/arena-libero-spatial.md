@@ -82,7 +82,7 @@ reproduce the supervised starting policy.
 Run the launcher from the repository root, once per task:
 
 ```bash
-TASK_ID=7 TOTAL_TRAINING_STEPS=8000 \
+TASK_ID=7 \
   bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh
 ```
 
@@ -111,10 +111,11 @@ task-config JSONs are not on that dataset, but they ship with Arena inside the
 image.
 
 A single run writes roughly 90 GB of replay shards and about 14 GB per saved
-checkpoint, so point the replay and checkpoint directories at node-local
-scratch that is bind-mounted from the host. Use an empty output directory for
-every fresh run, because SAC restores replay shards found in an existing output
-directory independently of model-checkpoint resume.
+checkpoint, so point `OUTPUT_DIR` at node-local scratch that is bind-mounted
+from the host. Replay, checkpoints, videos, and TensorBoard logs are all derived
+from that one run root. Use an empty output directory for every fresh run,
+because SAC restores replay shards found in an existing output directory
+independently of model-checkpoint resume.
 
 ## Experiment configuration
 
@@ -188,7 +189,7 @@ Start TensorBoard against that directory:
 
 ```bash
 tensorboard \
-  --logdir outputs/rl/dsrl/gr00t/libero_spatial-task7/tensorboard \
+  --logdir outputs/rl/dsrl/gr00t/arena-libero-spatial-task7/tensorboard \
   --bind_all \
   --port 6008
 ```

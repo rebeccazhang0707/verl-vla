@@ -38,7 +38,7 @@ hf download china-sae-robotics/gr00t_n16_arena_libero_all_suites_rel_rotvec \
 ```
 
 The include pattern preserves the `checkpoint-10000/` directory, producing the
-launcher's default `GROOT_MODEL_PATH` of `.data/models/checkpoint-10000`.
+launcher's default `MODEL_PATH` of `.data/models/checkpoint-10000`.
 
 ### 3. Provide the LIBERO assets
 
@@ -75,7 +75,7 @@ docker run --rm --gpus all --network=host --ipc=host --privileged --shm-size=64g
 Inside an already-running container it is just:
 
 ```bash
-TASK_ID=7 TOTAL_TRAINING_STEPS=8000 \
+TASK_ID=7 \
   bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh
 ```
 
@@ -83,7 +83,8 @@ The first run on a fresh image spends a long time before the first training
 step: Isaac Sim downloads its assets and compiles warp kernels and shaders.
 Those land in `.data/gr00t_arena/cache/`, which the launcher creates and the
 image symlinks `/root/.cache` to, so later runs are much faster. Raise
-`SIM_START_TIMEOUT_S` if the cold start still times out.
+`cluster.env.env_worker.simulator_start_timeout_s` with a Hydra override if the
+cold start still times out.
 
 `dsrl.yaml` owns the recipe — noise-actor and critic architecture, learning
 rates, entropy schedule, replay sampling, rollout and evaluation cadence. The
@@ -143,17 +144,17 @@ does not reshard, so any later resume or evaluation must use the same
 ## Storage
 
 A run writes roughly 90 GB of replay shards and about 14 GB per saved
-checkpoint. Point `REPLAY_POOL_DIR` at node-local scratch when `OUTPUT_ROOT`
-lives on a quota-limited shared filesystem; the replay pool is regenerable and
-can be deleted after the run.
+checkpoint. Point `OUTPUT_DIR` at node-local scratch; replay, checkpoints,
+videos, and TensorBoard logs are all derived from that one run root. The replay
+pool is regenerable and can be deleted after the run.
 
-Use a fresh `OUTPUT_ROOT` for every new experiment. SAC restores replay shards
+Use a fresh `OUTPUT_DIR` for every new experiment. SAC restores replay shards
 found in an existing directory independently of model-checkpoint resume.
 
 ## Monitoring
 
 ```bash
-tensorboard --logdir outputs/rl/dsrl/gr00t/libero_spatial-task7/tensorboard --bind_all
+tensorboard --logdir outputs/rl/dsrl/gr00t/arena-libero-spatial-task7/tensorboard --bind_all
 ```
 
 Select checkpoints on `val/trajectory_success_rate`. The curve is strongly
