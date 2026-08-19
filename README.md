@@ -24,9 +24,9 @@ shown below across simulators and physical robots:
     <th>Piper</th>
   </tr>
   <tr>
-    <td><img src="docs/_static/images/teleop-arena.webp" alt="Isaac Lab Arena teleoperation demo" width="360" height="164"></td>
-    <td><img src="docs/_static/images/teleop-libero.webp" alt="LIBERO teleoperation demo" width="360" height="164"></td>
-    <td><img src="docs/_static/images/teleop-piper.webp" alt="Piper teleoperation demo" width="360" height="164"></td>
+    <td><img src="https://raw.githubusercontent.com/verl-project/verl-vla/main/docs/_static/images/teleop-arena.webp" alt="Isaac Lab Arena teleoperation demo" width="360" height="164"></td>
+    <td><img src="https://raw.githubusercontent.com/verl-project/verl-vla/main/docs/_static/images/teleop-libero.webp" alt="LIBERO teleoperation demo" width="360" height="164"></td>
+    <td><img src="https://raw.githubusercontent.com/verl-project/verl-vla/main/docs/_static/images/teleop-piper.webp" alt="Piper teleoperation demo" width="360" height="164"></td>
   </tr>
 </table>
 
@@ -61,7 +61,7 @@ shown below across simulators and physical robots:
 
 ## How it works
 
-![verl-vla architecture](docs/_static/images/architecture.png)
+![verl-vla architecture](https://raw.githubusercontent.com/verl-project/verl-vla/main/docs/_static/images/architecture.png)
 
 A workflow defines the end-to-end procedure, a trainer advances the selected
 algorithm, and `TrainCluster` coordinates the distributed workers that execute

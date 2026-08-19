@@ -44,7 +44,7 @@ repos:
         pass_filenames: false
 
       - id: compileall
-        name: Compile all python files
-        entry: sh -c 'PYTHONWARNINGS=error python3 -m compileall -q . -x "(^|[\\/])(\\.venv|venv|\\.git)([\\/]|$)"'
+        name: Compile tracked Python files
+        entry: sh -c 'git ls-files -z -- "*.py" | xargs -0 -r env PYTHONWARNINGS=error python3 -m py_compile'
         language: python
         pass_filenames: false
