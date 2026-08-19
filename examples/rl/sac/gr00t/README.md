@@ -40,7 +40,7 @@ run_docker.sh   →   (re)creates the GR00T container + mounts   →   runs an i
 | `run_docker.sh` | GR00T container launcher. Mounts image/repo/Arena/models, runs the inner script named by `INNER_SCRIPT`. |
 | `run_gr00t_arena_eval.sh` | GR00T rollout through the shared `eval` workflow. `ARENA_TASK=gr1\|libero`. |
 | `run_gr00t_arena_sac.sh` | GR00T SAC training. `ARENA_TASK=gr1\|libero`. |
-| `run_gr00t_arena_dsrl.sh` | DSRL training over the frozen GR00T policy's initial flow noise. `ARENA_TASK=gr1\|libero`. |
+| (DSRL) | Moved to `examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh` — Arena LIBERO only, run directly inside the container. |
 
 Inner scripts are meant to run *inside* the container, but `run_docker.sh`
 launches them for you — you normally never call them directly.
@@ -220,24 +220,13 @@ CONTAINER_NAME=isaaclab_arena-cuda_gr00t_gn16_sac \
 > only `10 × 16 = 160`, so incomplete suffixes remain buffered across windows.
 > One-slot terminal segments are discarded as non-auto-reset padding.
 
-### GR1 fridge task DSRL training
-
-```bash
-INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_dsrl.sh \
-ARENA_TASK=gr1 \
-GROOT_MODEL_PATH=/models/checkpoint-10000 \
-OUTPUT_ROOT=/eval/outputs/arena_gr00t_gr1_dsrl \
-  examples/rl/sac/gr00t/run_docker.sh
-```
-
 ### LIBERO DSRL training
 
+DSRL now lives under its own workflow directory and is self-contained: run it
+inside the container rather than through `run_docker.sh`.
+
 ```bash
-INNER_SCRIPT=examples/rl/sac/gr00t/run_gr00t_arena_dsrl.sh \
-ARENA_TASK=libero TASK_SUITE=libero_spatial TASK_ID=3 \
-MODELS_HOST=checkpoints_libero GROOT_MODEL_PATH=/models/checkpoint-10000 \
-OUTPUT_ROOT=/eval/outputs/arena_gr00t_libero_dsrl \
-  examples/rl/sac/gr00t/run_docker.sh
+TASK_ID=3 bash examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh
 ```
 
 ### Start a container / shell only
@@ -398,11 +387,10 @@ small SAC actor over the flow-matching initial noise. The existing SAC critic
 scores that steering noise; replay stores it separately from the normalized
 model action and decoded environment action.
 
-`run_gr00t_arena_dsrl.sh` exposes `NOISE_ACTOR_LR` (3e-4), `CRITIC_LR`
-(3e-4), `CRITIC_TAU` (0.005), `AUTO_ENTROPY` (True), `TARGET_ENTROPY`
-(-64.0), `CRITIC_WARMUP_STEPS` (100), `EMA_DECAY` (null),
-`CRITIC_POOL_PROJ_DIM` (0), `CRITIC_LAYERNORM` (True), and
-`ACTOR_POSITIVE_SAMPLE_RATIO` (0.8).
+The maintained DSRL recipe is
+`examples/rl/dsrl/gr00t/arena_libero_spatial_online_from_sft_10000/run_train.sh`. Its algorithm settings are
+fixed to the published recipe; see
+`docs/reinforcement-learning/dsrl/gr00t/arena-libero-spatial.md`.
 
 DSRL is mutually exclusive with Flow-SDE, TD3+BC, and offline RLPD prefill:
 those paths use environment actions rather than steering noise. The full verl

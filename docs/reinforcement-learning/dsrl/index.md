@@ -9,4 +9,5 @@ online replay.
 :maxdepth: 1
 
 pi05/index
+gr00t/index
 ```
