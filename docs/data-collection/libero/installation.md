@@ -135,4 +135,3 @@ Choose a LIBERO input device:
 - [Keyboard](keyboard.md)
 - [Gamepad](gamepad.md)
 - [XR Controller](xr-controller.md)
-- [LeRobot Leader Arm](lerobot-leader-arm.md)

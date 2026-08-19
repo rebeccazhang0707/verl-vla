@@ -281,8 +281,7 @@ recording can be enabled through the shared recorder configuration.
 Teleoperation is divided into three responsibilities:
 
 - A **device** translates browser or hardware events into a stable device
-  snapshot. Built-in devices include keyboard, gamepad, XR controller, and a
-  LeRobot leader arm.
+  snapshot. Built-in devices include keyboard, gamepad, and XR controller.
 - An **intervention strategy**—the teleoperation policy—translates one device's
   state into actions for one environment type.
 - `TeleopController` connects devices and strategies to the observation server,

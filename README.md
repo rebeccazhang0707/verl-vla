@@ -76,7 +76,7 @@ The repository currently includes integrations and runnable examples for:
 | Models | ACT, Gaussian actor, Pi0.5, and GR00T N1.6 |
 | Environments and robots | LIBERO, Isaac Lab Arena, and Piper |
 | Training | SFT, SAC-style off-policy training, DSRL, and RECAP |
-| Human input | Keyboard, gamepad, XR controller, and LeRobot leader arm |
+| Human input | Keyboard, gamepad, and XR controller |
 
 Support for additional models, environments, training algorithms, and input
 devices is under active development.

@@ -10,11 +10,11 @@ example for the device you want to use.
 
 ## Supported environments and devices
 
-| Environment | Keyboard | Gamepad | XR Controller | LeRobot Leader Arm |
-| --- | --- | --- | --- | --- |
-| [LIBERO](libero/index.md) | Supported | Supported | Supported | Experimental |
-| [Isaac Lab Arena](isaac-lab-arena/index.md) | — | — | Supported | — |
-| [Piper](piper/index.md) | Supported | — | — | — |
+| Environment | Keyboard | Gamepad | XR Controller |
+| --- | --- | --- | --- |
+| [LIBERO](libero/index.md) | Supported | Supported | Supported |
+| [Isaac Lab Arena](isaac-lab-arena/index.md) | — | — | Supported |
+| [Piper](piper/index.md) | Supported | — | — |
 
 ```{toctree}
 :maxdepth: 2
