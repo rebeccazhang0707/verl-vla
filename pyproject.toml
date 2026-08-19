@@ -137,9 +137,6 @@ where = ["src"]
 # Include package-local config files when present.
 [tool.setuptools.package-data]
 verl_vla = [
-    "workflows/config/*.yaml",
-    "workflows/config/*/*.yaml",
-    "workflows/config/*/*/*.yaml",
-    "workflows/config/*/*/*/*.yaml",
+    "workflows/config/**/*.yaml",
     "teleop/obs_server/html/*",
 ]

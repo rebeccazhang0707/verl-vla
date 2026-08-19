@@ -45,6 +45,6 @@ repos:
 
       - id: compileall
         name: Compile tracked Python files
-        entry: sh -c 'git ls-files -z -- "*.py" | xargs -0 -r env PYTHONWARNINGS=error python3 -m py_compile'
+        entry: env PYTHONWARNINGS=error python3 scripts/compile_tracked_python.py
         language: python
         pass_filenames: false

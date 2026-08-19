@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - "**/*.py"
+      - "src/**/*.yaml"
       - ".github/workflows/sanity.yml"
       - "pyproject.toml"
       - "requirements.txt"
@@ -37,8 +38,21 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest
+          python -m pip install build pytest twine
           python -m pip install --no-deps -e .
 
       - name: Run sanity tests
         run: pytest -q tests/special_sanity
+
+      - name: Build and check distributions
+        run: |
+          python -m build
+          python -m twine check dist/*
+
+      - name: Smoke test installed wheel
+        run: |
+          python -m venv /tmp/verl-vla-wheel-smoke
+          /tmp/verl-vla-wheel-smoke/bin/python -m pip install hydra-core
+          /tmp/verl-vla-wheel-smoke/bin/python -m pip install --no-deps dist/*.whl
+          cd /tmp
+          /tmp/verl-vla-wheel-smoke/bin/python "$GITHUB_WORKSPACE/tests/special_sanity/check_wheel.py"
